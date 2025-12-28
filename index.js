@@ -1680,6 +1680,54 @@ async function showInsufficientTokens(ctx, required) {
   await ctx.reply(message, keyboard.createSubscriptionMenu());
 }
 
+// ==================== BROADCAST ====================
+
+async function broadcastMessage(message, parseMode = null) {
+  try {
+    console.log('📢 Starting broadcast...');
+    
+    // Отримати всіх користувачів з бази
+    const User = require('./database/models/User');
+    const users = await User.find({}, '_id username');
+    
+    console.log(`📊 Found ${users.length} users`);
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const user of users) {
+       try {
+        const chatId = user._id;
+        
+        if (!chatId) {
+          console.error('⚠️ User without ID:', user);
+          failCount++;
+          continue;
+        }
+        
+        await bot.telegram.sendMessage(chatId, message, {
+          parse_mode: parseMode,
+          disable_web_page_preview: true
+        });
+        successCount++;
+        console.log(`✅ Sent to ${chatId} (@${user.username || 'no_username'})`);
+        
+        // Затримка щоб не перевищити rate limit (30 msgs/sec)
+        await new Promise(resolve => setTimeout(resolve, 35));
+      } catch (error) {
+        failCount++;
+        console.error(`❌ Failed to send to ${user._id}:`, error.message);
+      }
+    }
+    
+    console.log(`✅ Broadcast complete: ${successCount} sent, ${failCount} failed`);
+    return { success: successCount, failed: failCount };
+  } catch (error) {
+    console.error('Broadcast error:', error);
+    throw error;
+  }
+}
+
 // ==================== ЗАПУСК БОТА ====================
 
 async function startBot() {
@@ -1689,9 +1737,40 @@ async function startBot() {
     await db.connect();
     
     console.log('🤖 Starting bot...');
-    await bot.launch();
     console.log('✅ Bot started successfully!');
     console.log('📱 Bot username: @neuro_lab_ai_bot');
+
+    if (process.env.SEND_STARTUP_BROADCAST === 'true') {
+      console.log('📢 Sending startup broadcast...');
+      
+      setTimeout(async () => {
+        try {
+          const message = 
+            '🎉 <b>Бот знову онлайн!</b>\n\n' +
+            '✨ Насолоджуйтесь генераціями!\n\n' +
+            '🆕 Що нового:\n' +
+            '• 🎨 Нові ціни на зображення (в 2-5 разів дешевше!)\n' +
+            '• 🎬 Runway Turbo тепер 14⚡\n' +
+            '💡 Спробуйте зараз! 🚀';
+          
+          const stats = await broadcastMessage(message, 'HTML');
+          console.log(`📊 Broadcast stats: ${stats.success} успішно, ${stats.failed} помилок`);
+          
+          // Повідомити адміна про результати
+          const adminId = parseInt(process.env.ADMIN_USER_ID || '0');
+          if (adminId) {
+            await bot.telegram.sendMessage(
+              adminId,
+              `📊 Startup broadcast complete:\n✅ Sent: ${stats.success}\n❌ Failed: ${stats.failed}`
+            );
+          }
+        } catch (error) {
+          console.error('Startup broadcast failed:', error);
+        }
+      }, 5000);
+    }
+
+    await bot.launch();
     
     process.once('SIGINT', async () => {
       console.log('\n🛑 Stopping bot...');
