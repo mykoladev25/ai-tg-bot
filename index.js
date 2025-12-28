@@ -8,7 +8,6 @@ const adminNotifier = require('./utils/adminNotifier');
 const claude = require('./services/claude');
 const midjourney = require('./services/midjourney');
 const replicate = require('./services/replicate');
-const gemini = require('./services/gemini');
 
 // Імпортуємо утиліти
 const keyboard = require('./utils/keyboard');
@@ -20,6 +19,32 @@ const models = require('./config/models');
 
 // Ініціалізація бота
 const bot = new Telegraf(process.env.BOT_TOKEN);
+
+const isDevelopment = process.env.NODE_ENV === 'development';
+
+if (isDevelopment) {
+  console.log('🛠️ Development mode - maintenance message enabled');
+  
+  bot.use(async (ctx, next) => {
+    // Дозволити адміну використовувати бота
+    const adminId = parseInt(process.env.ADMIN_TELEGRAM_ID || '0');
+    
+    if (ctx.from.id === adminId) {
+      console.log(`✅ Admin ${ctx.from.id} bypassed maintenance`);
+      return next(); // Адмін проходить далі
+    }
+    
+    // Для всіх інших - заглушка
+    await ctx.reply(
+      '🛠️ Бот тимчасово недоступний\n\n' +
+      '⚙️ Триває технічне обслуговування\n' +
+      '⏰ Очікуваний час: ~30 хвилин\n\n' +
+      'Спробуйте пізніше! Дякуємо за розуміння 🙏'
+    );
+    
+    console.log(`🚫 Blocked user ${ctx.from.id} (@${ctx.from.username}) during maintenance`);
+  });
+}
 
 // ✅ Зберігаємо поточну модель в пам'яті (не в БД!)
 const userCurrentModel = new Map(); // userId → modelKey
@@ -34,7 +59,7 @@ const INSTRUCTION_HTML = `
 
 📝 <b>Як користуватися ботом:</b>
 
-<b>1️⃣ GPT / Claude / Gemini</b>
+<b>1️⃣ GPT / Claude</b>
 - Оберіть режим: <i>текст / голос / зображення</i>
 - Надішліть запит
 - Отримайте відповідь від AI
@@ -53,7 +78,6 @@ const INSTRUCTION_HTML = `
 💰 <b>Токени ⚡</b>
 - <b>Кожна генерація списує токени</b>
 - 🎁 <b>Безкоштовно:</b> 10⚡ при реєстрації
-- 🆓 <b>Gemini</b> - безкоштовні текст та зображення
 - 💎 Купіть підписку для більшої кількості
 
 <i>⚡ Тарифи вказані біля кожної моделі</i>
@@ -111,7 +135,6 @@ bot.command('help', async (ctx) => {
 4. Чекайте на результат
 
 💰 Токени витрачаються за кожну генерацію
-🆓 Gemini - безкоштовні текст та зображення
 📦 Купіть підписку для отримання більше токенів
 
 👤 Підтримка:
@@ -166,8 +189,7 @@ bot.command('clear', async (ctx) => {
 
 bot.hears('💡 Базові помічники', async (ctx) => {
   await ctx.reply(
-    `💡 Claude & Gemini\n\n` +
-    `🆓 Gemini - безкоштовно\n` +
+    `💡 Claude\n\n` +
     `💎 Claude - преміум якість\n\n` +
     `Оберіть режим роботи 👇`,
     keyboard.createGPTActionsMenu(models.gpt.actions)
@@ -226,30 +248,6 @@ bot.action('gpt_text', async (ctx) => {
   );
 });
 
-bot.action('gpt_gemini_text', async (ctx) => {
-  await ctx.answerCbQuery();
-  userCurrentModel.set(ctx.from.id, 'gemini_text');
-  await ctx.reply(
-    '✍️ Режим Gemini активовано! 🆓\n\n' +
-    'Надішліть мені ваше запитання, і я відповім текстом.\n\n' +
-    '💡 Gemini 1.5 Flash - швидкий та безкоштовний!\n' +
-    '💰 Вартість: БЕЗКОШТОВНО\n' +
-    '💡 Підказка: Я запам\'ятовую контекст розмови.',
-    keyboard.createBackButton()
-  );
-});
-
-bot.action('gpt_gemini_vision', async (ctx) => {
-  await ctx.answerCbQuery();
-  userCurrentModel.set(ctx.from.id, 'gemini_vision');
-  await ctx.reply(
-    '🖼️ Режим Gemini Vision активовано! 🆓\n\n' +
-    'Надішліть мені зображення з підписом (або без), і я його проаналізую.\n\n' +
-    '💡 Безкоштовний аналіз зображень!',
-    keyboard.createBackButton()
-  );
-});
-
 bot.action('gpt_voice', async (ctx) => {
   await ctx.answerCbQuery();
   userCurrentModel.set(ctx.from.id, 'claude_voice');
@@ -278,7 +276,6 @@ bot.action('new_conversation', async (ctx) => {
 
   const userId = ctx.from.id;
   await userBalance.clearConversationHistory(userId);
-  userCurrentModel.set(userId, 'gemini_text');
 
   await ctx.reply(
     '✅ Нову розмову розпочато! 👋\n\nНадішліть своє повідомлення.',
@@ -433,7 +430,6 @@ bot.action('buy_subscription', async (ctx) => {
 await ctx.answerCbQuery();
   
   const message = `💎 Оберіть підписку\n\n` +
-    `🆓 Gemini - безкоштовний завжди\n` +
     `💎 Claude - платний, якісний\n\n` +
     `Виберіть план 👇`;
   
@@ -574,9 +570,7 @@ bot.on('text', async (ctx) => {
   }
   
   // Роутинг по моделях
-  if (currentModel === 'gemini_text' || currentModel === 'gemini_vision') {
-    await handleGeminiText(ctx, text);
-  } else if (currentModel === 'claude_vision' || currentModel === 'claude_text' || currentModel === 'claude' || currentModel === 'claude_voice') {
+  if (currentModel === 'claude_vision' || currentModel === 'claude_text' || currentModel === 'claude' || currentModel === 'claude_voice') {
     await handleClaudeText(ctx, text);
   } else if (currentModel === 'midjourney') {
     await handleMidjourneyGeneration(ctx, text);
@@ -639,7 +633,6 @@ bot.on('voice', async (ctx) => {
     );
 
     await handleClaudeText(ctx, transcription.text);
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
 
   } catch (error) {
     console.error('Voice processing error:', error);
@@ -657,9 +650,7 @@ bot.on('photo', async (ctx) => {
   const currentModel = await userCurrentModel.get(userId);
   const videoModelsAcceptingImage = ['kling', 'runway_gen4', 'runway_turbo'];
 
-  if (currentModel === 'gemini_vision') {
-    await handleGeminiVision(ctx);
-  } else if (currentModel === 'claude_vision') {
+  if (currentModel === 'claude_vision') {
     await handleClaudeVision(ctx);
   } else if (currentModel === 'clarity') {
     await handleClarityUpscaler(ctx);
@@ -729,70 +720,6 @@ async function handleClaudeText(ctx, text) {
   } catch (error) {
     console.error('Claude text error:', error);
     await ctx.reply('❌ Сталася помилка. Спробуйте ще раз.');
-  }
-}
-
-async function handleGeminiText(ctx, text) {
-  const userId = ctx.from.id;
-  
-  try {
-    const statusMsg = await ctx.reply('🤔 Думаю...');
-    const history = await userBalance.getConversationHistory(userId);
-    const response = await gemini.continueConversation(text, history);
-    
-    if (response.success) {
-      await userBalance.saveConversationMessage(userId, 'user', text);
-      await userBalance.saveConversationMessage(userId, 'assistant', response.text);
-      
-      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      await ctx.reply(response.text);
-    } else {
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка: ${response.error}`
-      );
-    }
-  } catch (error) {
-    console.error('Gemini text error:', error);
-    await ctx.reply('❌ Сталася помилка. Спробуйте ще раз.');
-  }
-}
-
-async function handleGeminiVision(ctx) {
-  const userId = ctx.from.id;
-
-  try {
-    const statusMsg = await ctx.reply('👀 Аналізую зображення...');
-
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const file = await ctx.telegram.getFile(photo.file_id);
-    const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-
-    const imageResponse = await axios.get(fileUrl, { responseType: 'arraybuffer' });
-    const imageBase64 = Buffer.from(imageResponse.data).toString('base64');
-
-    const prompt = ctx.message.caption || 'Опишіть це зображення детально.';
-    const response = await gemini.analyzeImage(imageBase64, prompt, 'image/jpeg');
-
-    if (response.success) {
-      await userBalance.saveConversationMessage(userId, 'user', `[Зображення] ${prompt}`);
-      await userBalance.saveConversationMessage(userId, 'assistant', response.text);
-
-      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      await ctx.reply(response.text);
-    } else {
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка: ${response.error}`
-      );
-    }
-  } catch (error) {
-    console.error('Gemini vision error:', error);
-    await ctx.reply('❌ Помилка при аналізі зображення.');
   }
 }
 
@@ -1748,8 +1675,7 @@ async function showInsufficientTokens(ctx, required) {
   const message = `⚠️ Недостатньо токенів!\n\n` +
     `Необхідно: ${required}⚡\n` +
     `Ваш баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
-    `💡 Спробуйте безкоштовний Gemini для текстів та аналізу зображень!\n\n` +
-    `Або купіть підписку та отримайте більше токенів 👇`;
+    `Купіть підписку та отримайте більше токенів 👇`;
   
   await ctx.reply(message, keyboard.createSubscriptionMenu());
 }
