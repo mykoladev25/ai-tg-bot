@@ -1,8 +1,8 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const GEMINI_MODEL = "gemini-1.5-flash-latest";
-const SYS_INSTR = "You are Gemini 1.5 Flash, a large language model developed by Google. You are helpful, harmless, and honest. Always identify yourself as Gemini when asked about your identity."
+const GEMINI_MODEL = "gemini-flash-lite-latest";
+const SYS_INSTR = "You are gemini-flash-lite-latest, a large language model developed by Google. You are helpful, harmless, and honest. Always identify yourself as Gemini when asked about your identity."
 
 
 /**

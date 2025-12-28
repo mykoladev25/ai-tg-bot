@@ -569,7 +569,7 @@ bot.on('text', async (ctx) => {
   // Роутинг по моделях
   if (currentModel === 'gemini_text' || currentModel === 'gemini_vision') {
     await handleGeminiText(ctx, text);
-  } else if (currentModel === 'claude_vision' || currentModel === 'claude_text' || currentModel === 'claude') {
+  } else if (currentModel === 'claude_vision' || currentModel === 'claude_text' || currentModel === 'claude' || currentModel === 'claude_voice') {
     await handleClaudeText(ctx, text);
   } else if (currentModel === 'midjourney') {
     await handleMidjourneyGeneration(ctx, text);
@@ -604,7 +604,7 @@ bot.on('voice', async (ctx) => {
   const currentModel = await userCurrentModel.get(userId);
 
   if (currentModel !== 'claude_voice') {
-    await ctx.reply('Спочатку активуйте голосовий режим через GPT → 🎙️ Говоріть');
+    await ctx.reply('Спочатку активуйте голосовий режим через "💡 Базові помічники" → 🎙️ Говоріть');
     return;
   }
 
@@ -738,7 +738,7 @@ async function handleGeminiText(ctx, text) {
       await userBalance.saveConversationMessage(userId, 'assistant', response.text);
       
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      await ctx.reply(response.text + '\n\n🆓 Безкоштовно');
+      await ctx.reply(response.text);
     } else {
       await ctx.telegram.editMessageText(
         ctx.chat.id,
@@ -774,7 +774,7 @@ async function handleGeminiVision(ctx) {
       await userBalance.saveConversationMessage(userId, 'assistant', response.text);
 
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      await ctx.reply(response.text + '\n\n🆓 Безкоштовно');
+      await ctx.reply(response.text);
     } else {
       await ctx.telegram.editMessageText(
         ctx.chat.id,
