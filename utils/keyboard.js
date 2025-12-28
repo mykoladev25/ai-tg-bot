@@ -5,7 +5,7 @@ const { Markup } = require('telegraf');
  */
 function createMainMenu() {
   return Markup.keyboard([
-    ['💡 Claude'],
+    ['💡 Базові помічники'],
     ['🎙️ Аудіо з AI', '🎬 Створення відео'],
     ['🎨 Дизайн з AI'],
     ['👤 Профіль', '❓ Допомога', '📄 Інструкція']
@@ -68,10 +68,10 @@ function createSubscriptionMenu() {
 /**
  * Меню оплати
  */
-function createPaymentMenu(price) {
+function createPaymentMenu(price, plan = 'basic') {
   return Markup.inlineKeyboard([
-    [Markup.button.callback(`✨ Оплатити ${price}⭐`, 'pay_stars')],
-    // [Markup.button.callback('🎁 Ввести промокод', 'enter_promo')],
+    [Markup.button.callback(`✨ Оплатити ${price}⭐`, `pay_stars_${plan}`)],
+    [Markup.button.callback('🔙 Назад', 'buy_subscription')],
     [Markup.button.callback('🏠 Головне меню', 'main_menu')]
   ]);
 }
@@ -112,6 +112,42 @@ function createConfirmationMenu(action) {
   ]);
 }
 
+/**
+ * Створити меню підписок динамічно
+ */
+function createSubscriptionsMenu() {
+  const models = require('../config/models');
+  const subscriptions = models.subscriptions;
+  
+  const buttons = [];
+  
+  const paidPlans = ['starter', 'basic', 'pro', 'premium'];
+  
+  paidPlans.forEach(planKey => {
+    const sub = subscriptions[planKey];
+    if (sub) {
+      const priceUSD = Math.round(sub.price * 0.024);
+      
+      let emoji = '';
+      if (planKey === 'starter') emoji = '🚀';
+      else if (planKey === 'basic') emoji = '💎';
+      else if (planKey === 'pro') emoji = '🔥';
+      else if (planKey === 'premium') emoji = '👑';
+      
+      buttons.push([
+        Markup.button.callback(
+          `${emoji} ${sub.name} (${sub.tokens}⚡) - $${priceUSD}`,
+          `sub_${planKey}`
+        )
+      ]);
+    }
+  });
+  
+  buttons.push([Markup.button.callback('🔙 Назад', 'main_menu')]);
+  
+  return Markup.inlineKeyboard(buttons);
+}
+
 module.exports = {
   createMainMenu,
   createInlineMenu,
@@ -120,5 +156,6 @@ module.exports = {
   createSubscriptionMenu,
   createPaymentMenu,
   createGenerationActionsMenu,
-  createConfirmationMenu
+  createConfirmationMenu,
+  createSubscriptionsMenu
 };

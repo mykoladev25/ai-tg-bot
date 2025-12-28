@@ -22,11 +22,10 @@ async function transcribeVoice(audioUrl) {
         const tempFile = path.join(tempDir, `audio_${Date.now()}.ogg`);
         fs.writeFileSync(tempFile, Buffer.from(audioResponse.data));
 
-        // Groq Whisper API
+        //  
         const transcription = await groq.audio.transcriptions.create({
             file: fs.createReadStream(tempFile),
             model: 'whisper-large-v3',
-            language: 'uk', // українська
             response_format: 'json'
         });
 

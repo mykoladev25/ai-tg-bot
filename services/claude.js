@@ -21,7 +21,7 @@ async function chatWithClaude(message, conversationHistory = []) {
       model: 'claude-sonnet-4-20250514',
       system: `Ти Claude Sonnet 4.5 - найновіша модель від Anthropic (claude-sonnet-4-20250514).
 Якщо користувач запитає "яка ти версія", відповідай: "Я Claude Sonnet 4.5 - найновіша модель від Anthropic".
-Спілкуйся українською мовою, будь корисним та дружнім.`,
+Спілкуйся українською мовою якщо не попросять іншою, будь корисним та дружнім.`,
       max_tokens: 4096,
       messages: messages,
       temperature: 1.0

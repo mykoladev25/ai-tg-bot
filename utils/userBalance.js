@@ -255,36 +255,6 @@ async function clearConversationHistory(userId) {
 }
 
 /**
- * Встановити поточну модель
- */
-async function setCurrentModel(userId, modelKey) {
-  try {
-    const user = await User.findById(userId);
-    if (!user) return false;
-    
-    user.currentModel = modelKey;
-    await user.save();
-    return true;
-  } catch (error) {
-    console.error('Error in setCurrentModel:', error);
-    return false;
-  }
-}
-
-/**
- * Отримати поточну модель
- */
-async function getCurrentModel(userId) {
-  try {
-    const user = await User.findById(userId);
-    return user?.currentModel || null;
-  } catch (error) {
-    console.error('Error in getCurrentModel:', error);
-    return null;
-  }
-}
-
-/**
  * Отримати історію транзакцій
  */
 async function getTransactionHistory(userId, limit = 10) {
@@ -379,8 +349,6 @@ module.exports = {
   saveConversationMessage,
   getConversationHistory,
   clearConversationHistory,
-  setCurrentModel,
-  getCurrentModel,
   getTransactionHistory,
   getUserStats,
   getAllUsers,

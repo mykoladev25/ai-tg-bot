@@ -52,7 +52,6 @@ async function transcribeWithReplicate(audioBuffer) {
             input: {
                 audio: dataUri,
                 model: 'large-v3',
-                language: 'uk', // Українська
                 translate: false
             }
         },
