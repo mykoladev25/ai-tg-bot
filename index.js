@@ -114,10 +114,10 @@ bot.command('help', async (ctx) => {
 🆓 Gemini - безкоштовні текст та зображення
 📦 Купіть підписку для отримання більше токенів
 
-👤 Підтримка / автор:
+👤 Підтримка:
 https://t.me/nnn_ddddddd
 
-© 2025 nnn_ddddddd. Всі права захищені.`;
+© 2025 neuro.lab.ai Всі права захищені.`;
 
   await ctx.reply(helpText, keyboard.createBackButton());
 });
@@ -181,7 +181,7 @@ bot.hears('🎬 Створення відео', async (ctx) => {
   );
 });
 
-bot.hears('🎨 Дизайн з AI', async (ctx) => {
+bot.hears('🎨 Створення зображень', async (ctx) => {
   await ctx.reply(
     '🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇',
     keyboard.createInlineMenu(models.design.models, 1)
@@ -1787,7 +1787,7 @@ async function startBot() {
 startBot();
 
 bot.catch((err, ctx) => {
-  if (error.name === 'TimeoutError') {
+  if (err.name === 'TimeoutError') {
     ctx.reply('⏱️ Генерація займає більше часу. Чекайте...');
     return;
   }

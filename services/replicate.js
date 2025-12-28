@@ -122,7 +122,7 @@ async function generateVideoWithKling(prompt, imageUrl = null) {
     const response = await axios.post(
       `${REPLICATE_API}/predictions`,
       {
-        version: 'minimax/video-01',
+        version: 'kwaivgi/kling-v2.5-turbo-pro',
         input: input
       },
       {
@@ -301,11 +301,11 @@ async function generateWithNanoBanana(prompt) {
 
     const input = {
       prompt: prompt,
+      resolution: "2K",
+      image_input: [],
       aspect_ratio: "1:1",
-      num_outputs: 1,
-      output_format: "webp",
-      output_quality: 90,
-      num_inference_steps: 4
+      output_format: "png",
+      safety_filter_level: "block_only_high"
     };
 
     const output = await replicate.run("google/nano-banana-pro", { input });
@@ -456,18 +456,29 @@ async function generateWithSuno(text, voice = 'v2/en_speaker_6') {
   try {
     console.log('Generating audio with Suno AI Bark:', text);
 
+    const validVoices = [
+      "announcer",
+      "en_speaker_0", "en_speaker_1", "en_speaker_2",
+      "ru_speaker_0", "ru_speaker_1",
+      "pl_speaker_0", "pl_speaker_1"
+    ];
+
+    // Якщо переданий voice не валідний — ставимо дефолтний
+    const selectedVoice = validVoices.includes(voice) ? voice : "announcer";
+
     const input = {
       prompt: text,
       text_temp: 0.7,
       waveform_temp: 0.7,
-      history_prompt: voice,
+      history_prompt: selectedVoice,
       output_full: false
     };
 
     const output = await replicate.run(
-        "suno-ai/bark:b76242b40d67c76ab6742e987628a2a9ac019e11d56ab96c4e91ce03b79b2787",
-        { input }
+      "suno-ai/bark:b76242b40d67c76ab6742e987628a2a9ac019e11d56ab96c4e91ce03b79b2787",
+      { input }
     );
+
 
     // Output - URL аудіо файлу
     const audioUrl = output?.audio || output;
@@ -494,12 +505,12 @@ async function generateVideoWithRunwayTurbo(prompt, imageUrl = null) {
     console.log('Starting Runway Gen-4 Turbo video generation via Replicate:', prompt);
 
     const input = {
-      prompt_text: prompt,
+      prompt: prompt,
       seconds: 5
     };
 
     if (imageUrl) {
-      input.prompt_image = imageUrl;
+      input.image = imageUrl;
     }
 
     const output = await replicate.run(
