@@ -46,7 +46,6 @@ function createBackButton(callback = 'main_menu', text = '🏠 Головне м
  * Меню GPT з діями
  */
 function createGPTActionsMenu(actions) {
-  console.log(actions);
   const buttons = actions.map(action => {
     const costText = action.cost > 0 ? ` (${action.cost}⚡)` : '';
     return [{ text: `${action.name}${costText}`, callback_data: `gpt_${action.key}` }];

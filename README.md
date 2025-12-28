@@ -182,8 +182,6 @@ bot.action('new_model', async (ctx) => {
 
 ### Підключення бази даних
 
-Замініть `utils/userBalance.js` на MongoDB/PostgreSQL:
-
 ```javascript
 // Приклад з MongoDB
 const mongoose = require('mongoose');

@@ -12,7 +12,7 @@ const replicate = require('./services/replicate');
 // Імпортуємо утиліти
 const keyboard = require('./utils/keyboard');
 const userBalance = require('./utils/userBalance');
-const database = require('./utils/database');
+const db = require('./database/connection');
 
 // Імпортуємо конфігурацію
 const models = require('./config/models');
@@ -71,7 +71,7 @@ const INSTRUCTION_HTML = `
 // ==================== КОМАНДИ ====================
 
 bot.start(async (ctx) => {
-  const user = userBalance.getUser(ctx.from.id);
+  const user = await userBalance.getUser(ctx.from.id, ctx.from);
   
   const welcomeMessage = `🏠 Головне меню
 
@@ -114,7 +114,7 @@ bot.command('profile', async (ctx) => {
 });
 
 bot.command('balance', async (ctx) => {
-  const user = userBalance.getUser(ctx.from.id);
+  const user = await userBalance.getUser(ctx.from.id, ctx.from);
   await ctx.reply(
     `💰 Ваш баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
     `📦 Підписка: ${user.subscription || 'Немає'}\n` +
@@ -124,7 +124,7 @@ bot.command('balance', async (ctx) => {
 });
 
 bot.command('history', async (ctx) => {
-  const history = userBalance.getTransactionHistory(ctx.from.id, 10);
+  const history = await userBalance.getTransactionHistory(ctx.from.id, 10);
   
   if (history.length === 0) {
     await ctx.reply('📊 Історія порожня', keyboard.createBackButton());
@@ -134,18 +134,18 @@ bot.command('history', async (ctx) => {
   let text = '📊 Історія останніх операцій:\n\n';
   
   history.forEach((item, index) => {
-    const date = new Date(item.timestamp).toLocaleString('uk-UA');
+    const date = new Date(item.createdAt).toLocaleString('uk-UA');  // ← createdAt
     const sign = item.type === 'deduction' ? '-' : '+';
     text += `${index + 1}. ${date}\n`;
-    text += `   ${item.action || item.reason}\n`;
-    text += `   ${sign}${item.amount}⚡ (баланс: ${item.balance.toFixed(2)}⚡)\n\n`;
+    text += `   ${item.description || 'Транзакція'}\n`;  // ← description
+    text += `   ${sign}${item.amount.toFixed(2)}⚡ (баланс: ${item.balanceAfter.toFixed(2)}⚡)\n\n`;  // ← balanceAfter
   });
   
   await ctx.reply(text, keyboard.createBackButton());
 });
 
 bot.command('clear', async (ctx) => {
-  userBalance.clearConversationHistory(ctx.from.id);
+  await userBalance.clearConversationHistory(ctx.from.id);
   await ctx.reply('✅ Історію розмови очищено!', keyboard.createMainMenu());
 });
 
@@ -164,7 +164,7 @@ Neurolab AI відповість на ваше запитання текстом
       `💡 Claude\n\n🎙️ Говоріть\n✍️ Пишіть\n🖼️ Завантажте зображення для аналізу`,
       keyboard.createGPTActionsMenu(models.gpt.actions)
   );
-  userBalance.setCurrentModel(ctx.from.id, 'claude');
+  await userBalance.setCurrentModel(ctx.from.id, 'claude');
 });
 
 bot.hears('🎬 Створення відео', async (ctx) => {
@@ -208,7 +208,7 @@ bot.hears('📄 Інструкція', async (ctx) => {
 // GPT Actions
 bot.action('gpt_text', async (ctx) => {
   await ctx.answerCbQuery();
-  userBalance.setCurrentModel(ctx.from.id, 'claude_text');
+  await userBalance.setCurrentModel(ctx.from.id, 'claude_text');
   await ctx.reply(
     '✍️ Режим текстової розмови активовано!\n\n' +
     'Надішліть мені ваше запитання, і я відповім текстом.\n\n' +
@@ -219,7 +219,7 @@ bot.action('gpt_text', async (ctx) => {
 
 bot.action('gpt_voice', async (ctx) => {
   await ctx.answerCbQuery();
-  userBalance.setCurrentModel(ctx.from.id, 'claude_voice');
+  await userBalance.setCurrentModel(ctx.from.id, 'claude_voice');
   await ctx.reply(
       '🎙️ Режим голосової розмови активовано!\n\n' +
       'Надішліть голосове повідомлення, і я перетворю його в текст та відповім.\n\n' +
@@ -230,7 +230,7 @@ bot.action('gpt_voice', async (ctx) => {
 
 bot.action('gpt_image', async (ctx) => {
   await ctx.answerCbQuery();
-  userBalance.setCurrentModel(ctx.from.id, 'claude_vision');
+  await userBalance.setCurrentModel(ctx.from.id, 'claude_vision');
   await ctx.reply(
     '🖼️ Режим аналізу зображень активовано!\n\n' +
     'Надішліть мені зображення з підписом (або без), і я його проаналізую.',
@@ -242,10 +242,10 @@ bot.action('new_conversation', async (ctx) => {
   await ctx.answerCbQuery('Історію очищено!');
 
   const userId = ctx.from.id;
-  userBalance.clearConversationHistory(userId);
+  await userBalance.clearConversationHistory(userId);
 
   // Скидаємо модель на GPT текстову
-  userBalance.setCurrentModel(userId, 'claude_text');
+  await userBalance.setCurrentModel(userId, 'claude_text');
 
   await ctx.reply('✅ Нову розмову розпочато! 👋\n\nНадішліть своє повідомлення, щоб почати чат із GPT.',
       keyboard.createGPTActionsMenu(models.gpt.actions)
@@ -269,12 +269,12 @@ bot.action(/^(midjourney|flux|nano_banana|stable_diffusion|seedream|clarity|ideo
   
   await ctx.answerCbQuery();
   
-  if (model.cost > 0 && !userBalance.hasTokens(ctx.from.id, model.cost)) {
+  if (model.cost > 0 && !await userBalance.hasTokens(ctx.from.id, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
   
-  userBalance.setCurrentModel(ctx.from.id, modelKey);
+  await userBalance.setCurrentModel(ctx.from.id, modelKey);
 
   if (modelKey === 'clarity') {
     await ctx.reply(
@@ -309,12 +309,12 @@ bot.action(/^(kling|runway_gen4|runway_turbo|luma)$/, async (ctx) => {
   
   await ctx.answerCbQuery();
   
-  if (!userBalance.hasTokens(ctx.from.id, model.cost)) {
+  if (!await userBalance.hasTokens(ctx.from.id, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
   
-  userBalance.setCurrentModel(ctx.from.id, modelKey);
+  await userBalance.setCurrentModel(ctx.from.id, modelKey);
   
   await ctx.reply(
     `${model.name}\n\n` +
@@ -342,12 +342,12 @@ bot.action(/^(suno|udio|elevenlabs)$/, async (ctx) => {
 
   await ctx.answerCbQuery();
 
-  if (!userBalance.hasTokens(ctx.from.id, model.cost)) {
+  if (!await userBalance.hasTokens(ctx.from.id, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
 
-  userBalance.setCurrentModel(ctx.from.id, modelKey);
+  await userBalance.setCurrentModel(ctx.from.id, modelKey);
 
   await ctx.reply(
       `${model.name}\n\n` +
@@ -463,10 +463,11 @@ bot.on('successful_payment', async (ctx) => {
   
   if (payload.type === 'subscription') {
     const sub = models.subscriptions.basic;
-    userBalance.addTokens(userId, sub.tokens, 'subscription_purchase');
-    userBalance.setSubscription(userId, sub.name, 30);
+    await userBalance.addTokens(userId, sub.tokens, 'subscription_purchase');
+    await userBalance.setSubscription(userId, sub.name, 30);
     
-    const user = userBalance.getUser(userId);
+    const user = await userBalance.getUser(userId, ctx.from);
+
     
     await ctx.reply(
       `✅ Оплата успішна!\n\n` +
@@ -484,7 +485,7 @@ bot.on('successful_payment', async (ctx) => {
 // Обробка текстових повідомлень
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
-  const currentModel = userBalance.getCurrentModel(userId);
+  const currentModel = await userBalance.getCurrentModel(userId);
   const text = ctx.message.text;
   
   // Ігноруємо команди
@@ -540,7 +541,7 @@ bot.on('text', async (ctx) => {
 // Обробка голосових повідомлень
 bot.on('voice', async (ctx) => {
   const userId = ctx.from.id;
-  const currentModel = userBalance.getCurrentModel(userId);
+  const currentModel = await userBalance.getCurrentModel(userId);
 
   if (currentModel !== 'claude_voice') {
     await ctx.reply('Спочатку активуйте голосовий режим через GPT → 🎙️ Говоріть');
@@ -593,7 +594,7 @@ bot.on('voice', async (ctx) => {
 // Обробка фото
 bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
-  const currentModel = userBalance.getCurrentModel(userId);
+  const currentModel = await userBalance.getCurrentModel(userId);
   const videoModelsAcceptingImage = ['kling', 'runway_gen4', 'runway_turbo'];
 
   if (currentModel === 'claude_vision') {
@@ -622,15 +623,43 @@ bot.on('photo', async (ctx) => {
 async function handleClaudeText(ctx, text) {
   const userId = ctx.from.id;
   
+  const textModel = models.gpt.actions.find(a => a.key === 'text');
+  
+  if (!textModel) {
+    await ctx.reply('❌ Модель не знайдено');
+    return;
+  }
+  
+  if (!(await userBalance.hasTokens(userId, textModel.cost))) {
+    await ctx.reply(
+      `❌ Недостатньо токенів!\n\n` +
+      `Потрібно: ${textModel.cost}⚡\n` +
+      `Поповніть баланс через /buy`,
+      keyboard.createMainMenu()
+    );
+    return;
+  }
+  
   try {
     const statusMsg = await ctx.reply('🤔 Думаю...');
     
-    const history = userBalance.getConversationHistory(userId);
+    const history = await userBalance.getConversationHistory(userId);
     const response = await claude.continueConversation(text, history);
     
     if (response.success) {
-      userBalance.saveConversationMessage(userId, 'user', text);
-      userBalance.saveConversationMessage(userId, 'assistant', response.text);
+      await userBalance.saveConversationMessage(userId, 'user', text);
+      await userBalance.saveConversationMessage(userId, 'assistant', response.text);
+      
+      await userBalance.deductTokens(
+        userId,
+        textModel.cost,
+        'Claude текстова генерація',
+        {
+          modelKey: 'claude_text',
+          modelName: 'Claude Sonnet 4.5',
+          apiCost: textModel.apiCost
+        }
+      );
       
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       await ctx.reply(response.text, keyboard.createGPTActionsMenu(models.gpt.actions));
@@ -652,7 +681,7 @@ async function handleClaudeVision(ctx) {
   const userId = ctx.from.id;
   const model = models.gpt.actions.find(m => m.key === 'image');
 
-  if (!userBalance.hasTokens(userId, model.cost)) {
+  if (!await userBalance.hasTokens(userId, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
@@ -669,18 +698,18 @@ async function handleClaudeVision(ctx) {
 
     const prompt = ctx.message.caption || 'Опишіть це зображення детально.';
 
-    userBalance.deductTokens(userId, model.cost, 'claude_vision_analysis', { prompt });
+    await userBalance.deductTokens(userId, model.cost, 'Claude аналіз зображення', { prompt });
 
     const response = await claude.analyzeImageWithClaude(imageBase64, prompt, 'image/jpeg');
 
     if (response.success) {
-      userBalance.saveConversationMessage(userId, 'user', `[Зображення] ${prompt}`);
-      userBalance.saveConversationMessage(userId, 'assistant', response.text);
+      await userBalance.saveConversationMessage(userId, 'user', `[Зображення] ${prompt}`);
+      await userBalance.saveConversationMessage(userId, 'assistant', response.text);
 
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       await ctx.reply(response.text, keyboard.createGPTActionsMenu(models.gpt.actions));
     } else {
-      userBalance.addTokens(userId, model.cost, 'claude_vision_refund');
+      await userBalance.addTokens(userId, model.cost, 'claude_vision_refund');
 
       await ctx.telegram.editMessageText(
           ctx.chat.id,
@@ -692,7 +721,7 @@ async function handleClaudeVision(ctx) {
   } catch (error) {
     console.error('Claude vision error:', error);
 
-    userBalance.addTokens(userId, model.cost, 'claude_vision_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'claude_vision_error_refund');
 
     await ctx.reply('❌ Помилка при аналізі зображення.\nТокени повернуто.');
   }
@@ -702,12 +731,13 @@ async function handleMidjourneyGeneration(ctx, prompt) {
   const userId = ctx.from.id;
   const model = models.design.models.find(m => m.key === 'midjourney');
   
-  if (!userBalance.deductTokens(userId, model.cost, 'Midjourney generation', { prompt })) {
+  if (!await userBalance.deductTokens(userId, model.cost, 'Midjourney generation', { prompt })) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
   
-  const user = userBalance.getUser(userId);
+  const user = await userBalance.getUser(userId, ctx.from);
+
   const statusMsg = await ctx.reply(
     `🎨 Генерую зображення через Midjourney...\n\n` +
     `⏱️ Це займе ~30-60 секунд\n` +
@@ -733,12 +763,12 @@ async function handleMidjourneyGeneration(ctx, prompt) {
         null,
         `❌ Помилка генерації: ${result.error}\n\n💰 Токени повернуто`
       );
-      userBalance.addTokens(userId, model.cost, 'refund');
+      await userBalance.addTokens(userId, model.cost, 'refund');
     }
   } catch (error) {
     console.error('Midjourney error:', error);
     await ctx.reply('❌ Сталася помилка');
-    userBalance.addTokens(userId, model.cost, 'refund');
+    await userBalance.addTokens(userId, model.cost, 'refund');
   }
 }
 
@@ -747,12 +777,12 @@ async function handleFluxGeneration(ctx, prompt) {
   const username = ctx.from.username || 'unknown';
   const model = models.design.models.find(m => m.key === 'flux');
 
-  if (!userBalance.hasTokens(userId, model.cost)) {
+  if (!await userBalance.hasTokens(userId, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
 
-  userBalance.deductTokens(userId, model.cost, 'flux_generation', { prompt });
+  await userBalance.deductTokens(userId, model.cost, 'flux_generation', { prompt });
 
   const statusMsg = await ctx.reply(
       `💎 Генерую через FLUX 1.1 Pro...\n\n` +
@@ -780,7 +810,7 @@ async function handleFluxGeneration(ctx, prompt) {
           `Спробуйте іншу модель або повторіть пізніше.`
       );
 
-      userBalance.addTokens(userId, model.cost, 'flux_refund');
+      await userBalance.addTokens(userId, model.cost, 'flux_refund');
       return;
     }
 
@@ -812,7 +842,7 @@ async function handleFluxGeneration(ctx, prompt) {
         '❌ Помилка генерації. Токени повернуто.\nСпробуйте іншу модель.'
     );
 
-    userBalance.addTokens(userId, model.cost, 'flux_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'flux_error_refund');
   }
 }
 
@@ -821,12 +851,12 @@ async function handleStableDiffusionGeneration(ctx, prompt) {
   const username = ctx.from.username || 'unknown';
   const model = models.design.models.find(m => m.key === 'stable_diffusion');
 
-  if (!userBalance.hasTokens(userId, model.cost)) {
+  if (!await userBalance.hasTokens(userId, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
 
-  userBalance.deductTokens(userId, model.cost, 'stable_diffusion_generation', { prompt });
+  await userBalance.deductTokens(userId, model.cost, 'stable_diffusion_generation', { prompt });
 
   const statusMsg = await ctx.reply(
       `🌀 Генерую через Stable Diffusion...\n\n` +
@@ -854,7 +884,7 @@ async function handleStableDiffusionGeneration(ctx, prompt) {
           `Спробуйте іншу модель або повторіть пізніше.`
       );
 
-      userBalance.addTokens(userId, model.cost, 'stable_diffusion_refund');
+      await userBalance.addTokens(userId, model.cost, 'stable_diffusion_refund');
       return;
     }
 
@@ -886,7 +916,7 @@ async function handleStableDiffusionGeneration(ctx, prompt) {
         '❌ Помилка генерації. Токени повернуто.\nСпробуйте іншу модель.'
     );
 
-    userBalance.addTokens(userId, model.cost, 'stable_diffusion_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'stable_diffusion_error_refund');
   }
 }
 
@@ -895,12 +925,12 @@ async function handleKlingVideo(ctx, prompt) {
   const username = ctx.from.username || 'unknown';
   const model = models.video.models.find(m => m.key === 'kling');
 
-  if (!userBalance.hasTokens(userId, model.cost)) {
+  if (!await userBalance.hasTokens(userId, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
 
-  userBalance.deductTokens(userId, model.cost, 'kling_video', { prompt });
+  await userBalance.deductTokens(userId, model.cost, 'kling_video', { prompt });
 
   let imageUrl = null;
 
@@ -938,7 +968,7 @@ async function handleKlingVideo(ctx, prompt) {
           `Спробуйте іншу модель або повторіть пізніше.`
       );
 
-      userBalance.addTokens(userId, model.cost, 'kling_refund');
+      await userBalance.addTokens(userId, model.cost, 'kling_refund');
       return;
     }
 
@@ -971,7 +1001,7 @@ async function handleKlingVideo(ctx, prompt) {
         '❌ Помилка генерації відео. Токени повернуто.\nСпробуйте іншу модель.'
     );
 
-    userBalance.addTokens(userId, model.cost, 'kling_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'kling_error_refund');
   }
 }
 
@@ -983,12 +1013,12 @@ async function handleNanoBananaGeneration(ctx, prompt) {
   const username = ctx.from.username || 'unknown';
   const model = models.design.models.find(m => m.key === 'nano_banana');
 
-  if (!userBalance.hasTokens(userId, model.cost)) {
+  if (!await userBalance.hasTokens(userId, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
 
-  userBalance.deductTokens(userId, model.cost, 'nano_banana_generation', { prompt });
+  await userBalance.deductTokens(userId, model.cost, 'nano_banana_generation', { prompt });
 
   const statusMsg = await ctx.reply(
       `🍌 Генерую через Nano Banana Pro...\n\n` +
@@ -1016,7 +1046,7 @@ async function handleNanoBananaGeneration(ctx, prompt) {
           `Спробуйте іншу модель або повторіть пізніше.`
       );
 
-      userBalance.addTokens(userId, model.cost, 'nano_banana_refund');
+      await userBalance.addTokens(userId, model.cost, 'nano_banana_refund');
       return;
     }
 
@@ -1048,7 +1078,7 @@ async function handleNanoBananaGeneration(ctx, prompt) {
         '❌ Помилка генерації. Токени повернуто.\nСпробуйте іншу модель.'
     );
 
-    userBalance.addTokens(userId, model.cost, 'nano_banana_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'nano_banana_error_refund');
   }
 }
 
@@ -1065,7 +1095,7 @@ async function handleSeedreamGeneration(ctx, prompt) {
     return;
   }
 
-  userBalance.deductTokens(userId, model.cost, 'seedream_generation', { prompt });
+  await userBalance.deductTokens(userId, model.cost, 'seedream_generation', { prompt });
 
   const statusMsg = await ctx.reply(
       `🌊 Генерую через Seedream 4.5...\n\n` +
@@ -1093,7 +1123,7 @@ async function handleSeedreamGeneration(ctx, prompt) {
           `Спробуйте іншу модель або повторіть пізніше.`
       );
 
-      userBalance.addTokens(userId, model.cost, 'seedream_refund');
+      await userBalance.addTokens(userId, model.cost, 'seedream_refund');
       return;
     }
 
@@ -1125,7 +1155,7 @@ async function handleSeedreamGeneration(ctx, prompt) {
         '❌ Помилка генерації. Токени повернуто.\nСпробуйте іншу модель.'
     );
 
-    userBalance.addTokens(userId, model.cost, 'seedream_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'seedream_error_refund');
   }
 }
 
@@ -1137,12 +1167,12 @@ async function handleClarityUpscaler(ctx) {
   const username = ctx.from.username || 'unknown';
   const model = models.design.models.find(m => m.key === 'clarity');
 
-  if (!userBalance.hasTokens(userId, model.cost)) {
+  if (!await userBalance.hasTokens(userId, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
 
-  userBalance.deductTokens(userId, model.cost, 'clarity_upscaler', { action: 'upscale' });
+  await userBalance.deductTokens(userId, model.cost, 'clarity_upscaler', { action: 'upscale' });
 
   const statusMsg = await ctx.reply(
       `🔮 Покращую якість зображення через Clarity Upscaler...\n\n` +
@@ -1179,7 +1209,7 @@ async function handleClarityUpscaler(ctx) {
           `Спробуйте ще раз або оберіть іншу модель.`
       );
 
-      userBalance.addTokens(userId, model.cost, 'clarity_refund');
+      await userBalance.addTokens(userId, model.cost, 'clarity_refund');
       return;
     }
 
@@ -1210,7 +1240,7 @@ async function handleClarityUpscaler(ctx) {
         '❌ Помилка покращення зображення. Токени повернуто.\nСпробуйте ще раз.'
     );
 
-    userBalance.addTokens(userId, model.cost, 'clarity_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'clarity_error_refund');
   }
 }
 
@@ -1222,12 +1252,12 @@ async function handleIdeogramGeneration(ctx, prompt) {
   const username = ctx.from.username || 'unknown';
   const model = models.design.models.find(m => m.key === 'ideogram');
 
-  if (!userBalance.hasTokens(userId, model.cost)) {
+  if (!await userBalance.hasTokens(userId, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
 
-  userBalance.deductTokens(userId, model.cost, 'ideogram_generation', { prompt });
+  await userBalance.deductTokens(userId, model.cost, 'ideogram_generation', { prompt });
 
   const statusMsg = await ctx.reply(
       `🎯 Генерую через Ideogram v3 Turbo...\n\n` +
@@ -1255,7 +1285,7 @@ async function handleIdeogramGeneration(ctx, prompt) {
           `Спробуйте іншу модель або повторіть пізніше.`
       );
 
-      userBalance.addTokens(userId, model.cost, 'ideogram_refund');
+      await userBalance.addTokens(userId, model.cost, 'ideogram_refund');
       return;
     }
 
@@ -1287,7 +1317,7 @@ async function handleIdeogramGeneration(ctx, prompt) {
         '❌ Помилка генерації. Токени повернуто.\nСпробуйте іншу модель.'
     );
 
-    userBalance.addTokens(userId, model.cost, 'ideogram_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'ideogram_error_refund');
   }
 }
 
@@ -1296,12 +1326,12 @@ async function handleRunwayVideo(ctx, prompt) {
   const username = ctx.from.username || 'unknown';
   const model = models.video.models.find(m => m.key === 'runway_gen4');
 
-  if (!userBalance.hasTokens(userId, model.cost)) {
+  if (!await userBalance.hasTokens(userId, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
 
-  userBalance.deductTokens(userId, model.cost, 'runway_video', { prompt });
+  await userBalance.deductTokens(userId, model.cost, 'runway_video', { prompt });
 
   let imageUrl = null;
 
@@ -1338,7 +1368,7 @@ async function handleRunwayVideo(ctx, prompt) {
           `Спробуйте іншу модель або повторіть пізніше.`
       );
 
-      userBalance.addTokens(userId, model.cost, 'runway_refund');
+      await userBalance.addTokens(userId, model.cost, 'runway_refund');
       return;
     }
 
@@ -1371,7 +1401,7 @@ async function handleRunwayVideo(ctx, prompt) {
         '❌ Помилка генерації відео. Токени повернуто.\nСпробуйте іншу модель.'
     );
 
-    userBalance.addTokens(userId, model.cost, 'runway_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'runway_error_refund');
   }
 }
 
@@ -1383,7 +1413,7 @@ async function handleSunoGeneration(ctx, text) {
   const username = ctx.from.username || 'unknown';
   const model = models.audio.models.find(m => m.key === 'suno');
 
-  if (!userBalance.hasTokens(userId, model.cost)) {
+  if (!await userBalance.hasTokens(userId, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
@@ -1399,7 +1429,7 @@ async function handleSunoGeneration(ctx, text) {
     return;
   }
 
-  userBalance.deductTokens(userId, model.cost, 'suno_generation', { text });
+  await userBalance.deductTokens(userId, model.cost, 'suno_generation', { text });
 
   const statusMsg = await ctx.reply(
       `🎵 Генерую аудіо через Suno AI Bark...\n\n` +
@@ -1428,7 +1458,7 @@ async function handleSunoGeneration(ctx, text) {
           `Спробуйте ще раз або оберіть іншу модель.`
       );
 
-      userBalance.addTokens(userId, model.cost, 'suno_refund');
+      await userBalance.addTokens(userId, model.cost, 'suno_refund');
       return;
     }
 
@@ -1460,7 +1490,7 @@ async function handleSunoGeneration(ctx, text) {
         '❌ Помилка генерації аудіо. Токени повернуто.\nСпробуйте ще раз.'
     );
 
-    userBalance.addTokens(userId, model.cost, 'suno_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'suno_error_refund');
   }
 }
 
@@ -1472,12 +1502,12 @@ async function handleRunwayTurboVideo(ctx, prompt) {
   const username = ctx.from.username || 'unknown';
   const model = models.video.models.find(m => m.key === 'runway_turbo');
 
-  if (!userBalance.hasTokens(userId, model.cost)) {
+  if (!await userBalance.hasTokens(userId, model.cost)) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
 
-  userBalance.deductTokens(userId, model.cost, 'runway_turbo_video', { prompt });
+  await userBalance.deductTokens(userId, model.cost, 'runway_turbo_video', { prompt });
 
   let imageUrl = null;
 
@@ -1514,7 +1544,7 @@ async function handleRunwayTurboVideo(ctx, prompt) {
           `Спробуйте іншу модель або повторіть пізніше.`
       );
 
-      userBalance.addTokens(userId, model.cost, 'runway_turbo_refund');
+      await userBalance.addTokens(userId, model.cost, 'runway_turbo_refund');
       return;
     }
 
@@ -1547,15 +1577,21 @@ async function handleRunwayTurboVideo(ctx, prompt) {
         '❌ Помилка генерації відео. Токени повернуто.\nСпробуйте іншу модель.'
     );
 
-    userBalance.addTokens(userId, model.cost, 'runway_turbo_error_refund');
+    await userBalance.addTokens(userId, model.cost, 'runway_turbo_error_refund');
   }
 }
 
 // ==================== HELPER FUNCTIONS ====================
 
 async function showProfile(ctx) {
-  const stats = userBalance.getUserStats(ctx.from.id);
-  
+  const user = await userBalance.getUser(ctx.from.id, ctx.from);
+
+  if (!user) {
+      await ctx.reply('❌ Помилка. Спробуйте /start', keyboard.createBackButton());
+      return;
+  }
+
+  const stats = await userBalance.getUserStats(ctx.from.id);
   let message = `👤 Ваш профіль\n\n`;
   message += `🆔 ID: ${ctx.from.id}\n`;
   message += `👤 Ім'я: ${ctx.from.first_name}\n`;
@@ -1573,7 +1609,7 @@ async function showProfile(ctx) {
 }
 
 async function showInsufficientTokens(ctx, required) {
-  const user = userBalance.getUser(ctx.from.id);
+  const user = await userBalance.getUser(ctx.from.id);
   
   const message = `⚠️ Недостатньо токенів!\n\n` +
     `Необхідно: ${required}⚡\n` +
@@ -1599,9 +1635,37 @@ async function startBot() {
   // database.setupExitHandler(users);
   
   // Запускаємо бота
-  await bot.launch();
-  console.log('✅ Bot started successfully!');
-  console.log('📱 Bot username:', bot.botInfo.username);
+  async function startBot() {
+  try {
+    // Підключаємось до MongoDB
+    console.log('📡 Connecting to MongoDB...');
+    await db.connect();
+    
+    // Запускаємо бота
+    console.log('🤖 Starting bot...');
+    await bot.launch();
+    console.log('✅ Bot started successfully!');
+    
+    // Graceful shutdown
+    process.once('SIGINT', async () => {
+      console.log('\n🛑 Stopping bot...');
+      await db.disconnect();
+      bot.stop('SIGINT');
+    });
+    
+    process.once('SIGTERM', async () => {
+      console.log('\n🛑 Stopping bot...');
+      await db.disconnect();
+      bot.stop('SIGTERM');
+    });
+  } catch (error) {
+    console.error('❌ Failed to start bot:',
+       error);
+    process.exit(1);
+  }
+}
+
+startBot();
 }
 
 startBot();

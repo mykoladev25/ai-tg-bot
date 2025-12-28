@@ -1,227 +1,372 @@
-// Проста in-memory база (для продакшену використовуй MongoDB/PostgreSQL)
-const users = new Map();
+const User = require('../database/models/User');
+const Transaction = require('../database/models/Transaction');
 
 /**
  * Отримати або створити користувача
  */
-function getUser(userId) {
-  if (!users.has(userId)) {
-    users.set(userId, {
-      id: userId,
-      tokens: 100, // FREE токени при реєстрації
-      subscription: null,
-      subscriptionExpiry: null,
-      conversationHistory: [],
-      currentModel: null,
-      history: [],
-      createdAt: new Date(),
-      lastActivity: new Date()
-    });
+async function getUser(userId, userInfo = {}) {
+  try {
+    let user = await User.findById(userId);
+    
+    if (!user) {
+      // Створюємо нового користувача
+      user = new User({
+        _id: userId,
+        username: userInfo.username,
+        firstName: userInfo.first_name,
+        lastName: userInfo.last_name,
+        languageCode: userInfo.language_code || 'uk',
+        tokens: 10,  // Початковий баланс
+        totalTokensEarned: 10
+      });
+
+      await user.save();
+      
+      // Додаємо початкову транзакцію
+      await Transaction.create({
+        userId,
+        type: 'bonus',
+        category: 'initial',
+        amount: 10,
+        balanceBefore: 0,
+        balanceAfter: 10,
+        description: 'Початковий бонус при реєстрації'
+      });
+    } else {
+      // Оновлюємо останню активність
+      user.lastActivityAt = new Date();
+      await user.save();
+    }
+    
+    return user;
+  } catch (error) {
+    console.error('Error in getUser:', error);
+    throw error;
   }
-  
-  // Оновлюємо останню активність
-  const user = users.get(userId);
-  user.lastActivity = new Date();
-  
-  return user;
 }
 
 /**
  * Перевірити чи достатньо токенів
  */
-function hasTokens(userId, amount) {
-  const user = getUser(userId);
-  return user.tokens >= amount;
+async function hasTokens(userId, amount) {
+  try {
+    const user = await User.findById(userId);
+    return user && user.tokens >= amount;
+  } catch (error) {
+    console.error('Error in hasTokens:', error);
+    return false;
+  }
 }
 
 /**
  * Відняти токени
  */
-function deductTokens(userId, amount, action, details = {}) {
-  const user = getUser(userId);
-  
-  if (user.tokens < amount) {
+async function deductTokens(userId, amount, action, details = {}) {
+  try {
+    const user = await User.findById(userId);
+    
+    if (!user || user.tokens < amount) {
+      return false;
+    }
+    
+    const balanceBefore = user.tokens;
+    user.tokens -= amount;
+    user.totalTokensSpent += amount;
+    const balanceAfter = user.tokens;
+    
+    // Оновлюємо статистику
+    if (details.modelKey) {
+      user.stats.totalGenerations += 1;
+      
+      // Визначаємо тип генерації
+      if (details.modelKey.includes('text') || details.modelKey.includes('claude')) {
+        user.stats.textRequests += 1;
+      } else if (details.modelKey.includes('vision') || details.modelKey.includes('image')) {
+        if (details.isAnalysis) {
+          user.stats.visionRequests += 1;
+        } else {
+          user.stats.imageRequests += 1;
+        }
+      } else if (details.modelKey.includes('video') || details.modelKey.includes('runway') || details.modelKey.includes('kling')) {
+        user.stats.videoRequests += 1;
+      } else if (details.modelKey.includes('audio') || details.modelKey.includes('suno')) {
+        user.stats.audioRequests += 1;
+      }
+    }
+    
+    await user.save();
+    
+    // Створюємо транзакцію
+    await Transaction.create({
+      userId,
+      type: 'deduction',
+      category: 'generation',
+      amount,
+      balanceBefore,
+      balanceAfter,
+      description: action,
+      model: details.modelKey ? {
+        key: details.modelKey,
+        name: details.modelName,
+        cost: amount,
+        apiCost: details.apiCost
+      } : undefined,
+      metadata: details
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error in deductTokens:', error);
     return false;
   }
-  
-  user.tokens -= amount;
-  user.history.push({
-    type: 'deduction',
-    action,
-    amount,
-    details,
-    balance: user.tokens,
-    timestamp: new Date()
-  });
-  
-  return true;
 }
 
 /**
  * Додати токени
  */
-function addTokens(userId, amount, reason = 'purchase') {
-  const user = getUser(userId);
-  user.tokens += amount;
-  
-  user.history.push({
-    type: 'addition',
-    reason,
-    amount,
-    balance: user.tokens,
-    timestamp: new Date()
-  });
-  
-  return user.tokens;
+async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return null;
+    
+    const balanceBefore = user.tokens;
+    user.tokens += amount;
+    const balanceAfter = user.tokens;
+    
+    if (reason === 'purchase' || reason === 'subscription_purchase') {
+      user.totalTokensPurchased += amount;
+    }
+    user.totalTokensEarned += amount;
+    
+    await user.save();
+    
+    // Визначаємо категорію
+    let category = 'bonus';
+    if (reason.includes('subscription') || reason.includes('purchase')) {
+      category = 'subscription';
+    } else if (reason.includes('admin')) {
+      category = 'admin';
+    } else if (reason.includes('referral')) {
+      category = 'referral';
+    }
+    
+    // Створюємо транзакцію
+    await Transaction.create({
+      userId,
+      type: 'addition',
+      category,
+      amount,
+      balanceBefore,
+      balanceAfter,
+      description: reason,
+      metadata
+    });
+    
+    return balanceAfter;
+  } catch (error) {
+    console.error('Error in addTokens:', error);
+    return null;
+  }
 }
 
 /**
  * Встановити підписку
  */
-function setSubscription(userId, subscriptionType, durationDays = 30) {
-  const user = getUser(userId);
-  user.subscription = subscriptionType;
-  
-  const expiry = new Date();
-  expiry.setDate(expiry.getDate() + durationDays);
-  user.subscriptionExpiry = expiry;
-  
-  return user;
+async function setSubscription(userId, subscriptionType, durationDays = 30) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return null;
+    
+    const startedAt = new Date();
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + durationDays);
+    
+    user.subscription = {
+      type: subscriptionType,
+      startedAt,
+      expiresAt,
+      isActive: true
+    };
+    
+    await user.save();
+    return user;
+  } catch (error) {
+    console.error('Error in setSubscription:', error);
+    return null;
+  }
 }
 
 /**
  * Перевірити чи активна підписка
  */
-function hasActiveSubscription(userId) {
-  const user = getUser(userId);
-  
-  if (!user.subscription || !user.subscriptionExpiry) {
+async function hasActiveSubscription(userId) {
+  try {
+    const user = await User.findById(userId);
+    return user?.hasActiveSubscription || false;
+  } catch (error) {
+    console.error('Error in hasActiveSubscription:', error);
     return false;
   }
-  
-  return new Date() < user.subscriptionExpiry;
 }
 
 /**
  * Зберегти контекст розмови
  */
-function saveConversationMessage(userId, role, content) {
-  const user = getUser(userId);
-  
-  user.conversationHistory.push({
-    role,
-    content,
-    timestamp: new Date()
-  });
-  
-  // Обмежуємо історію до останніх 20 повідомлень
-  if (user.conversationHistory.length > 20) {
-    user.conversationHistory = user.conversationHistory.slice(-20);
+async function saveConversationMessage(userId, role, content) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return [];
+    
+    await user.addToConversation(role, content);
+    return user.conversationHistory;
+  } catch (error) {
+    console.error('Error in saveConversationMessage:', error);
+    return [];
   }
-  
-  return user.conversationHistory;
 }
 
 /**
  * Отримати історію розмови
  */
-function getConversationHistory(userId) {
-  const user = getUser(userId);
-  return user.conversationHistory;
+async function getConversationHistory(userId) {
+  try {
+    const user = await User.findById(userId);
+    return user?.conversationHistory || [];
+  } catch (error) {
+    console.error('Error in getConversationHistory:', error);
+    return [];
+  }
 }
 
 /**
  * Очистити історію розмови
  */
-function clearConversationHistory(userId) {
-  const user = getUser(userId);
-  user.conversationHistory = [];
-  return true;
+async function clearConversationHistory(userId) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return false;
+    
+    await user.clearConversation();
+    return true;
+  } catch (error) {
+    console.error('Error in clearConversationHistory:', error);
+    return false;
+  }
 }
 
 /**
  * Встановити поточну модель
  */
-function setCurrentModel(userId, modelKey) {
-  const user = getUser(userId);
-  user.currentModel = modelKey;
-  return true;
+async function setCurrentModel(userId, modelKey) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return false;
+    
+    user.currentModel = modelKey;
+    await user.save();
+    return true;
+  } catch (error) {
+    console.error('Error in setCurrentModel:', error);
+    return false;
+  }
 }
 
 /**
  * Отримати поточну модель
  */
-function getCurrentModel(userId) {
-  const user = getUser(userId);
-  return user.currentModel;
+async function getCurrentModel(userId) {
+  try {
+    const user = await User.findById(userId);
+    return user?.currentModel || null;
+  } catch (error) {
+    console.error('Error in getCurrentModel:', error);
+    return null;
+  }
 }
 
 /**
  * Отримати історію транзакцій
  */
-function getTransactionHistory(userId, limit = 10) {
-  const user = getUser(userId);
-  return user.history.slice(-limit).reverse();
+async function getTransactionHistory(userId, limit = 10) {
+  try {
+    return await Transaction.getUserHistory(userId, limit);
+  } catch (error) {
+    console.error('Error in getTransactionHistory:', error);
+    return [];
+  }
 }
 
 /**
  * Отримати статистику користувача
  */
-function getUserStats(userId) {
-  const user = getUser(userId);
-
-  let totalSpent = 0;
-  let generationCount = 0;
-
-  for (const h of user.history) {
-    if (h.type === 'deduction') {
-      totalSpent += h.amount;
-      generationCount++;
-    }
-
-    if (
-        h.type === 'addition' &&
-        typeof h.reason === 'string' &&
-        h.reason.includes('refund')
-    ) {
-      totalSpent -= h.amount;
-      generationCount = Math.max(0, generationCount - 1);
-    }
+async function getUserStats(userId) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return null;
+    
+    const transactions = await Transaction.find({ userId, type: 'deduction' });
+    
+    return {
+      currentBalance: user.tokens,
+      totalSpent: user.totalTokensSpent,
+      totalPurchased: user.totalTokensPurchased,
+      totalEarned: user.totalTokensEarned,
+      generationCount: user.stats.totalGenerations,
+      textRequests: user.stats.textRequests,
+      imageRequests: user.stats.imageRequests,
+      videoRequests: user.stats.videoRequests,
+      audioRequests: user.stats.audioRequests,
+      visionRequests: user.stats.visionRequests,
+      memberSince: user.createdAt,
+      lastActivity: user.lastActivityAt,
+      hasSubscription: user.hasActiveSubscription,
+      subscriptionType: user.subscription?.type,
+      subscriptionExpiry: user.subscription?.expiresAt
+    };
+  } catch (error) {
+    console.error('Error in getUserStats:', error);
+    return null;
   }
-
-  return {
-    currentBalance: user.tokens,
-    totalSpent: Math.max(0, totalSpent),
-    generationCount,
-    totalAdded: user.history
-        .filter(h => h.type === 'addition')
-        .reduce((s, h) => s + h.amount, 0),
-    memberSince: user.createdAt,
-    lastActivity: user.lastActivity,
-    hasSubscription: hasActiveSubscription(userId),
-    subscriptionType: user.subscription,
-    subscriptionExpiry: user.subscriptionExpiry
-  };
 }
-
 
 /**
  * Отримати всіх користувачів (для адміністрування)
  */
-function getAllUsers() {
-  return Array.from(users.values());
+async function getAllUsers(filters = {}) {
+  try {
+    const query = {};
+    
+    if (filters.isBanned !== undefined) {
+      query.isBanned = filters.isBanned;
+    }
+    
+    if (filters.hasSubscription) {
+      query['subscription.expiresAt'] = { $gt: new Date() };
+    }
+    
+    return await User.find(query)
+      .sort({ lastActivityAt: -1 })
+      .limit(filters.limit || 100)
+      .lean();
+  } catch (error) {
+    console.error('Error in getAllUsers:', error);
+    return [];
+  }
 }
 
 /**
  * Отримати кількість активних користувачів
  */
-function getActiveUsersCount(hoursAgo = 24) {
-  const cutoffTime = new Date();
-  cutoffTime.setHours(cutoffTime.getHours() - hoursAgo);
-  
-  return Array.from(users.values())
-    .filter(user => user.lastActivity > cutoffTime)
-    .length;
+async function getActiveUsersCount(hoursAgo = 24) {
+  try {
+    const cutoffTime = new Date(Date.now() - hoursAgo * 60 * 60 * 1000);
+    return await User.countDocuments({
+      lastActivityAt: { $gte: cutoffTime }
+    });
+  } catch (error) {
+    console.error('Error in getActiveUsersCount:', error);
+    return 0;
+  }
 }
 
 module.exports = {
