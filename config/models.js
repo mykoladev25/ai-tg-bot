@@ -10,16 +10,16 @@ module.exports = {
     ],
     actions: [
       { name: '🎙️ Говоріть', key: 'voice', cost: 0, apiCost: 0 },
-      { name: '✍️ Пишіть', key: 'text', cost: 2, apiCost: 0.015 }, // ✅ ОНОВЛЕНО: 1⚡ → 2⚡
-      { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 5, apiCost: 0.048 } // ✅ ОНОВЛЕНО: 3⚡ → 5⚡
+      { name: '✍️ Пишіть', key: 'text', cost: 3, apiCost: 0.015 }, // ✅ ОНОВЛЕНО: 2⚡ → 3⚡
+      { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 8, apiCost: 0.048 } // ✅ ОНОВЛЕНО: 5⚡ → 8⚡
     ]
   },
 
   video: {
     models: [
-      { name: '🎬 RunWay: Gen-4 Turbo ⚡', key: 'runway_turbo', cost: 30, apiCost: 0.25, available: true }, // ✅ ОНОВЛЕНО: 14⚡ → 25⚡
-      { name: '🎭 Kling', key: 'kling', cost: 35, apiCost: 0.35, available: true }, // ✅ ОНОВЛЕНО: 30⚡ → 35⚡
-      { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 50, apiCost: 0.9, available: false },
+      { name: '🎬 RunWay: Gen-4 Turbo ⚡', key: 'runway_turbo', cost: 42, apiCost: 0.25, available: true, requiresImage: true }, // ✅ ОНОВЛЕНО: 30⚡ → 42⚡
+      { name: '🎭 Kling', key: 'kling', cost: 60, apiCost: 0.35, available: true, requiresImage: false }, // ✅ ОНОВЛЕНО: 35⚡ → 60⚡
+      { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 150, apiCost: 0.9, available: false, requiresImage: true }, // ✅ ОНОВЛЕНО: 50⚡ → 150⚡
       { name: '🌊 MidJourney Video', key: 'midjourney_video', cost: 18, apiCost: 0, available: false },
       { name: '💜 HeyGen', key: 'heygen', cost: 15, apiCost: 0, available: false }
     ]
@@ -27,13 +27,13 @@ module.exports = {
 
   design: {
     models: [
-      { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 7, apiCost: 0.07, available: true }, // ✅ ОНОВЛЕНО: 4⚡ → 7⚡
-      { name: '🍌 Nano Banana PRO 2K', key: 'nano_banana_2k', cost: 15, apiCost: 0.15, resolution: '2K', maxImages: 14, available: true }, // ✅ ОНОВЛЕНО: 10⚡ → 15⚡
-      { name: '🍌🍌 Nano Banana PRO 4K', key: 'nano_banana_4k', cost: 30, apiCost: 0.30, resolution: '4K', maxImages: 14, available: true }, // ✅ ОНОВЛЕНО: 20⚡ → 30⚡
-      { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 4, apiCost: 0.04, size: '2K', maxImages: 14, available: true },
-      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 8, apiCost: 0.08, size: '4K', maxImages: 14, available: true }, // ✅ ОНОВЛЕНО: 6⚡ → 8⚡
-      { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 4, apiCost: 0.01, maxImages: 1, available: true },
-      { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 5, apiCost: 0.03, maxImages: 1, available: true },
+      { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 12, apiCost: 0.07, available: true }, // ✅ ОНОВЛЕНО: 7⚡ → 12⚡
+      { name: '🍌 Nano Banana PRO 2K', key: 'nano_banana_2k', cost: 25, apiCost: 0.15, resolution: '2K', maxImages: 14, available: true }, // ✅ ОНОВЛЕНО: 15⚡ → 25⚡
+      { name: '🍌🍌 Nano Banana PRO 4K', key: 'nano_banana_4k', cost: 50, apiCost: 0.30, resolution: '4K', maxImages: 14, available: true }, // ✅ ОНОВЛЕНО: 30⚡ → 50⚡
+      { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 7, apiCost: 0.04, size: '2K', maxImages: 14, available: true }, // ✅ ОНОВЛЕНО: 4⚡ → 7⚡
+      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 14, apiCost: 0.08, size: '4K', maxImages: 14, available: true }, // ✅ ОНОВЛЕНО: 8⚡ → 14⚡
+      { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 3, apiCost: 0.01, maxImages: 1, available: true }, // ✅ ОНОВЛЕНО: 4⚡ → 3⚡
+      { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 6, apiCost: 0.03, maxImages: 1, available: true }, // ✅ ОНОВЛЕНО: 5⚡ → 6⚡
       { name: '🖼️ MidJourney', key: 'midjourney', cost: 4, apiCost: 0, available: false }
     ]
   },
@@ -56,35 +56,35 @@ module.exports = {
         '✨ Спробуйте всі моделі',
         '',
         '💡 Приклади використання:',
-        '• 5× Claude Text (2⚡)',
-        '• 2× Claude Vision (5⚡)',
-        '• 2× Seedream 2K (4⚡)',
-        '• 2× Clarity (4⚡)',
-        '• 1× Stable Diffusion (7⚡)',
+        '• 3× Claude Text (3⚡)',
+        '• 3× Clarity (3⚡)',
+        '• 1× Seedream 2K (7⚡)',
+        '• 1× Ideogram (6⚡)',
+        '• 1× Claude Vision (8⚡)',
         '',
         '⚡ Комбінуйте на свій розсуд!'
       ]
     },
     starter: {
       name: 'STARTER',
-      tokens: 100,
+      tokens: 150, // ✅ ПІДВИЩЕНО: 100⚡ → 150⚡
       price: 299,
       features: [
-        '🚀 100⚡ токенів на місяць',
+        '🚀 150⚡ токенів на місяць',
         '💎 Доступ до всіх моделей',
         '',
         '💡 Приклади використання:',
-        '• 50× Claude Text (2⚡)',
-        '• 20× Claude Vision (5⚡)',
-        '• 25× Seedream 2K (4⚡)',
-        '• 12× Seedream 4K (8⚡)',
-        '• 25× Clarity (4⚡)',
-        '• 20× Ideogram (5⚡)',
-        '• 14× Stable Diffusion (7⚡)',
-        '• 6× Nano Banana 2K (15⚡)',
-        '• 3× Nano Banana 4K (30⚡)',
-        '• 4× Runway Turbo (25⚡)',
-        '• 2× Kling відео (35⚡)',
+        '• 50× Claude Text (3⚡)',
+        '• 18× Claude Vision (8⚡)',
+        '• 21× Seedream 2K (7⚡)',
+        '• 10× Seedream 4K (14⚡)',
+        '• 50× Clarity (3⚡)',
+        '• 25× Ideogram (6⚡)',
+        '• 12× Stable Diffusion (12⚡)',
+        '• 6× Nano Banana 2K (25⚡)',
+        '• 3× Nano Banana 4K (50⚡)',
+        '• 3× Runway Turbo (42⚡)',
+        '• 2× Kling відео (60⚡)',
         '',
         '⚡ Токени - це валюта!',
         '🎨 Комбінуйте моделі як хочете'
@@ -92,24 +92,24 @@ module.exports = {
     },
     basic: {
       name: 'BASIC',
-      tokens: 300,
+      tokens: 450, // ✅ ПІДВИЩЕНО: 300⚡ → 450⚡
       price: 899,
       features: [
-        '💎 300⚡ токенів на місяць',
+        '💎 450⚡ токенів на місяць',
         '🎨 Для активних користувачів',
         '',
         '📊 Приклади використання:',
-        '• 150× Claude Text (2⚡)',
-        '• 60× Claude Vision (5⚡)',
-        '• 75× Seedream 2K (4⚡)',
-        '• 37× Seedream 4K (8⚡)',
-        '• 75× Clarity (4⚡)',
-        '• 60× Ideogram (5⚡)',
-        '• 42× Stable Diffusion (7⚡)',
-        '• 20× Nano Banana 2K (15⚡)',
-        '• 10× Nano Banana 4K (30⚡)',
-        '• 12× Runway Turbo (25⚡)',
-        '• 8× Kling (35⚡)',
+        '• 150× Claude Text (3⚡)',
+        '• 56× Claude Vision (8⚡)',
+        '• 64× Seedream 2K (7⚡)',
+        '• 32× Seedream 4K (14⚡)',
+        '• 150× Clarity (3⚡)',
+        '• 75× Ideogram (6⚡)',
+        '• 37× Stable Diffusion (12⚡)',
+        '• 18× Nano Banana 2K (25⚡)',
+        '• 9× Nano Banana 4K (50⚡)',
+        '• 10× Runway Turbo (42⚡)',
+        '• 7× Kling (60⚡)',
         '',
         '✨ Комбінуйте як завгодно!',
         '🎬 Більше відео та зображень'
@@ -117,24 +117,24 @@ module.exports = {
     },
     pro: {
       name: 'PRO',
-      tokens: 750,
+      tokens: 1100, // ✅ ПІДВИЩЕНО: 750⚡ → 1100⚡
       price: 1999,
       features: [
-        '🔥 750⚡ токенів на місяць',
+        '🔥 1100⚡ токенів на місяць',
         '🚀 Для професіоналів',
         '',
         '🎯 Приклади використання:',
-        '• 375× Claude Text (2⚡)',
-        '• 150× Claude Vision (5⚡)',
-        '• 187× Seedream 2K (4⚡)',
-        '• 93× Seedream 4K (8⚡)',
-        '• 187× Clarity (4⚡)',
-        '• 150× Ideogram (5⚡)',
-        '• 107× Stable Diffusion (7⚡)',
-        '• 50× Nano Banana 2K (15⚡)',
-        '• 25× Nano Banana 4K (30⚡)',
-        '• 30× Runway Turbo (25⚡)',
-        '• 21× Kling (35⚡)',
+        '• 366× Claude Text (3⚡)',
+        '• 137× Claude Vision (8⚡)',
+        '• 157× Seedream 2K (7⚡)',
+        '• 78× Seedream 4K (14⚡)',
+        '• 366× Clarity (3⚡)',
+        '• 183× Ideogram (6⚡)',
+        '• 91× Stable Diffusion (12⚡)',
+        '• 44× Nano Banana 2K (25⚡)',
+        '• 22× Nano Banana 4K (50⚡)',
+        '• 26× Runway Turbo (42⚡)',
+        '• 18× Kling (60⚡)',
         '',
         '✨ Пріоритетна підтримка',
         '⚡ Швидша обробка'
@@ -142,24 +142,24 @@ module.exports = {
     },
     premium: {
       name: 'PREMIUM',
-      tokens: 2000,
+      tokens: 2800, // ✅ ПІДВИЩЕНО: 2000⚡ → 2800⚡
       price: 4999,
       features: [
-        '👑 2000⚡ токенів на місяць',
+        '👑 2800⚡ токенів на місяць',
         '💫 Максимум можливостей',
         '',
         '🎨 Приклади використання:',
-        '• 1000× Claude Text (2⚡)',
-        '• 400× Claude Vision (5⚡)',
-        '• 500× Seedream 2K (4⚡)',
-        '• 250× Seedream 4K (8⚡)',
-        '• 500× Clarity (4⚡)',
-        '• 400× Ideogram (5⚡)',
-        '• 285× Stable Diffusion (7⚡)',
-        '• 133× Nano Banana 2K (15⚡)',
-        '• 66× Nano Banana 4K (30⚡)',
-        '• 80× Runway Turbo (25⚡)',
-        '• 57× Kling (35⚡)',
+        '• 933× Claude Text (3⚡)',
+        '• 350× Claude Vision (8⚡)',
+        '• 400× Seedream 2K (7⚡)',
+        '• 200× Seedream 4K (14⚡)',
+        '• 933× Clarity (3⚡)',
+        '• 466× Ideogram (6⚡)',
+        '• 233× Stable Diffusion (12⚡)',
+        '• 112× Nano Banana 2K (25⚡)',
+        '• 56× Nano Banana 4K (50⚡)',
+        '• 66× Runway Turbo (42⚡)',
+        '• 46× Kling (60⚡)',
         '',
         '👑 VIP підтримка 24/7',
         '⚡ Найвищий пріоритет',
