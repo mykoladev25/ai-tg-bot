@@ -17,7 +17,7 @@ module.exports = {
 
   video: {
     models: [
-      { name: '🎬 RunWay: Gen-4 Turbo ⚡', key: 'runway_turbo', cost: 25, apiCost: 0.25, available: true }, // ✅ ОНОВЛЕНО: 14⚡ → 25⚡
+      { name: '🎬 RunWay: Gen-4 Turbo ⚡', key: 'runway_turbo', cost: 30, apiCost: 0.25, available: true }, // ✅ ОНОВЛЕНО: 14⚡ → 25⚡
       { name: '🎭 Kling', key: 'kling', cost: 35, apiCost: 0.35, available: true }, // ✅ ОНОВЛЕНО: 30⚡ → 35⚡
       { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 50, apiCost: 0.9, available: false },
       { name: '🌊 MidJourney Video', key: 'midjourney_video', cost: 18, apiCost: 0, available: false },
