@@ -700,47 +700,35 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null) {
 
     // ✅ Перевірити розмір файлу ПЕРЕД видаленням statusMsg
     const fileSize = await getFileSize(result.imageUrl);
-    const maxTelegramSize = 10 * 1024 * 1024; // 10MB
-
     const maxPhotoSize = 10 * 1024 * 1024; // 10MB
-    const maxDocumentSize = 50 * 1024 * 1024; // 50MB
 
-    if (fileSize > maxDocumentSize) {
-      // 🔗 Занадто великий - тільки посилання (>50MB)
+    if (fileSize > maxPhotoSize) {
+      // 🔗 Файл завеликий - надіслати посилання
       const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
       
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `✅ <b>${model.name}</b> (${mode})\n\n` +
-        `📝 <b>Промпт:</b> ${prompt}\n\n` +
-        `📊 <b>Розмір:</b> ${fileSizeMB} MB (занадто великий)\n\n` +
-        `🔗 <a href="${result.imageUrl}">📥 Завантажити зображення</a>\n\n` +
-        `⏰ Посилання активне 1 годину\n` +
-        `💰 Витрачено: ${model.cost}⚡`,
-        {
-          parse_mode: 'HTML',
-          disable_web_page_preview: true
-        }
-      );
-      
-      await ctx.reply('☝️ Натисніть на посилання вище', keyboard.createBackButton('design_menu'));
-      
-    } else if (fileSize > maxPhotoSize) {
-      // 📄 Надіслати як документ (10-50MB)
-      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
-      
+      // ✅ Видалити statusMsg
       try {
         await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       } catch (e) {
         console.warn('Could not delete status message:', e.message);
       }
-
-      await ctx.replyWithDocument(
-        { url: result.imageUrl },
+      
+      // ✅ Надіслати нове повідомлення з посиланням
+      await ctx.reply(
+        `✅ <b>${model.name}</b> (${mode})\n\n` +
+        `📝 <b>Промпт:</b> ${prompt}\n\n` +
+        `📊 <b>Розмір:</b> ${fileSizeMB} MB\n` +
+        `⚠️ Файл завеликий для відправки в Telegram\n\n` +
+        `🔗 <a href="${result.imageUrl}">📥 Натисніть тут щоб завантажити PNG файл</a>\n\n` +
+        `💡 <b>Як завантажити:</b>\n` +
+        `• Натисніть на посилання вище ☝️\n` +
+        `• Файл автоматично завантажиться\n` +
+        `• Відкрийте його на телефоні/комп'ютері\n\n` +
+        `⏰ Посилання активне 1 годину\n` +
+        `💰 Витрачено: ${model.cost}⚡`,
         {
-          caption: `${model.name} (${mode})\n\n📝 Промпт: ${prompt}\n\n📊 Розмір: ${fileSizeMB} MB\n💰 Витрачено: ${model.cost}⚡`,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
           ...keyboard.createBackButton('design_menu')
         }
       );
