@@ -21,20 +21,19 @@ const models = require('./config/models');
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 const isDevelopment = process.env.NODE_ENV === 'development';
+const isShowBroadCast = process.env.SEND_STARTUP_BROADCAST === 'true' && false;
 
 if (isDevelopment) {
   console.log('🛠️ Development mode - maintenance message enabled');
   
   bot.use(async (ctx, next) => {
-    // Дозволити адміну використовувати бота
     const adminId = parseInt(process.env.ADMIN_TELEGRAM_ID || '0');
     
     if (ctx.from.id === adminId) {
       console.log(`✅ Admin ${ctx.from.id} bypassed maintenance`);
-      return next(); // Адмін проходить далі
+      return next();
     }
     
-    // Для всіх інших - заглушка
     await ctx.reply(
       '🛠️ Бот тимчасово недоступний\n\n' +
       '⚙️ Триває технічне обслуговування\n' +
@@ -46,11 +45,9 @@ if (isDevelopment) {
   });
 }
 
-// ✅ Зберігаємо поточну модель в пам'яті (не в БД!)
-const userCurrentModel = new Map(); // userId → modelKey
-
-// Зберігаємо стан генерації для кожного користувача
+const userCurrentModel = new Map();
 const userState = new Map();
+const mediaGroups = new Map();
 
 const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || '@nnn_ddddddd';
 
@@ -74,14 +71,12 @@ const INSTRUCTION_HTML = `
 - Надішліть текстовий опис
 - Відео буде готове <i>за 2–5 хвилин</i>
 
-
 💰 <b>Токени ⚡</b>
 - <b>Кожна генерація списує токени</b>
 - 🎁 <b>Безкоштовно:</b> 10⚡ при реєстрації
 - 💎 Купіть підписку для більшої кількості
 
 <i>⚡ Тарифи вказані біля кожної моделі</i>
-
 
 📜 <b>Політика білінгу</b>
 
@@ -189,9 +184,7 @@ bot.command('clear', async (ctx) => {
 
 bot.hears('💡 Базові помічники', async (ctx) => {
   await ctx.reply(
-    `💡 Claude\n\n` +
-    `💎 Claude - преміум якість\n\n` +
-    `Оберіть режим роботи 👇`,
+    `💡 Claude\n\n💎 Claude - преміум якість\n\nОберіть режим роботи 👇`,
     keyboard.createGPTActionsMenu(models.gpt.actions)
   );
 });
@@ -203,7 +196,7 @@ bot.hears('🎬 Створення відео', async (ctx) => {
   );
 });
 
-bot.hears('🎨 Створення зображень', async (ctx) => {
+bot.hears('🎨 Створення/редагування зображень', async (ctx) => {
   await ctx.reply(
     '🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇',
     keyboard.createInlineMenu(models.design.models, 1)
@@ -234,7 +227,6 @@ bot.hears('📄 Інструкція', async (ctx) => {
 
 // ==================== CALLBACK HANDLERS ====================
 
-// GPT Actions
 bot.action('gpt_text', async (ctx) => {
   await ctx.answerCbQuery();
   userCurrentModel.set(ctx.from.id, 'claude_text');
@@ -242,7 +234,7 @@ bot.action('gpt_text', async (ctx) => {
     '✍️ Режим Claude активовано! 💎\n\n' +
     'Надішліть мені ваше запитання, і я відповім текстом.\n\n' +
     '💡 Claude Sonnet 4.5 - найкраща якість\n' +
-    '💰 Вартість: 0.5⚡ за запит\n' +
+    '💰 Вартість: 1⚡ за запит\n' +
     '💡 Підказка: Я запам\'ятовую контекст розмови.',
     keyboard.createBackButton()
   );
@@ -255,7 +247,7 @@ bot.action('gpt_voice', async (ctx) => {
     '🎙️ Режим голосової розмови активовано! 🆓\n\n' +
     'Надішліть голосове повідомлення, і я перетворю його в текст та відповім.\n\n' +
     '💡 Groq Whisper - безкоштовна транскрипція\n' +
-    '💰 Відповідь через Claude: 0.5⚡',
+    '💰 Відповідь через Claude: 1⚡',
     keyboard.createBackButton()
   );
 });
@@ -266,17 +258,14 @@ bot.action('gpt_image', async (ctx) => {
   await ctx.reply(
     '🖼️ Режим Claude Vision активовано! 💎\n\n' +
     'Надішліть мені зображення з підписом (або без), і я його проаналізую.\n\n' +
-    '💰 Вартість: 1⚡ за аналіз',
+    '💰 Вартість: 3⚡ за аналіз',
     keyboard.createBackButton()
   );
 });
 
 bot.action('new_conversation', async (ctx) => {
   await ctx.answerCbQuery('Історію очищено!');
-
-  const userId = ctx.from.id;
-  await userBalance.clearConversationHistory(userId);
-
+  await userBalance.clearConversationHistory(ctx.from.id);
   await ctx.reply(
     '✅ Нову розмову розпочато! 👋\n\nНадішліть своє повідомлення.',
     keyboard.createGPTActionsMenu(models.gpt.actions)
@@ -284,7 +273,7 @@ bot.action('new_conversation', async (ctx) => {
 });
 
 // Design Models
-bot.action(/^(midjourney|flux|nano_banana|stable_diffusion|seedream|clarity|ideogram)$/, async (ctx) => {
+bot.action(/^(midjourney|flux|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_2k|seedream_4k|clarity|ideogram)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
   
@@ -307,25 +296,17 @@ bot.action(/^(midjourney|flux|nano_banana|stable_diffusion|seedream|clarity|ideo
   
   userCurrentModel.set(ctx.from.id, modelKey);
 
-  if (modelKey === 'clarity') {
-    await ctx.reply(
-      `${model.name}\n\n` +
-      `🔮 Покращення якості зображень\n\n` +
-      `Надішліть фото, яке хочете покращити.\n` +
-      `Можете додати підпис (опис) для кращого результату.\n\n` +
-      `💰 Вартість: ${model.cost}⚡\n` +
-      `📈 Збільшення: 2x (scale factor)\n` +
-      `⏱️ Час обробки: ~30-60 секунд`,
-      keyboard.createBackButton('design_menu')
-    );
-  } else {
-    await ctx.reply(
-      `${model.name}\n\n` +
-      `Надішліть текстовий опис зображення, яке хочете згенерувати.\n\n` +
-      `Вартість: ${model.cost > 0 ? model.cost + '⚡' : 'Безкоштовно'}`,
-      keyboard.createBackButton('design_menu')
-    );
-  }
+  const messages = {
+    clarity: `${model.name}\n\n🔮 Покращення якості зображень\n\nНадішліть фото, яке хочете покращити.\nМожете додати підпис (опис) для кращого результату.\n\n💰 Вартість: ${model.cost}⚡\n📈 Збільшення: 2x (scale factor)\n⏱️ Час обробки: ~30-60 секунд`,
+    stable_diffusion: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~30-40 секунд`,
+    ideogram: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~30-40 секунд`,  
+    nano_banana: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💡 Підтримка до 14 зображень одночасно!\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~20-30 секунд`
+  };
+
+  await ctx.reply(
+    messages[modelKey] || `${model.name}\n\nНадішліть текстовий опис зображення, яке хочете згенерувати.\n\nВартість: ${model.cost > 0 ? model.cost + '⚡' : 'Безкоштовно'}`,
+    keyboard.createBackButton('design_menu')
+  );
 });
 
 // Video Models
@@ -348,10 +329,7 @@ bot.action(/^(kling|runway_gen4|runway_turbo|luma)$/, async (ctx) => {
   userCurrentModel.set(ctx.from.id, modelKey);
   
   await ctx.reply(
-    `${model.name}\n\n` +
-    `Надішліть текстовий опис відео, яке хочете згенерувати, або надішліть картинку з підписом/описом.\n\n` +
-    `⏱️ Генерація займе 2-5 хвилин\n` +
-    `💰 Вартість: ${model.cost}⚡`,
+    `${model.name}\n\nНадішліть текстовий опис відео, яке хочете згенерувати, або надішліть картинку з підписом/описом.\n\n⏱️ Генерація займе 2-5 хвилин\n💰 Вартість: ${model.cost}⚡`,
     keyboard.createBackButton('video_menu')
   );
 });
@@ -381,26 +359,18 @@ bot.action(/^(suno|udio|elevenlabs)$/, async (ctx) => {
   userCurrentModel.set(ctx.from.id, modelKey);
 
   await ctx.reply(
-    `${model.name}\n\n` +
-    `🎵 Генерація аудіо\n\n` +
-    `Надішліть текст для озвучення.\n\n` +
-    `💰 Вартість: ${model.cost}⚡\n` +
-    `⏱️ Час генерації: ~20-40 секунд`,
+    `${model.name}\n\n🎵 Генерація аудіо\n\nНадішліть текст для озвучення.\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час генерації: ~20-40 секунд`,
     keyboard.createBackButton('audio_menu')
   );
 });
 
-// Audio Navigation
+// Navigation
 bot.action('audio_menu', async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.deleteMessage();
-  await ctx.reply(
-    '🎙️ Аудіо з AI\n\nВиберіть розділ для роботи з аудіо 👇',
-    keyboard.createInlineMenu(models.audio.models, 2)
-  );
+  await ctx.reply('🎙️ Аудіо з AI\n\nВиберіть розділ для роботи з аудіо 👇', keyboard.createInlineMenu(models.audio.models, 2));
 });
 
-// Navigation
 bot.action('main_menu', async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.deleteMessage();
@@ -410,36 +380,23 @@ bot.action('main_menu', async (ctx) => {
 bot.action('design_menu', async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.deleteMessage();
-  await ctx.reply(
-    '🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇',
-    keyboard.createInlineMenu(models.design.models, 1)
-  );
+  await ctx.reply('🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇', keyboard.createInlineMenu(models.design.models, 1));
 });
 
 bot.action('video_menu', async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.deleteMessage();
-  await ctx.reply(
-    '🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇',
-    keyboard.createInlineMenu(models.video.models, 1)
-  );
+  await ctx.reply('🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇', keyboard.createInlineMenu(models.video.models, 1));
 });
 
 // Subscription
 bot.action('buy_subscription', async (ctx) => {
-await ctx.answerCbQuery();
-  
-  const message = `💎 Оберіть підписку\n\n` +
-    `💎 Claude - платний, якісний\n\n` +
-    `Виберіть план 👇`;
-  
-  await ctx.reply(message, keyboard.createSubscriptionsMenu());
+  await ctx.answerCbQuery();
+  await ctx.reply(`💎 Оберіть підписку\n\n💎 Claude - платний, якісний\n\nВиберіть план 👇`, keyboard.createSubscriptionsMenu());
 });
 
-// Community button
 bot.action('community', async (ctx) => {
   await ctx.answerCbQuery();
-
   const message = `👥 <b>Спільнота neuro\u200B.lab\u200B.ai</b>
 
 👩‍💼 <b>Авторка:</b> Анастасія Черевань
@@ -453,11 +410,7 @@ bot.action('community', async (ctx) => {
 
 Приєднуйтесь до нашої спільноти! 🚀`;
 
-  await ctx.reply(message, {
-    parse_mode: 'HTML',
-    disable_web_page_preview: false,
-    ...keyboard.createBackButton()
-  });
+  await ctx.reply(message, { parse_mode: 'HTML', disable_web_page_preview: false, ...keyboard.createBackButton() });
 });
 
 bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
@@ -517,7 +470,7 @@ bot.on('successful_payment', async (ctx) => {
   const payload = JSON.parse(ctx.message.successful_payment.invoice_payload);
   
   if (payload.type === 'subscription') {
-    const planKey = payload.plan; // 'starter', 'basic', 'pro', або 'premium'
+    const planKey = payload.plan;
     const sub = models.subscriptions[planKey];
     
     if (!sub) {
@@ -525,20 +478,13 @@ bot.on('successful_payment', async (ctx) => {
       return;
     }
     
-    await userBalance.addTokens(userId, sub.tokens, 'subscription_purchase', {
-      plan: sub.name,
-      price: sub.price
-    });
+    await userBalance.addTokens(userId, sub.tokens, 'subscription_purchase', { plan: sub.name, price: sub.price });
     await userBalance.setSubscription(userId, sub.name, 30);
     
     const user = await userBalance.getUser(userId, ctx.from);
     
     await ctx.reply(
-      `✅ Оплата успішна!\n\n` +
-      `🎉 Ви отримали ${sub.tokens}⚡ токенів\n` +
-      `💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n` +
-      `📦 Підписка: ${sub.name}\n\n` +
-      `Дякуємо за підтримку! 💙`,
+      `✅ Оплата успішна!\n\n🎉 Ви отримали ${sub.tokens}⚡ токенів\n💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n📦 Підписка: ${sub.name}\n\nДякуємо за підтримку! 💙`,
       keyboard.createMainMenu()
     );
   }
@@ -548,61 +494,50 @@ bot.on('successful_payment', async (ctx) => {
 
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
-  const currentModel = await userCurrentModel.get(userId);
+  const currentModel = userCurrentModel.get(userId);
   const text = ctx.message.text;
   
   if (text.startsWith('/')) return;
   
   if (!currentModel) {
-    await ctx.reply(
-      'Будь ласка, спочатку виберіть модель з меню 👇',
-      keyboard.createMainMenu()
-    );
+    await ctx.reply('Будь ласка, спочатку виберіть модель з меню 👇', keyboard.createMainMenu());
     return;
   }
   
   if (currentModel === 'clarity') {
-    await ctx.reply(
-      '🔮 Clarity Upscaler чекає на зображення.\n\nНадішліть фото для покращення якості.',
-      keyboard.createGPTActionsMenu(models.design.models)
-    );
+    await ctx.reply('🔮 Clarity Upscaler чекає на зображення.\n\nНадішліть фото для покращення якості.', keyboard.createGPTActionsMenu(models.design.models));
     return;
   }
   
-  // Роутинг по моделях
-  if (currentModel === 'claude_vision' || currentModel === 'claude_text' || currentModel === 'claude' || currentModel === 'claude_voice') {
-    await handleClaudeText(ctx, text);
-  } else if (currentModel === 'midjourney') {
-    await handleMidjourneyGeneration(ctx, text);
-  } else if (currentModel === 'flux') {
-    await handleFluxGeneration(ctx, text);
-  } else if (currentModel === 'stable_diffusion') {
-    await handleStableDiffusionGeneration(ctx, text);
-  } else if (currentModel === 'nano_banana') {
-    await handleNanoBananaGeneration(ctx, text);
-  } else if (currentModel === 'seedream') {
-    await handleSeedreamGeneration(ctx, text);
-  } else if (currentModel === 'ideogram') {
-    await handleIdeogramGeneration(ctx, text);
-  } else if (currentModel === 'kling') {
-    await handleKlingVideo(ctx, text);
-  } else if (currentModel === 'runway_gen4') {
-    await handleRunwayVideo(ctx, text);
-  } else if (currentModel === 'runway_turbo') {
-    await handleRunwayTurboVideo(ctx, text);
-  } else if (currentModel === 'suno') {
-    await handleSunoGeneration(ctx, text);
+  const handlers = {
+    claude_vision: () => handleClaudeText(ctx, text),
+    claude_text: () => handleClaudeText(ctx, text),
+    claude: () => handleClaudeText(ctx, text),
+    claude_voice: () => handleClaudeText(ctx, text),
+    midjourney: () => handleMidjourneyGeneration(ctx, text),
+    flux: () => handleImageGeneration(ctx, text, 'flux'),
+    stable_diffusion: () => handleImageGeneration(ctx, text, 'stable_diffusion'),
+    nano_banana_2k: () => handleImageGeneration(ctx, text, 'nano_banana_2k'),
+    nano_banana_4k: () => handleImageGeneration(ctx, text, 'nano_banana_4k'),
+    seedream_2k: () => handleImageGeneration(ctx, text, 'seedream_2k'),
+    seedream_4k: () => handleImageGeneration(ctx, text, 'seedream_4k'),
+    ideogram: () => handleImageGeneration(ctx, text, 'ideogram'),
+    kling: () => handleVideoGeneration(ctx, text, 'kling'),
+    runway_gen4: () => handleVideoGeneration(ctx, text, 'runway_gen4'),
+    runway_turbo: () => handleVideoGeneration(ctx, text, 'runway_turbo'),
+    suno: () => handleSunoGeneration(ctx, text)
+  };
+  
+  if (handlers[currentModel]) {
+    await handlers[currentModel]();
   } else {
-    await ctx.reply(
-      `Модель "${currentModel}" ще не підтримується.\nВиберіть іншу модель.`,
-      keyboard.createMainMenu()
-    );
+    await ctx.reply(`Модель "${currentModel}" ще не підтримується.\nВиберіть іншу модель.`, keyboard.createMainMenu());
   }
 });
 
 bot.on('voice', async (ctx) => {
   const userId = ctx.from.id;
-  const currentModel = await userCurrentModel.get(userId);
+  const currentModel = userCurrentModel.get(userId);
 
   if (currentModel !== 'claude_voice') {
     await ctx.reply('Спочатку активуйте голосовий режим через "💡 Базові помічники" → 🎙️ Говоріть');
@@ -616,73 +551,282 @@ bot.on('voice', async (ctx) => {
     const transcription = await groqWhisper.transcribeVoice(fileLink.href);
 
     if (!transcription.success) {
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка розпізнавання: ${transcription.error}`
-      );
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка розпізнавання: ${transcription.error}`);
       return;
     }
 
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      `📝 Розпізнано: "${transcription.text}"\n\n🤔 Думаю...`
-    );
-
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `📝 Розпізнано: "${transcription.text}"\n\n🤔 Думаю...`);
     await handleClaudeText(ctx, transcription.text);
 
   } catch (error) {
     console.error('Voice processing error:', error);
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка обробки голосу. Спробуйте ще раз.'
-    );
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Помилка обробки голосу. Спробуйте ще раз.');
   }
 });
 
 bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
-  const currentModel = await userCurrentModel.get(userId);
-  const videoModelsAcceptingImage = ['kling', 'runway_gen4', 'runway_turbo'];
+  const currentModel = userCurrentModel.get(userId);
+  const mediaGroupId = ctx.message.media_group_id;
+
+  // Обробка альбомів
+  if (mediaGroupId) {
+    if (!mediaGroups.has(mediaGroupId)) {
+      mediaGroups.set(mediaGroupId, { photos: [], caption: ctx.message.caption || '', userId, currentModel, timeout: null });
+    }
+
+    const group = mediaGroups.get(mediaGroupId);
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    const file = await ctx.telegram.getFile(photo.file_id);
+    const photoUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+    group.photos.push(photoUrl);
+
+    if (ctx.message.caption) group.caption = ctx.message.caption;
+    if (group.timeout) clearTimeout(group.timeout);
+
+    group.timeout = setTimeout(async () => {
+      const finalGroup = mediaGroups.get(mediaGroupId);
+      mediaGroups.delete(mediaGroupId);
+      console.log(`📸 Album received: ${finalGroup.photos.length} photos`);
+      await handleMediaGroup(ctx, finalGroup);
+    }, 500);
+
+    return;
+  }
+
+  // Обробка одного фото
+  const videoModels = ['kling', 'runway_gen4', 'runway_turbo'];
+  const imageModels = ['nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_2k', 'seedream_4k', 'ideogram'];
+  const prompt = ctx.message.caption || 'transform this image, masterpiece quality, highly detailed';
 
   if (currentModel === 'claude_vision') {
     await handleClaudeVision(ctx);
   } else if (currentModel === 'clarity') {
     await handleClarityUpscaler(ctx);
-  } else if (videoModelsAcceptingImage.includes(currentModel)) {
-    const prompt = ctx.message.caption || '';
-    if (currentModel === 'kling') {
-      await handleKlingVideo(ctx, prompt);
-    } else if (currentModel === 'runway_gen4') {
-      await handleRunwayVideo(ctx, prompt);
-    } else if (currentModel === 'runway_turbo') {
-      await handleRunwayTurboVideo(ctx, prompt);
-    }
+  } else if (imageModels.includes(currentModel)) {
+    await handleImageGeneration(ctx, prompt, currentModel);
+  } else if (videoModels.includes(currentModel)) {
+    await handleVideoGeneration(ctx, prompt, currentModel);
   } else {
-    await ctx.reply(
-      'Для аналізу зображень виберіть режим "💡 Claude" → "🖼️ Завантажте зображення"',
-      keyboard.createGPTActionsMenu(models.gpt.actions)
-    );
+    await ctx.reply('Для аналізу зображень виберіть режим "💡 Claude" → "🖼️ Завантажте зображення"', keyboard.createGPTActionsMenu(models.gpt.actions));
   }
 });
 
-// ==================== ГЕНЕРАЦІЯ ====================
+// ==================== UNIFIED HANDLERS ====================
+
+async function handleMediaGroup(ctx, group) {
+  const { photos, caption, currentModel } = group;
+  const model = models.design.models.find(m => m.key === currentModel);
+
+  // ✅ Перевірити чи модель підтримує багато зображень
+  if (model?.maxImages && model.maxImages > 1) {
+    await handleImageGeneration(ctx, caption, currentModel, photos);
+  } else {
+    await ctx.reply(
+      `📸 Отримано ${photos.length} фото.\n\n` +
+      `⚠️ ${model?.name || 'Ця модель'} підтримує тільки 1 зображення.\n` +
+      `Обробляю перше фото...`
+    );
+    const prompt = caption || 'transform this image, best quality, highly detailed';
+    await handleImageGeneration(ctx, prompt, currentModel, photos[0]);
+  }
+}
+
+async function getImageUrl(ctx) {
+  if (!ctx.message?.photo) return null;
+  const photo = ctx.message.photo[ctx.message.photo.length - 1];
+  const file = await ctx.telegram.getFile(photo.file_id);
+  return `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+}
+
+async function validateImageCount(photos, maxCount = 14) {
+  if (!photos || !Array.isArray(photos)) return photos;
+  if (photos.length <= maxCount) return photos;
+  return photos.slice(0, maxCount);
+}
+
+async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const model = models.design.models.find(m => m.key === modelKey);
+
+  if (!(await userBalance.hasTokens(userId, model.cost))) {
+    await showInsufficientTokens(ctx, model.cost);
+    return;
+  }
+
+  if (!imageInput && ctx.message?.photo) {
+    imageInput = await getImageUrl(ctx);
+  }
+
+  if (model.maxImages && Array.isArray(imageInput)) {
+    const originalCount = imageInput.length;
+    imageInput = await validateImageCount(imageInput, model.maxImages);
+    
+    if (originalCount > model.maxImages) {
+      await ctx.reply(
+        `⚠️ ${model.name} підтримує до ${model.maxImages} зображень.\n\n` +
+        `Ви надіслали ${originalCount} фото.\n` +
+        `Обробляю перші ${model.maxImages}...`
+      );
+    }
+  }
+
+  const isAlbum = Array.isArray(imageInput) && imageInput.length > 1;
+  const mode = imageInput ? (isAlbum ? `album (${imageInput.length})` : 'img2img') : 'text2img';
+
+  const statusMsg = await ctx.reply(`${model.name} генерація (${mode})...\n\nПромпт: "${prompt}"`);
+
+  try {
+    const replicateFunctions = {
+      flux: () => replicate.generateWithFlux(prompt),
+      stable_diffusion: () => replicate.generateWithStableDiffusion(prompt, imageInput),
+      nano_banana_2k: () => replicate.generateWithNanoBanana(prompt, imageInput, '2K'),
+      nano_banana_4k: () => replicate.generateWithNanoBanana(prompt, imageInput, '4K'),
+      seedream_2k: () => replicate.generateWithSeedream(prompt, imageInput, '2K'),
+      seedream_4k: () => replicate.generateWithSeedream(prompt, imageInput, '4K'),
+      ideogram: () => replicate.generateWithIdeogram(prompt, imageInput, 0.5)
+    };
+
+    const result = await replicateFunctions[modelKey]();
+
+    if (!result.success) {
+      await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_generation`, model: model.name, prompt, hasImage: !!imageInput });
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка генерації.\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`);
+      return;
+    }
+
+    await userBalance.deductTokens(userId, model.cost, `${model.name} generation`, { modelKey, modelName: model.name, apiCost: model.apiCost, prompt, hasImage: !!imageInput });
+
+    // ✅ Перевірити розмір файлу ПЕРЕД видаленням statusMsg
+    const fileSize = await getFileSize(result.imageUrl);
+    const maxTelegramSize = 10 * 1024 * 1024; // 10MB
+
+    const maxPhotoSize = 10 * 1024 * 1024; // 10MB
+    const maxDocumentSize = 50 * 1024 * 1024; // 50MB
+
+    if (fileSize > maxDocumentSize) {
+      // 🔗 Занадто великий - тільки посилання (>50MB)
+      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+      
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `✅ <b>${model.name}</b> (${mode})\n\n` +
+        `📝 <b>Промпт:</b> ${prompt}\n\n` +
+        `📊 <b>Розмір:</b> ${fileSizeMB} MB (занадто великий)\n\n` +
+        `🔗 <a href="${result.imageUrl}">📥 Завантажити зображення</a>\n\n` +
+        `⏰ Посилання активне 1 годину\n` +
+        `💰 Витрачено: ${model.cost}⚡`,
+        {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        }
+      );
+      
+      await ctx.reply('☝️ Натисніть на посилання вище', keyboard.createBackButton('design_menu'));
+      
+    } else if (fileSize > maxPhotoSize) {
+      // 📄 Надіслати як документ (10-50MB)
+      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+      
+      try {
+        await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+      } catch (e) {
+        console.warn('Could not delete status message:', e.message);
+      }
+
+      await ctx.replyWithDocument(
+        { url: result.imageUrl },
+        {
+          caption: `${model.name} (${mode})\n\n📝 Промпт: ${prompt}\n\n📊 Розмір: ${fileSizeMB} MB\n💰 Витрачено: ${model.cost}⚡`,
+          ...keyboard.createBackButton('design_menu')
+        }
+      );
+      
+    } else {
+      // 📷 Надіслати як фото (<10MB)
+      try {
+        await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+      } catch (e) {
+        console.warn('Could not delete status message:', e.message);
+      }
+
+      await ctx.replyWithPhoto({ url: result.imageUrl }, {
+        caption: `${model.name} (${mode})\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
+        ...keyboard.createBackButton('design_menu')
+      });
+    }
+
+  } catch (error) {
+    console.error(`${modelKey} generation failed:`, error);
+    await adminNotifier.notifyAdmin(bot, error, { userId, username, action: `${modelKey}_generation`, model: model.name, prompt });
+    
+    // ✅ НЕ видаляти statusMsg, а редагувати його
+    try {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        '❌ Помилка генерації. Спробуйте іншу модель.'
+      );
+    } catch (e) {
+      // Якщо не можемо редагувати - надіслати нове повідомлення
+      await ctx.reply('❌ Помилка генерації. Спробуйте іншу модель.', keyboard.createBackButton('design_menu'));
+    }
+  }
+}
+
+async function handleVideoGeneration(ctx, prompt, modelKey) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const model = models.video.models.find(m => m.key === modelKey);
+
+  if (!(await userBalance.hasTokens(userId, model.cost))) {
+    await showInsufficientTokens(ctx, model.cost);
+    return;
+  }
+
+  const imageUrl = await getImageUrl(ctx);
+  const statusMsg = await ctx.reply(`🎬 Генерую відео через ${model.name}...\n⏱️ Це може зайняти 2-5 хвилин\n\nПромпт: "${prompt}"`);
+
+  try {
+    const videoFunctions = {
+      kling: replicate.generateVideoWithKling,
+      runway_gen4: replicate.generateVideoWithRunway,
+      runway_turbo: replicate.generateVideoWithRunwayTurbo
+    };
+
+    const result = await videoFunctions[modelKey](prompt, imageUrl);
+
+    if (!result.success) {
+      await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_video_generation`, model: model.name, prompt, hasImage: !!imageUrl });
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка генерації відео.\n\nСпробуйте іншу модель або повторіть пізніше.`);
+      return;
+    }
+
+    await userBalance.deductTokens(userId, model.cost, `${model.name} generation`, { modelKey, modelName: model.name, apiCost: model.apiCost, prompt, hasImage: !!imageUrl });
+    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+    await ctx.replyWithVideo({ url: result.videoUrl }, {
+      caption: `${model.name}\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
+      ...keyboard.createBackButton('video_menu')
+    });
+
+  } catch (error) {
+    console.error(`${modelKey} video generation failed:`, error);
+    await adminNotifier.notifyAdmin(bot, error, { userId, username, action: `${modelKey}_video_generation`, model: model.name, prompt, hasImage: !!imageUrl });
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Помилка генерації відео. Спробуйте іншу модель.');
+  }
+}
+
+// ==================== SPECIFIC HANDLERS ====================
 
 async function handleClaudeText(ctx, text) {
   const userId = ctx.from.id;
   const textModel = models.gpt.actions.find(a => a.key === 'text');
   
-  if (!textModel) {
-    await ctx.reply('❌ Модель не знайдено');
-    return;
-  }
-  
-  if (!(await userBalance.hasTokens(userId, textModel.cost))) {
+  if (!textModel || !(await userBalance.hasTokens(userId, textModel.cost))) {
     await showInsufficientTokens(ctx, textModel.cost);
     return;
   }
@@ -695,27 +839,11 @@ async function handleClaudeText(ctx, text) {
     if (response.success) {
       await userBalance.saveConversationMessage(userId, 'user', text);
       await userBalance.saveConversationMessage(userId, 'assistant', response.text);
-      
-      await userBalance.deductTokens(
-        userId,
-        textModel.cost,
-        'Claude текстова генерація',
-        {
-          modelKey: 'claude_text',
-          modelName: 'Claude Sonnet 4.5',
-          apiCost: textModel.apiCost
-        }
-      );
-      
+      await userBalance.deductTokens(userId, textModel.cost, 'Claude текстова генерація', { modelKey: 'claude_text', modelName: 'Claude Sonnet 4.5', apiCost: textModel.apiCost });
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       await ctx.reply(response.text);
     } else {
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка: ${response.error}`
-      );
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка: ${response.error}`);
     }
   } catch (error) {
     console.error('Claude text error:', error);
@@ -734,41 +862,20 @@ async function handleClaudeVision(ctx) {
 
   try {
     const statusMsg = await ctx.reply('👀 Аналізую зображення...');
-
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const file = await ctx.telegram.getFile(photo.file_id);
-    const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-
-    const imageResponse = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+    const imageUrl = await getImageUrl(ctx);
+    const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBase64 = Buffer.from(imageResponse.data).toString('base64');
-
     const prompt = ctx.message.caption || 'Опишіть це зображення детально.';
     const response = await claude.analyzeImageWithClaude(imageBase64, prompt, 'image/jpeg');
 
     if (response.success) {
       await userBalance.saveConversationMessage(userId, 'user', `[Зображення] ${prompt}`);
       await userBalance.saveConversationMessage(userId, 'assistant', response.text);
-
-      await userBalance.deductTokens(
-        userId, 
-        model.cost, 
-        'Claude аналіз зображення',
-        {
-          modelKey: 'claude_vision',
-          modelName: 'Claude Vision',
-          apiCost: model.apiCost
-        }
-      );
-
+      await userBalance.deductTokens(userId, model.cost, 'Claude аналіз зображення', { modelKey: 'claude_vision', modelName: 'Claude Vision', apiCost: model.apiCost });
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       await ctx.reply(response.text);
     } else {
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка: ${response.error}`
-      );
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка: ${response.error}`);
     }
   } catch (error) {
     console.error('Claude vision error:', error);
@@ -785,44 +892,21 @@ async function handleMidjourneyGeneration(ctx, prompt) {
     return;
   }
 
-  const statusMsg = await ctx.reply(
-    `🎨 Генерую зображення через Midjourney...\n\n` +
-    `⏱️ Це займе ~30-60 секунд`
-  );
+  const statusMsg = await ctx.reply(`🎨 Генерую зображення через Midjourney...\n\n⏱️ Це займе ~30-60 секунд`);
   
   try {
     const result = await midjourney.generateImage(prompt);
     
     if (result.success) {
-      await userBalance.deductTokens(
-        userId, 
-        model.cost, 
-        'Midjourney generation',
-        {
-          modelKey: 'midjourney',
-          modelName: model.name,
-          apiCost: model.apiCost,
-          prompt
-        }
-      );
-      
+      await userBalance.deductTokens(userId, model.cost, 'Midjourney generation', { modelKey: 'midjourney', modelName: model.name, apiCost: model.apiCost, prompt });
       const user = await userBalance.getUser(userId, ctx.from);
-      
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      await ctx.replyWithPhoto(
-        { url: result.imageUrl },
-        {
-          caption: `✅ Готово!\n\nPrompt: ${prompt}\n\n💰 Використано: ${model.cost}⚡\n💰 Залишок: ${user.tokens.toFixed(2)}⚡`,
-          ...keyboard.createGenerationActionsMenu(result.taskId)
-        }
-      );
+      await ctx.replyWithPhoto({ url: result.imageUrl }, {
+        caption: `✅ Готово!\n\nPrompt: ${prompt}\n\n💰 Використано: ${model.cost}⚡\n💰 Залишок: ${user.tokens.toFixed(2)}⚡`,
+        ...keyboard.createGenerationActionsMenu(result.taskId)
+      });
     } else {
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації: ${result.error}`
-      );
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка генерації: ${result.error}`);
     }
   } catch (error) {
     console.error('Midjourney error:', error);
@@ -830,313 +914,8 @@ async function handleMidjourneyGeneration(ctx, prompt) {
   }
 }
 
-async function handleFluxGeneration(ctx, prompt) {
-  const userId = ctx.from.id;
-  const username = ctx.from.username || 'unknown';
-  const model = models.design.models.find(m => m.key === 'flux');
-
-  if (!(await userBalance.hasTokens(userId, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
-    return;
-  }
-
-  const statusMsg = await ctx.reply(
-    `💎 Генерую через FLUX 1.1 Pro...\n\n` +
-    `Промпт: "${prompt}"`
-  );
-
-  try {
-    const result = await replicate.generateWithFlux(prompt);
-
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId,
-        username,
-        action: 'flux_generation',
-        model: 'FLUX 1.1 Pro',
-        prompt
-      });
-
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації.\n\nСпробуйте іншу модель або повторіть пізніше.`
-      );
-      return;
-    }
-
-    await userBalance.deductTokens(
-      userId,
-      model.cost,
-      'FLUX generation',
-      {
-        modelKey: 'flux',
-        modelName: model.name,
-        apiCost: model.apiCost,
-        prompt
-      }
-    );
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithPhoto(
-      { url: result.imageUrl },
-      {
-        caption: `💎 FLUX 1.1 Pro\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('design_menu')
-      }
-    );
-
-  } catch (error) {
-    console.error('FLUX generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, {
-      userId,
-      username,
-      action: 'flux_generation',
-      model: 'FLUX 1.1 Pro',
-      prompt
-    });
-
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка генерації. Спробуйте іншу модель.'
-    );
-  }
-}
-
-async function handleStableDiffusionGeneration(ctx, prompt) {
-  const userId = ctx.from.id;
-  const username = ctx.from.username || 'unknown';
-  const model = models.design.models.find(m => m.key === 'stable_diffusion');
-
-  if (!(await userBalance.hasTokens(userId, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
-    return;
-  }
-
-  const statusMsg = await ctx.reply(
-    `🌀 Генерую через Stable Diffusion...\n\n` +
-    `Промпт: "${prompt}"`
-  );
-
-  try {
-    const result = await replicate.generateWithStableDiffusion(prompt);
-
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId,
-        username,
-        action: 'stable_diffusion_generation',
-        model: 'Stable Diffusion SDXL',
-        prompt
-      });
-
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації.\n\nСпробуйте іншу модель або повторіть пізніше.`
-      );
-      return;
-    }
-
-    await userBalance.deductTokens(
-      userId,
-      model.cost,
-      'Stable Diffusion generation',
-      {
-        modelKey: 'stable_diffusion',
-        modelName: model.name,
-        apiCost: model.apiCost,
-        prompt
-      }
-    );
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithPhoto(
-      { url: result.imageUrl },
-      {
-        caption: `🌀 Stable Diffusion\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('design_menu')
-      }
-    );
-
-  } catch (error) {
-    console.error('Stable Diffusion generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, {
-      userId,
-      username,
-      action: 'stable_diffusion_generation',
-      model: 'Stable Diffusion SDXL',
-      prompt
-    });
-
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка генерації. Спробуйте іншу модель.'
-    );
-  }
-}
-
-async function handleNanoBananaGeneration(ctx, prompt) {
-  const userId = ctx.from.id;
-  const username = ctx.from.username || 'unknown';
-  const model = models.design.models.find(m => m.key === 'nano_banana');
-
-  if (!(await userBalance.hasTokens(userId, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
-    return;
-  }
-
-  const statusMsg = await ctx.reply(
-    `🍌 Генерую через Nano Banana Pro...\n\n` +
-    `Промпт: "${prompt}"`
-  );
-
-  try {
-    const result = await replicate.generateWithNanoBanana(prompt);
-
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId,
-        username,
-        action: 'nano_banana_generation',
-        model: 'Nano Banana Pro',
-        prompt
-      });
-
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації.\n\nСпробуйте іншу модель або повторіть пізніше.`
-      );
-      return;
-    }
-
-    await userBalance.deductTokens(
-      userId,
-      model.cost,
-      'Nano Banana generation',
-      {
-        modelKey: 'nano_banana',
-        modelName: model.name,
-        apiCost: model.apiCost,
-        prompt
-      }
-    );
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithPhoto(
-      { url: result.imageUrl },
-      {
-        caption: `🍌 Nano Banana Pro\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('design_menu')
-      }
-    );
-
-  } catch (error) {
-    console.error('Nano Banana generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, {
-      userId,
-      username,
-      action: 'nano_banana_generation',
-      model: 'Nano Banana Pro',
-      prompt
-    });
-
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка генерації. Спробуйте іншу модель.'
-    );
-  }
-}
-
-async function handleSeedreamGeneration(ctx, prompt) {
-  const userId = ctx.from.id;
-  const username = ctx.from.username || 'unknown';
-  const model = models.design.models.find(m => m.key === 'seedream');
-
-  if (!(await userBalance.hasTokens(userId, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
-    return;
-  }
-
-  const statusMsg = await ctx.reply(
-    `🌊 Генерую через Seedream 4.5...\n\n` +
-    `Промпт: "${prompt}"`
-  );
-
-  try {
-    const result = await replicate.generateWithSeedream(prompt);
-
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId,
-        username,
-        action: 'seedream_generation',
-        model: 'Seedream 4.5',
-        prompt
-      });
-
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації.\n\nСпробуйте іншу модель або повторіть пізніше.`
-      );
-      return;
-    }
-
-    await userBalance.deductTokens(
-      userId,
-      model.cost,
-      'Seedream generation',
-      {
-        modelKey: 'seedream',
-        modelName: model.name,
-        apiCost: model.apiCost,
-        prompt
-      }
-    );
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithPhoto(
-      { url: result.imageUrl },
-      {
-        caption: `🌊 Seedream 4.5\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('design_menu')
-      }
-    );
-
-  } catch (error) {
-    console.error('Seedream generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, {
-      userId,
-      username,
-      action: 'seedream_generation',
-      model: 'Seedream 4.5',
-      prompt
-    });
-
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка генерації. Спробуйте іншу модель.'
-    );
-  }
-}
-
 async function handleClarityUpscaler(ctx) {
   const userId = ctx.from.id;
-  const username = ctx.from.username || 'unknown';
   const model = models.design.models.find(m => m.key === 'clarity');
 
   if (!(await userBalance.hasTokens(userId, model.cost))) {
@@ -1144,414 +923,34 @@ async function handleClarityUpscaler(ctx) {
     return;
   }
 
-  const statusMsg = await ctx.reply(
-    `🔮 Покращую якість зображення через Clarity Upscaler...\n\n` +
-    `⏱️ Це може зайняти 30-60 секунд`
-  );
+  const statusMsg = await ctx.reply(`🔮 Покращую якість зображення через Clarity Upscaler...\n\n⏱️ Це може зайняти 30-60 секунд`);
 
   try {
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const file = await ctx.telegram.getFile(photo.file_id);
-    const imageUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-
+    const imageUrl = await getImageUrl(ctx);
     const prompt = ctx.message.caption || 'masterpiece, best quality, highres, extremely detailed';
     const result = await replicate.generateWithClarityUpscaler(imageUrl, prompt);
 
     if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId,
-        username,
-        action: 'clarity_upscaler',
-        model: 'Clarity Upscaler',
-        prompt,
-        imageUrl
-      });
-
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка покращення.\n\nСпробуйте ще раз або оберіть іншу модель.`
-      );
+      await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username: ctx.from.username, action: 'clarity_upscaler', model: 'Clarity Upscaler', prompt, imageUrl });
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка покращення.\n\nСпробуйте ще раз або оберіть іншу модель.`);
       return;
     }
 
-    await userBalance.deductTokens(
-      userId,
-      model.cost,
-      'Clarity Upscaler',
-      {
-        modelKey: 'clarity',
-        modelName: model.name,
-        apiCost: model.apiCost,
-        prompt
-      }
-    );
-
+    await userBalance.deductTokens(userId, model.cost, 'Clarity Upscaler', { modelKey: 'clarity', modelName: model.name, apiCost: model.apiCost, prompt });
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithPhoto(
-      { url: result.imageUrl },
-      {
-        caption: `🔮 Clarity Upscaler\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('design_menu')
-      }
-    );
+    await ctx.replyWithPhoto({ url: result.imageUrl }, {
+      caption: `🔮 Clarity Upscaler\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
+      ...keyboard.createBackButton('design_menu')
+    });
 
   } catch (error) {
     console.error('Clarity Upscaler failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, {
-      userId,
-      username,
-      action: 'clarity_upscaler',
-      model: 'Clarity Upscaler'
-    });
-
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка покращення зображення. Спробуйте ще раз.'
-    );
-  }
-}
-
-async function handleIdeogramGeneration(ctx, prompt) {
-  const userId = ctx.from.id;
-  const username = ctx.from.username || 'unknown';
-  const model = models.design.models.find(m => m.key === 'ideogram');
-
-  if (!(await userBalance.hasTokens(userId, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
-    return;
-  }
-
-  const statusMsg = await ctx.reply(
-    `🎯 Генерую через Ideogram v3 Turbo...\n\n` +
-    `Промпт: "${prompt}"`
-  );
-
-  try {
-    const result = await replicate.generateWithIdeogram(prompt);
-
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId,
-        username,
-        action: 'ideogram_generation',
-        model: 'Ideogram v3 Turbo',
-        prompt
-      });
-
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації.\n\nСпробуйте іншу модель або повторіть пізніше.`
-      );
-      return;
-    }
-
-    await userBalance.deductTokens(
-      userId,
-      model.cost,
-      'Ideogram generation',
-      {
-        modelKey: 'ideogram',
-        modelName: model.name,
-        apiCost: model.apiCost,
-        prompt
-      }
-    );
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithPhoto(
-      { url: result.imageUrl },
-      {
-        caption: `🎯 Ideogram v3 Turbo\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('design_menu')
-      }
-    );
-
-  } catch (error) {
-    console.error('Ideogram generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, {
-      userId,
-      username,
-      action: 'ideogram_generation',
-      model: 'Ideogram v3 Turbo',
-      prompt
-    });
-
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка генерації. Спробуйте іншу модель.'
-    );
-  }
-}
-
-async function handleKlingVideo(ctx, prompt) {
-  const userId = ctx.from.id;
-  const username = ctx.from.username || 'unknown';
-  const model = models.video.models.find(m => m.key === 'kling');
-
-  if (!(await userBalance.hasTokens(userId, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
-    return;
-  }
-
-  let imageUrl = null;
-  if (ctx.message?.photo) {
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const file = await ctx.telegram.getFile(photo.file_id);
-    imageUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-  }
-
-  const statusMsg = await ctx.reply(
-    `🎭 Генерую відео через Kling...\n⏱️ Це може зайняти 2-5 хвилин\n\n` +
-    `Промпт: "${prompt}"`
-  );
-
-  try {
-    const result = await replicate.generateVideoWithKling(prompt, imageUrl);
-
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId,
-        username,
-        action: 'kling_video_generation',
-        model: 'Kling Video',
-        prompt,
-        hasImage: !!imageUrl
-      });
-
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації відео.\n\nСпробуйте іншу модель або повторіть пізніше.`
-      );
-      return;
-    }
-
-    await userBalance.deductTokens(
-      userId,
-      model.cost,
-      'Kling video generation',
-      {
-        modelKey: 'kling',
-        modelName: model.name,
-        apiCost: model.apiCost,
-        prompt,
-        hasImage: !!imageUrl
-      }
-    );
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithVideo(
-      { url: result.videoUrl },
-      {
-        caption: `🎭 Kling Video\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('video_menu')
-      }
-    );
-
-  } catch (error) {
-    console.error('Kling video generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, {
-      userId,
-      username,
-      action: 'kling_video_generation',
-      model: 'Kling Video',
-      prompt,
-      hasImage: !!imageUrl
-    });
-
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка генерації відео. Спробуйте іншу модель.'
-    );
-  }
-}
-
-async function handleRunwayVideo(ctx, prompt) {
-  const userId = ctx.from.id;
-  const username = ctx.from.username || 'unknown';
-  const model = models.video.models.find(m => m.key === 'runway_gen4');
-
-  if (!(await userBalance.hasTokens(userId, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
-    return;
-  }
-
-  let imageUrl = null;
-  if (ctx.message?.photo) {
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const file = await ctx.telegram.getFile(photo.file_id);
-    imageUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-  }
-
-  const statusMsg = await ctx.reply(
-    `🎬 Генерую відео через Runway Gen-4 Aleph...\n⏱️ Це займе 2-4 хвилини\n\n` +
-    `Промпт: "${prompt}"`
-  );
-
-  try {
-    const result = await replicate.generateVideoWithRunway(prompt, imageUrl);
-
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId,
-        username,
-        action: 'runway_video_generation',
-        model: 'Runway Gen-4',
-        prompt,
-        hasImage: !!imageUrl
-      });
-
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації відео.\n\nСпробуйте іншу модель або повторіть пізніше.`
-      );
-      return;
-    }
-
-    await userBalance.deductTokens(
-      userId,
-      model.cost,
-      'Runway Gen-4 generation',
-      {
-        modelKey: 'runway_gen4',
-        modelName: model.name,
-        apiCost: model.apiCost,
-        prompt,
-        hasImage: !!imageUrl
-      }
-    );
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithVideo(
-      { url: result.videoUrl },
-      {
-        caption: `🎬 Runway Gen-4\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('video_menu')
-      }
-    );
-
-  } catch (error) {
-    console.error('Runway video generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, {
-      userId,
-      username,
-      action: 'runway_video_generation',
-      model: 'Runway Gen-4',
-      prompt,
-      hasImage: !!imageUrl
-    });
-
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка генерації відео. Спробуйте іншу модель.'
-    );
-  }
-}
-
-async function handleRunwayTurboVideo(ctx, prompt) {
-  const userId = ctx.from.id;
-  const username = ctx.from.username || 'unknown';
-  const model = models.video.models.find(m => m.key === 'runway_turbo');
-
-  if (!(await userBalance.hasTokens(userId, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
-    return;
-  }
-
-  let imageUrl = null;
-  if (ctx.message?.photo) {
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const file = await ctx.telegram.getFile(photo.file_id);
-    imageUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-  }
-
-  const statusMsg = await ctx.reply(
-    `🎬 Генерую відео через Runway Gen-4 Turbo...\n⏱️ Це займе 1-2 хвилини\n\n` +
-    `Промпт: "${prompt}"`
-  );
-
-  try {
-    const result = await replicate.generateVideoWithRunwayTurbo(prompt, imageUrl);
-
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId,
-        username,
-        action: 'runway_turbo_video_generation',
-        model: 'Runway Gen-4 Turbo',
-        prompt,
-        hasImage: !!imageUrl
-      });
-
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації відео.\n\nСпробуйте іншу модель або повторіть пізніше.`
-      );
-      return;
-    }
-
-    await userBalance.deductTokens(
-      userId,
-      model.cost,
-      'Runway Turbo generation',
-      {
-        modelKey: 'runway_turbo',
-        modelName: model.name,
-        apiCost: model.apiCost,
-        prompt,
-        hasImage: !!imageUrl
-      }
-    );
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithVideo(
-      { url: result.videoUrl },
-      {
-        caption: `🎬 Runway Gen-4 Turbo\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('video_menu')
-      }
-    );
-
-  } catch (error) {
-    console.error('Runway Turbo video generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, {
-      userId,
-      username,
-      action: 'runway_turbo_video_generation',
-      model: 'Runway Gen-4 Turbo',
-      prompt,
-      hasImage: !!imageUrl
-    });
-
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка генерації відео. Спробуйте іншу модель.'
-    );
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Помилка покращення зображення. Спробуйте ще раз.');
   }
 }
 
 async function handleSunoGeneration(ctx, text) {
   const userId = ctx.from.id;
-  const username = ctx.from.username || 'unknown';
   const model = models.audio.models.find(m => m.key === 'suno');
 
   if (!(await userBalance.hasTokens(userId, model.cost))) {
@@ -1560,83 +959,45 @@ async function handleSunoGeneration(ctx, text) {
   }
 
   if (text.length > 500) {
-    await ctx.reply(
-      '❌ Текст занадто довгий!\n\n' +
-      'Максимум: 500 символів\n' +
-      `Ваш текст: ${text.length} символів\n\n` +
-      'Скоротіть текст і спробуйте ще раз.'
-    );
+    await ctx.reply(`❌ Текст занадто довгий!\n\nМаксимум: 500 символів\nВаш текст: ${text.length} символів\n\nСкоротіть текст і спробуйте ще раз.`);
     return;
   }
 
-  const statusMsg = await ctx.reply(
-    `🎵 Генерую аудіо через Suno AI Bark...\n\n` +
-    `Текст: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n\n` +
-    `⏱️ Це може зайняти 20-40 секунд`
-  );
+  const statusMsg = await ctx.reply(`🎵 Генерую аудіо через Suno AI Bark...\n\nТекст: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n\n⏱️ Це може зайняти 20-40 секунд`);
 
   try {
     const result = await replicate.generateWithSuno(text);
 
     if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId,
-        username,
-        action: 'suno_generation',
-        model: 'Suno AI Bark',
-        text
-      });
-
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації аудіо.\n\nСпробуйте ще раз або оберіть іншу модель.`
-      );
+      await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username: ctx.from.username, action: 'suno_generation', model: 'Suno AI Bark', text });
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка генерації аудіо.\n\nСпробуйте ще раз або оберіть іншу модель.`);
       return;
     }
 
-    await userBalance.deductTokens(
-      userId,
-      model.cost,
-      'Suno audio generation',
-      {
-        modelKey: 'suno',
-        modelName: model.name,
-        apiCost: model.apiCost,
-        text
-      }
-    );
-
+    await userBalance.deductTokens(userId, model.cost, 'Suno audio generation', { modelKey: 'suno', modelName: model.name, apiCost: model.apiCost, text });
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithAudio(
-      { url: result.audioUrl },
-      {
-        caption: `🎵 Suno AI Bark\n\n📝 Текст: ${text}\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('audio_menu')
-      }
-    );
+    await ctx.replyWithAudio({ url: result.audioUrl }, {
+      caption: `🎵 Suno AI Bark\n\n📝 Текст: ${text}\n\n💰 Витрачено: ${model.cost}⚡`,
+      ...keyboard.createBackButton('audio_menu')
+    });
 
   } catch (error) {
     console.error('Suno generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, {
-      userId,
-      username,
-      action: 'suno_generation',
-      model: 'Suno AI Bark',
-      text
-    });
-
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      '❌ Помилка генерації аудіо. Спробуйте ще раз.'
-    );
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Помилка генерації аудіо. Спробуйте ще раз.');
   }
 }
 
 // ==================== HELPER FUNCTIONS ====================
+
+async function getFileSize(url) {
+  try {
+    const response = await axios.head(url);
+    return parseInt(response.headers['content-length'] || '0');
+  } catch (error) {
+    console.error('Error getting file size:', error.message);
+    return 0;
+  }
+}
 
 async function showProfile(ctx) {
   const user = await userBalance.getUser(ctx.from.id, ctx.from);
@@ -1671,48 +1032,34 @@ async function showProfile(ctx) {
 
 async function showInsufficientTokens(ctx, required) {
   const user = await userBalance.getUser(ctx.from.id, ctx.from);
-  
-  const message = `⚠️ Недостатньо токенів!\n\n` +
-    `Необхідно: ${required}⚡\n` +
-    `Ваш баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
-    `Купіть підписку та отримайте більше токенів 👇`;
-  
-  await ctx.reply(message, keyboard.createSubscriptionMenu());
+  await ctx.reply(
+    `⚠️ Недостатньо токенів!\n\nНеобхідно: ${required}⚡\nВаш баланс: ${user.tokens.toFixed(2)}⚡\n\nКупіть підписку та отримайте більше токенів 👇`,
+    keyboard.createSubscriptionMenu()
+  );
 }
-
-// ==================== BROADCAST ====================
 
 async function broadcastMessage(message, parseMode = null) {
   try {
     console.log('📢 Starting broadcast...');
-    
-    // Отримати всіх користувачів з бази
     const User = require('./database/models/User');
     const users = await User.find({}, '_id username');
-    
     console.log(`📊 Found ${users.length} users`);
     
     let successCount = 0;
     let failCount = 0;
     
     for (const user of users) {
-       try {
+      try {
         const chatId = user._id;
-        
         if (!chatId) {
           console.error('⚠️ User without ID:', user);
           failCount++;
           continue;
         }
         
-        await bot.telegram.sendMessage(chatId, message, {
-          parse_mode: parseMode,
-          disable_web_page_preview: true
-        });
+        await bot.telegram.sendMessage(chatId, message, { parse_mode: parseMode, disable_web_page_preview: true });
         successCount++;
         console.log(`✅ Sent to ${chatId} (@${user.username || 'no_username'})`);
-        
-        // Затримка щоб не перевищити rate limit (30 msgs/sec)
         await new Promise(resolve => setTimeout(resolve, 35));
       } catch (error) {
         failCount++;
@@ -1740,29 +1087,17 @@ async function startBot() {
     console.log('✅ Bot started successfully!');
     console.log('📱 Bot username: @neuro_lab_ai_bot');
 
-    if (process.env.SEND_STARTUP_BROADCAST === 'true') {
+    if (isShowBroadCast) {
       console.log('📢 Sending startup broadcast...');
-      
       setTimeout(async () => {
         try {
-          const message = 
-            '🎉 <b>Бот знову онлайн!</b>\n\n' +
-            '✨ Насолоджуйтесь генераціями!\n\n' +
-            '🆕 Що нового:\n' +
-            '• 🎨 Нові ціни на зображення (в 2-5 разів дешевше!)\n' +
-            '• 🎬 Runway Turbo тепер 14⚡\n' +
-            '💡 Спробуйте зараз! 🚀';
-          
+          const message = '🎉 <b>Бот знову онлайн!</b>\n\n✨ Насолоджуйтесь генераціями!\n\n🆕 Що нового:\n• 🎨 Нові ціни на зображення (в 2-5 разів дешевше!)\n• 🎬 Runway Turbo тепер 14⚡\n💡 Спробуйте зараз! 🚀';
           const stats = await broadcastMessage(message, 'HTML');
           console.log(`📊 Broadcast stats: ${stats.success} успішно, ${stats.failed} помилок`);
           
-          // Повідомити адміна про результати
           const adminId = parseInt(process.env.ADMIN_USER_ID || '0');
           if (adminId) {
-            await bot.telegram.sendMessage(
-              adminId,
-              `📊 Startup broadcast complete:\n✅ Sent: ${stats.success}\n❌ Failed: ${stats.failed}`
-            );
+            await bot.telegram.sendMessage(adminId, `📊 Startup broadcast complete:\n✅ Sent: ${stats.success}\n❌ Failed: ${stats.failed}`);
           }
         } catch (error) {
           console.error('Startup broadcast failed:', error);
