@@ -16,7 +16,7 @@ const userSchema = new mongoose.Schema({
   
   // Підписка
   subscription: {
-    type: { type: String, enum: ['trial', 'starter', 'basic', 'pro', 'premium'] },
+    type: { type: String, enum: ['TRIAL', 'STARTER', 'BASIC', 'PRO', 'PREMIUM', null] },
     startedAt: Date,
     expiresAt: Date,
     isActive: Boolean
