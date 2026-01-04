@@ -9,10 +9,10 @@ const userSchema = new mongoose.Schema({
   languageCode: { type: String, default: 'uk' },
   
   // Баланс токенів
-  tokens: { type: Number, default: 10, required: true },  // Початковий баланс 10⚡
+  tokens: { type: Number, default: 75, required: true },  // Початковий баланс 75⚡
   totalTokensPurchased: { type: Number, default: 0 },
   totalTokensSpent: { type: Number, default: 0 },
-  totalTokensEarned: { type: Number, default: 10 },  // Включає початковий бонус
+  totalTokensEarned: { type: Number, default: 75 },  // Включає початковий бонус
   
   // Підписка
   subscription: {

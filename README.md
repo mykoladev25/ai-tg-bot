@@ -141,18 +141,6 @@ const runway = await replicate.generateVideoWithRunway('cinematic shot');
 
 ## 💰 Система токенів
 
-Кожен користувач має баланс токенів:
-- 🆓 **5.50⚡** - при реєстрації
-- 💳 **260⚡** - BASIC підписка (760 Telegram Stars)
-
-Вартість генерацій:
-- Claude (текст) - безкоштовно
-- Stable Diffusion
-- Midjourney - 2⚡
-- Flux - 6⚡
-- Kling (відео) - 5⚡
-- Runway (відео) - 10⚡
-
 ## 🔧 Розширення функціоналу
 
 ### Додавання нової AI моделі
