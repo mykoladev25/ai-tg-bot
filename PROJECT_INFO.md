@@ -183,16 +183,6 @@
 
 ---
 
-## 📁 handlers/ (порожня)
-Директорія для майбутніх handler файлів:
-- menuHandler.js
-- gptHandler.js
-- videoHandler.js
-- designHandler.js
-- paymentHandler.js
-
----
-
 ## 📄 Документація
 
 ### README.md (8KB)

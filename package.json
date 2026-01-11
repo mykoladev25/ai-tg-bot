@@ -26,6 +26,7 @@
     "groq-sdk": "^0.37.0",
     "mongoose": "^9.0.2",
     "replicate": "^1.4.0",
+    "stripe": "^20.1.2",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {

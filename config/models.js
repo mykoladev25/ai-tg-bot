@@ -10,166 +10,176 @@ module.exports = {
     ],
     actions: [
       { name: '🎙️ Говоріть', key: 'voice', cost: 0, apiCost: 0 },
-      { name: '✍️ Пишіть', key: 'text', cost: 3, apiCost: 0.008 }, // ✅ ВИПРАВЛЕНО: 0.015 → 0.008
-      { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 8, apiCost: 0.048 } // ✅ Правильно
+      { name: '✍️ Пишіть', key: 'text', cost: 1, apiCost: 0.008 }, // ✅ $0.012 user, 20% margin, але не важливий (LLM безкоштовні)
+      { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 5, apiCost: 0.048 } // ✅ $0.060 user, 20% margin
     ]
   },
 
   video: {
     models: [
-      { name: '🎬 RunWay: Gen-4 Turbo ⚡', key: 'runway_turbo', cost: 42, apiCost: 0.25, available: true, requiresImage: true }, // ✅ Правильно
-      { name: '🎭 Kling', key: 'kling', cost: 60, apiCost: 0.35, available: true, requiresImage: false }, // ✅ Правильно
-      { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 150, apiCost: 0.9, available: false, requiresImage: true }, // ✅ Правильно
-      { name: '🌊 MidJourney Video', key: 'midjourney_video', cost: 18, apiCost: 0, available: false },
-      { name: '💜 HeyGen', key: 'heygen', cost: 15, apiCost: 0, available: false }
+      { name: '🎬 RunWay: Gen-4 Turbo ⚡', key: 'runway_turbo', cost: 26, apiCost: 0.25, available: true, requiresImage: true }, // ✅ $0.31 user, 20% margin, УНІКАЛЬНА
+      { name: '🎭 Kling', key: 'kling', cost: 37, apiCost: 0.35, available: true, requiresImage: false }, // ✅ $0.44 user vs $1.50 Higgsfield = 3.4x ДЕШЕВШЕ!
+      { name: '🔥 Kling Motion <10s', key: 'kling_motion_minimal', cost: 104, apiCost: 1, available: true, requiresImage: true }, // ✅ $1.25 user, 20% margin, УНІКАЛЬНА
+      { name: '🔥 Kling Motion 20s+ 💎', key: 'kling_motion', cost: 256, apiCost: 2.46, available: true, requiresImage: true }, // ✅ $3.07 user, 20% margin, УНІКАЛЬНА
+      { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 94, apiCost: 0.9, available: false, requiresImage: true }, // ✅ $1.13 user, 20% margin, УНІКАЛЬНА
+      { name: '🌊 MidJourney Video', key: 'midjourney_video', cost: 15, apiCost: 0, available: false },
+      { name: '💜 HeyGen', key: 'heygen', cost: 12, apiCost: 0, available: false }
     ]
   },
 
   design: {
     models: [
-      { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 12, apiCost: 0.01, available: true }, // ✅ ВИПРАВЛЕНО: 0.07 → 0.01
-      { name: '🍌 Nano Banana PRO 2K', key: 'nano_banana_2k', cost: 25, apiCost: 0.15, resolution: '2K', maxImages: 14, available: true }, // ✅ Правильно
-      { name: '🍌🍌 Nano Banana PRO 4K', key: 'nano_banana_4k', cost: 50, apiCost: 0.30, resolution: '4K', maxImages: 14, available: true }, // ✅ Правильно (подвоєно)
-      { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 7, apiCost: 0.03, size: '2K', maxImages: 14, available: true }, // ✅ ВИПРАВЛЕНО: 0.04 → 0.03
-      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 14, apiCost: 0.06, size: '4K', maxImages: 14, available: true }, // ✅ ВИПРАВЛЕНО: 0.08 → 0.06 (подвоєно)
-      { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 3, apiCost: 0.02, maxImages: 1, available: true }, // ✅ ВИПРАВЛЕНО: 0.01 → 0.02
-      { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 6, apiCost: 0.03, maxImages: 1, available: true }, // ✅ Правильно
-      { name: '🖼️ MidJourney', key: 'midjourney', cost: 4, apiCost: 0, available: false }
+      { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 1, apiCost: 0.01, available: true }, // ✅ $0.012 user vs $0.041 Higgsfield = 3.4x ДЕШЕВШЕ!
+      { name: '🍌 Nano Banana PRO 2K', key: 'nano_banana_2k', cost: 16, apiCost: 0.15, resolution: '2K', maxImages: 14, available: true }, // ✅ $0.19 user vs $0.15 Higgsfield, КОНКУРЕНТНА!, 20% margin
+      { name: '🍌🍌 Nano Banana PRO 4K', key: 'nano_banana_4k', cost: 31, apiCost: 0.30, resolution: '4K', maxImages: 14, available: true }, // ✅ $0.37 user vs $0.20 Higgsfield, трохи дорожче але токени НЕ згорають!, 20% margin
+      { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 3, apiCost: 0.03, size: '2K', maxImages: 14, available: true }, // ✅ $0.036 user vs $0.075 Higgsfield = 2x ДЕШЕВШЕ!
+      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 6, apiCost: 0.06, size: '4K', maxImages: 14, available: true }, // ✅ $0.072 user vs $0.123 Higgsfield = 1.7x ДЕШЕВШЕ!
+      { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 2, apiCost: 0.02, maxImages: 1, available: true }, // ✅ $0.024 user vs $0.05 Higgsfield = 2x ДЕШЕВШЕ!
+      { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 3, apiCost: 0.03, maxImages: 1, available: true }, // ✅ $0.036 user vs $0.082 Higgsfield = 2.3x ДЕШЕВШЕ!
+      { name: '🖼️ MidJourney', key: 'midjourney', cost: 3, apiCost: 0, available: false }
     ]
   },
 
   audio: {
     models: [
-      { name: '🎵 Suno AI Bark', key: 'suno', cost: 3, apiCost: 0.0023, available: false }, // ✅ ВИПРАВЛЕНО: 0.01 → 0.0023
-      { name: '🎼 Udio AI', key: 'udio', cost: 8, apiCost: 0, available: false },
-      { name: '🎤 ElevenLabs', key: 'elevenlabs', cost: 5, apiCost: 0.03, available: false }
+      { name: '🎵 Suno AI Bark', key: 'suno', cost: 2, apiCost: 0.0023, available: false },
+      { name: '🎼 Udio AI', key: 'udio', cost: 6, apiCost: 0, available: false },
+      { name: '🎤 ElevenLabs', key: 'elevenlabs', cost: 4, apiCost: 0.03, available: false }
     ]
   },
 
   subscriptions: {
     trial: {
       name: 'TRIAL',
-      tokens: 75,
+      tokens: 75, // ✅ Loss $0.90, acceptable для trial
       price: 0,
       features: [
         '🎁 75⚡ безкоштовних токенів',
         '✨ Спробуйте всі моделі',
         '',
         '💡 Що можна згенерувати:',
-        '• 25× Claude Text (3⚡)',
-        '• 9× Claude Vision (8⚡)',
-        '• 10× Seedream 2K (7⚡)',
-        '• 12× Ideogram (6⚡)',
-        '• 25× Clarity Upscaler (3⚡)',
-        '• 6× Stable Diffusion (12⚡)',
-        '• 1× Kling відео (60⚡)',
+        '• 75× Stable Diffusion (1⚡)',
+        '• 25× Seedream 2K (3⚡)',
+        '• 25× Ideogram (3⚡)',
+        '• 37× Clarity (2⚡)',
+        '• 4× Nano Banana 2K (16⚡)',
+        '• 2× Nano Banana 4K (31⚡)',
+        '• 2× Kling відео (37⚡)',
+        '• 2× Runway Turbo (26⚡)',
         '',
-        '⚡ Токени НЕ згорають!'
+        '⚡ Токени НЕ згорають!',
+        '🔥 vs Higgsfield: credits ЗГОРАЮТЬ!'
       ]
     },
     
     starter: {
       name: 'STARTER',
-      tokens: 600,
+      tokens: 240, // ✅ Profit $0.71 (19.8% margin)
       price: 299,
       features: [
-        '🚀 600⚡ токенів',
+        '🚀 240⚡ токенів',
         '💎 Доступ до всіх моделей',
         '⏰ Токени НЕ згорають',
         '',
         '💡 Що можна згенерувати:',
-        '• 200× Claude Text (3⚡)',
-        '• 75× Claude Vision (8⚡)',
-        '• 85× Seedream 2K (7⚡)',
-        '• 100× Ideogram (6⚡)',
-        '• 200× Clarity (3⚡)',
-        '• 50× Stable Diffusion (12⚡)',
-        '• 24× Nano Banana 2K (25⚡)',
-        '• 14× Runway Turbo (42⚡)',
-        '• 10× Kling відео (60⚡)',
+        '• 240× Stable Diffusion (1⚡)',
+        '• 80× Seedream 2K (3⚡)',
+        '• 40× Seedream 4K (6⚡)',
+        '• 80× Ideogram (3⚡)',
+        '• 120× Clarity (2⚡)',
+        '• 15× Nano Banana 2K (16⚡)',
+        '• 7× Nano Banana 4K (31⚡)',
+        '• 9× Runway Turbo (26⚡)',
+        '• 6× Kling відео (37⚡)',
+        '• 2× Kling Motion <10s (104⚡)',
         '',
-        '✨ Комбінуйте як завгодно!'
+        '✨ Комбінуйте як завгодно!',
+        '🔥 vs Higgsfield $9: вони згорають + дорожче!'
       ]
     },
     
     basic: {
       name: 'BASIC',
-      tokens: 2000,
+      tokens: 720, // ✅ Profit $2.15 (19.9% margin)
       price: 899,
       features: [
-        '💎 2000⚡ токенів',
+        '💎 720⚡ токенів',
         '🎨 Для активних користувачів',
         '⏰ Токени НЕ згорають',
         '',
         '📊 Що можна згенерувати:',
-        '• 666× Claude Text (3⚡)',
-        '• 250× Claude Vision (8⚡)',
-        '• 285× Seedream 2K (7⚡)',
-        '• 142× Seedream 4K (14⚡)',
-        '• 333× Ideogram (6⚡)',
-        '• 666× Clarity (3⚡)',
-        '• 166× Stable Diffusion (12⚡)',
-        '• 80× Nano Banana 2K (25⚡)',
-        '• 40× Nano Banana 4K (50⚡)',
-        '• 47× Runway Turbo (42⚡)',
-        '• 33× Kling (60⚡)',
+        '• 720× Stable Diffusion (1⚡)',
+        '• 240× Seedream 2K (3⚡)',
+        '• 120× Seedream 4K (6⚡)',
+        '• 240× Ideogram (3⚡)',
+        '• 360× Clarity (2⚡)',
+        '• 45× Nano Banana 2K (16⚡)',
+        '• 23× Nano Banana 4K (31⚡)',
+        '• 27× Runway Turbo (26⚡)',
+        '• 19× Kling відео (37⚡)',
+        '• 6× Kling Motion <10s (104⚡)',
+        '• 2× Kling Motion 20s+ 💎 (256⚡)',
         '',
-        '🎬 Акцент на відео та зображення'
+        '✨ Комбінуйте як завгодно!',
+        '🎬 Акцент на відео та зображення',
+        '🔥 vs Higgsfield $29: вони згорають + дорожче!'
       ]
     },
     
     pro: {
       name: 'PRO',
-      tokens: 5000,
+      tokens: 1600, // ✅ Profit $4.79 (20% margin)
       price: 1999,
       features: [
-        '🔥 5000⚡ токенів',
+        '🔥 1600⚡ токенів',
         '🚀 Для професіоналів',
         '⏰ Токени НЕ згорають',
         '',
         '🎯 Що можна згенерувати:',
-        '• 1666× Claude Text (3⚡)',
-        '• 625× Claude Vision (8⚡)',
-        '• 714× Seedream 2K (7⚡)',
-        '• 357× Seedream 4K (14⚡)',
-        '• 833× Ideogram (6⚡)',
-        '• 1666× Clarity (3⚡)',
-        '• 416× Stable Diffusion (12⚡)',
-        '• 200× Nano Banana 2K (25⚡)',
-        '• 100× Nano Banana 4K (50⚡)',
-        '• 119× Runway Turbo (42⚡)',
-        '• 83× Kling (60⚡)',
+        '• 1600× Stable Diffusion (1⚡)',
+        '• 533× Seedream 2K (3⚡)',
+        '• 266× Seedream 4K (6⚡)',
+        '• 533× Ideogram (3⚡)',
+        '• 800× Clarity (2⚡)',
+        '• 100× Nano Banana 2K (16⚡)',
+        '• 51× Nano Banana 4K (31⚡)',
+        '• 61× Runway Turbo (26⚡)',
+        '• 43× Kling відео (37⚡)',
+        '• 15× Kling Motion <10s (104⚡)',
+        '• 6× Kling Motion 20s+ 💎 (256⚡)',
         '',
         '✨ Пріоритетна підтримка',
-        '⚡ Найкраще співвідношення'
+        '⚡ Найкраще співвідношення',
+        '🔥 vs Higgsfield $49: вони згорають + дорожче!'
       ]
     },
     
     premium: {
       name: 'PREMIUM',
-      tokens: 12500,
+      tokens: 4000, // ✅ Profit $11.99 (20% margin)
       price: 4999,
       features: [
-        '👑 12500⚡ токенів',
+        '👑 4000⚡ токенів',
         '💫 Максимум можливостей',
         '⏰ Токени НЕ згорають',
         '',
         '🎨 Що можна згенерувати:',
-        '• 4166× Claude Text (3⚡)',
-        '• 1562× Claude Vision (8⚡)',
-        '• 1785× Seedream 2K (7⚡)',
-        '• 892× Seedream 4K (14⚡)',
-        '• 2083× Ideogram (6⚡)',
-        '• 4166× Clarity (3⚡)',
-        '• 1041× Stable Diffusion (12⚡)',
-        '• 500× Nano Banana 2K (25⚡)',
-        '• 250× Nano Banana 4K (50⚡)',
-        '• 297× Runway Turbo (42⚡)',
-        '• 208× Kling (60⚡)',
+        '• 4000× Stable Diffusion (1⚡)',
+        '• 1333× Seedream 2K (3⚡)',
+        '• 666× Seedream 4K (6⚡)',
+        '• 1333× Ideogram (3⚡)',
+        '• 2000× Clarity (2⚡)',
+        '• 250× Nano Banana 2K (16⚡)',
+        '• 129× Nano Banana 4K (31⚡)',
+        '• 153× Runway Turbo (26⚡)',
+        '• 108× Kling відео (37⚡)',
+        '• 38× Kling Motion <10s (104⚡)',
+        '• 15× Kling Motion 20s+ 💎 (256⚡)',
         '',
         '👑 VIP підтримка 24/7',
         '⚡ Найвищий пріоритет',
-        '🎁 Ранній доступ до нових AI'
+        '🎁 Ранній доступ до нових AI',
+        '🔥 vs Higgsfield $249: вони згорають + дорожче!'
       ]
     }
   }

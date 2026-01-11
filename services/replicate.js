@@ -515,15 +515,63 @@ async function generateWithSuno(text, voice = 'announcer') {
   }
 }
 
+/**
+ * Генерація відео через Kling v2.6 Motion Control (image + reference video)
+ * @param {string} imageUrl - URL зображення персонажа
+ * @param {string} videoUrl - URL референсного відео
+ * @param {string} modelKey - тип моделі: 'kling_motion' або 'kling_motion_minimal'
+ * @param {string} prompt - додатковий промпт
+ * @param {boolean} keepOriginalSound - зберігати звук оригінального відео
+ */
+async function generateVideoWithKlingMotion(imageUrl, videoUrl, modelKey = 'kling_motion', prompt = '', keepOriginalSound = true) {
+  try {
+    if (!imageUrl || !videoUrl) {
+      throw new Error('Both image and reference video are required for Kling Motion Control');
+    }
+
+    // Встановлюємо параметри залежно від типу моделі
+    const isDuration5 = modelKey === 'kling_motion_minimal';
+    const input = {
+      mode: "pro",
+      image: imageUrl,
+      video: videoUrl,
+      prompt: prompt,
+      duration: isDuration5 ? 5 : 10,                    // 5s для minimal, 10s для full
+      keep_original_sound: keepOriginalSound,
+      character_orientation: isDuration5 ? "image" : "video"  // "image" для minimal, "video" для full
+    };
+
+    console.log(`Kling Motion Control: ${modelKey} - duration: ${input.duration}, orientation: ${input.character_orientation}`);
+
+    const output = await replicate.run(
+      "kwaivgi/kling-v2.6-motion-control",
+      { input }
+    );
+
+    return {
+      success: true,
+      videoUrl: Array.isArray(output) ? output[0] : output
+    };
+
+  } catch (error) {
+    console.error('Kling Motion Control API Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 module.exports = {
   generateWithFlux,
   generateWithStableDiffusion,
   generateWithNanoBanana,
-  generateWithSeedream,
+  generateWithSeedream, 
   generateWithClarityUpscaler,
   generateWithIdeogram,
   generateWithSuno,
   generateVideoWithRunwayTurbo,
   generateVideoWithKling,
+  generateVideoWithKlingMotion,
   generateVideoWithRunway
 };

@@ -23,6 +23,65 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const isDevelopment = process.env.NODE_ENV === 'development';
 const isShowBroadCast = process.env.SEND_STARTUP_BROADCAST === 'true' && false;
 
+
+// ✅ МАСИВ МОДЕЛЕЙ З БАГАТОКРОКОВИМ ПРОЦЕСОМ
+const MODELS_WITH_STATE = [
+  'kling_motion',           // фото + відео (20s+)
+  'kling_motion_minimal',   // фото + відео (<10s)
+  'nano_banana_pro'         // вибір розміру (майбутнє)
+];
+
+// ✅ MIDDLEWARE: обнуляти стан при callback (крім моделей зі станами)
+bot.on('callback_query', async (ctx, next) => {
+  const callbackData = ctx.callbackQuery.data;
+  const userId = ctx.from.id;
+  const currentModel = userCurrentModel.get(userId);
+  const state = userState.get(userId);
+  
+  if (MODELS_WITH_STATE.includes(callbackData)) {
+    return next();
+  }
+  
+  if (MODELS_WITH_STATE.includes(currentModel) && state) {
+    const allowedNavigation = ['video_menu', 'design_menu', 'audio_menu', 'main_menu'];
+    if (allowedNavigation.includes(callbackData)) {
+      return next();
+    }
+  }
+  
+  userCurrentModel.delete(userId);
+  userState.delete(userId);
+  
+  return next();
+});
+
+bot.on('text', async (ctx, next) => {
+  const text = ctx.message.text;
+  const userId = ctx.from.id;
+  const currentModel = userCurrentModel.get(userId);
+  const state = userState.get(userId);
+  
+  // Кнопки головного меню (обнуляють стан)
+  const menuButtons = [
+    '💡 Базові помічники',
+    '🎬 Створення відео',
+    '🎨 Створення/редагування зображень',
+    '🎙️ Аудіо з AI',
+    '👤 Профіль',
+    '❓ Допомога',
+    '📄 Інструкція'
+  ];
+  
+  // Якщо натиснута кнопка меню - обнуляємо
+  if (menuButtons.includes(text)) {
+    userCurrentModel.delete(userId);
+    userState.delete(userId);
+  }
+  
+  // Якщо звичайний текст (промпт) - НЕ обнуляємо, передаємо далі
+  return next();
+});
+
 if (isDevelopment) {
   console.log('🛠️ Development mode - maintenance message enabled');
   
@@ -56,19 +115,19 @@ const INSTRUCTION_HTML = `
 
 📝 <b>Як користуватися ботом:</b>
 
-<b>1️⃣ Claude</b>
+<b>1️⃣ GPT / Claude</b>
 - Оберіть режим: <i>текст / голос / зображення</i>
 - Надішліть запит
 - Отримайте відповідь від AI
 
 <b>2️⃣ Генерація зображень</b>
 - Оберіть модель (<i>Nano Banana, тощо</i>)
-- Опишіть, що хочете побачити \n🖼️ АБО надішліть фото з підписом для редагування
+- Опишіть, що хочете побачити
 - Очікуйте результат <i>(~30–60 сек)</i>
 
 <b>3️⃣ Генерація відео</b>
 - Оберіть модель
-- 📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування
+- Надішліть текстовий опис
 - Відео буде готове <i>за 2–5 хвилин</i>
 
 💰 <b>Токени ⚡</b>
@@ -310,7 +369,7 @@ bot.action(/^(midjourney|flux|nano_banana_2k|nano_banana_4k|stable_diffusion|see
 });
 
 // Video Models
-bot.action(/^(kling|runway_gen4|runway_turbo|luma)$/, async (ctx) => {
+bot.action(/^(kling|kling_motion|kling_motion_minimal|runway_gen4|runway_turbo|luma)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.video.models.find(m => m.key === modelKey);
   
@@ -331,6 +390,10 @@ bot.action(/^(kling|runway_gen4|runway_turbo|luma)$/, async (ctx) => {
   const messages = {
     kling: `${model.name}\n\n🎭 Text-to-Video і Image-to-Video\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для створення відео з зображення\n\n⏱️ Генерація: 2-5 хвилин\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 1080p, 5 секунд`,
     
+    kling_motion: `${model.name}\n\n🔥 Motion Transfer: Image + Video → Video 🎬\n\n⚠️ ПОТРІБНО 2 ФАЙЛИ:\n1️⃣ Надішліть ФОТО (персонаж/об'єкт)\n2️⃣ Потім ВІДЕО (референсні рухи)\n\n🎯 Як це працює:\n• Фото: Ваш персонаж/об'єкт\n• Відео: Рухи які хочете перенести\n• Результат: Персонаж з фото виконує рухи з відео!\n\n💡 Приклад:\n📷 Фото: Ваше селфі\n🎥 Відео: Танець\n✨ Результат: Ви танцюєте!\n\n⏱️ Генерація: 2-4 хвилини\n💰 Вартість: ${model.cost}⚡\n📊 Якість: PRO, 5 секунд\n\n👉 Спочатку надішліть ФОТО`,
+    
+    kling_motion_minimal: `${model.name}\n\n🔥 Motion Transfer: Image + Video → Video 🎬\n\n⚠️ ПОТРІБНО 2 ФАЙЛИ:\n1️⃣ Надішліть ФОТО (персонаж/об'єкт)\n2️⃣ Потім ВІДЕО (референсні рухи)\n\n🎯 Як це працює:\n• Фото: Ваш персонаж/об'єкт\n• Відео: Рухи які хочете перенести\n• Результат: Персонаж з фото виконує рухи з відео!\n\n💡 Приклад:\n📷 Фото: Ваше селфі\n🎥 Відео: Танець\n✨ Результат: Ви танцюєте!\n\n⏱️ Генерація: 1-2 хвилини\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 720p, до 10 секунд\n⚡ Швидша версія для коротких відео!\n\n👉 Спочатку надішліть ФОТО`,
+
     runway_turbo: `${model.name}\n\n🎬 Image-to-Video ONLY ⚠️\n\n⚠️ ОБОВ'ЯЗКОВО: Надішліть зображення + текстовий опис\n\n📝 Опис має містити деталі руху/анімації\n🖼️ Зображення стане першим кадром відео\n\n💡 Приклад:\n"Camera slowly zooms in, person turns head to the left"\n\n⏱️ Генерація: 1-3 хвилини\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 720p, 5 секунд\n⚡ Найшвидша модель!`,
     
     runway_gen4: `${model.name}\n\n🎬 Image-to-Video ONLY ⚠️\n\n⚠️ ОБОВ'ЯЗКОВО: Надішліть зображення + текстовий опис\n\n📝 Опис має містити деталі руху/анімації\n🖼️ Зображення стане першим кадром відео\n\n💡 Приклад:\n"Slow motion, waves crashing, cinematic"\n\n⏱️ Генерація: 3-5 хвилин\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 1080p, 10 секунд\n💎 Найвища якість!`,
@@ -402,7 +465,7 @@ bot.action('video_menu', async (ctx) => {
 // Subscription
 bot.action('buy_subscription', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.reply(`💎 Оберіть підписку\n\n💎 Claude - платний, якісний\n\nВиберіть план 👇`, keyboard.createSubscriptionsMenu());
+  await ctx.reply(`💎 Оберіть підписку\n\n Виберіть план 👇`, keyboard.createSubscriptionsMenu());
 });
 
 bot.action('community', async (ctx) => {
@@ -518,6 +581,26 @@ bot.on('text', async (ctx) => {
     await ctx.reply('🔮 Clarity Upscaler чекає на зображення.\n\nНадішліть фото для покращення якості.', keyboard.createGPTActionsMenu(models.design.models));
     return;
   }
+
+  if (currentModel === 'kling_motion' || currentModel === 'kling_motion_minimal') {
+    const state = userState.get(userId);
+    
+    if (state?.step === 'waiting_video' && state?.imageUrl) {
+      const modelName = currentModel === 'kling_motion_minimal' ? 'ВІДЕО (тривалістю <= 10 сек⏱️)' : 'ВІДЕО';
+      await ctx.reply(
+        `⚠️ Очікується ${modelName}, а не текст!\n\n` +
+        `🎥 Надішліть відео файл з рухами.`,
+        keyboard.createBackButton('video_menu')
+      );
+    } else {
+      await ctx.reply(
+        '🔥 Kling Motion Control чекає на ФОТО!\n\n' +
+        '👉 Надішліть фото персонажа (не текст)',
+        keyboard.createBackButton('video_menu')
+      );
+    }
+    return;
+  }
   
   const handlers = {
     claude_vision: () => handleClaudeText(ctx, text),
@@ -613,12 +696,123 @@ bot.on('photo', async (ctx) => {
     await handleClaudeVision(ctx);
   } else if (currentModel === 'clarity') {
     await handleClarityUpscaler(ctx);
+  } else if (currentModel === 'kling_motion' || currentModel === 'kling_motion_minimal') {
+    // Kling Motion: зберігаємо фото, чекаємо на відео
+    const imageUrl = await getImageUrl(ctx);
+    userState.set(userId, { model: currentModel, step: 'waiting_video', imageUrl });
+    const videoLengthMsg = currentModel === 'kling_motion_minimal' ? '(<= 10 сек⏱️)' : '(до 5 сек⏱️)';
+    await ctx.reply(
+      '✅ Фото отримано!\n\n' +
+      `🎥 Тепер надішліть ВІДЕО з рухами ${videoLengthMsg}, \n\n які хочете перенести на персонажа з фото.\n\n` +
+      '💡 Наприклад: відео танцю, жестів, або будь-яких рухів.\n\n' +
+      '⏱️ Після відео почнеться генерація',
+      keyboard.createBackButton('video_menu')
+    );
   } else if (imageModels.includes(currentModel)) {
     await handleImageGeneration(ctx, prompt, currentModel);
   } else if (videoModels.includes(currentModel)) {
     await handleVideoGeneration(ctx, prompt, currentModel);
   } else {
     await ctx.reply('Для аналізу зображень виберіть режим "💡 Claude" → "🖼️ Завантажте зображення"', keyboard.createGPTActionsMenu(models.gpt.actions));
+  }
+});
+
+// ==================== VIDEO HANDLER ====================
+
+bot.on('video', async (ctx) => {
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  // Перевіряємо чи це Kling Motion (або Minimal) в стані очікування відео
+  if ((state?.model === 'kling_motion' || state?.model === 'kling_motion_minimal') && state?.step === 'waiting_video' && state?.imageUrl) {
+    const modelKey = state.model;
+    const model = models.video.models.find(m => m.key === modelKey);
+
+    if (!(await userBalance.hasTokens(userId, model.cost))) {
+      await showInsufficientTokens(ctx, model.cost);
+      userState.delete(userId);
+      return;
+    }
+
+    const videoFile = ctx.message.video;
+    const videoUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${(await ctx.telegram.getFile(videoFile.file_id)).file_path}`;
+    
+    const generationTime = modelKey === 'kling_motion_minimal' ? '1-2 хвилини' : '2-4 хвилини';
+    const statusMsg = await ctx.reply(
+      `🔥 Генерую відео через Kling Motion Control...\n\n` +
+      `📷 Фото: отримано\n` +
+      `🎥 Референсне відео: отримано\n\n` +
+      `⏱️ Це може зайняти ${generationTime}\n` +
+      `💡 Переношу рухи з відео на персонажа...`
+    );
+
+    try {
+      const result = await replicate.generateVideoWithKlingMotion(
+        state.imageUrl,
+        videoUrl,
+        modelKey,  // передаємо тип моделі
+        ctx.message.caption || '',
+        true // keep_original_sound
+      );
+
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(
+          bot, 
+          new Error(result.error), 
+          { 
+            userId, 
+            username: ctx.from.username, 
+            action: `${modelKey}_generation`,
+            model: model.name
+          }
+        );
+        await ctx.telegram.editMessageText(
+          ctx.chat.id, 
+          statusMsg.message_id, 
+          null, 
+          `❌ Помилка генерації.\n\nСпробуйте ще раз або оберіть іншу модель.`
+        );
+        userState.delete(userId);
+        return;
+      }
+
+      await userBalance.deductTokens(
+        userId, 
+        model.cost, 
+        `${model.name} generation`, 
+        { 
+          modelKey: modelKey,
+          modelName: model.name,
+          apiCost: model.apiCost 
+        }
+      );
+      
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+      await ctx.replyWithVideo(
+        { url: result.videoUrl }, 
+        {
+          caption: `${model.name}\n\n🔥 Motion Transfer завершено!\n\n💰 Витрачено: ${model.cost}⚡`,
+          ...keyboard.createBackButton('video_menu')
+        }
+      );
+      
+      userState.delete(userId);
+
+    } catch (error) {
+      console.error(`${modelKey} generation failed:`, error);
+      await adminNotifier.notifyAdmin(bot, error, { userId, username: ctx.from.username, action: `${modelKey}_generation`, model: model.name });
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Помилка генерації відео. Спробуйте ще раз.');
+      userState.delete(userId);
+    }
+  } else {
+    await ctx.reply(
+      '⚠️ Для використання відео:\n\n' +
+      '1. Виберіть модель 🔥 Kling Motion Control\n' +
+      '2. Надішліть фото персонажа\n' +
+      '3. Надішліть відео з рухами\n\n' +
+      'Або оберіть іншу модель для генерації відео 👇',
+      keyboard.createBackButton('video_menu')
+    );
   }
 });
 
@@ -1141,7 +1335,7 @@ startBot();
 
 bot.catch((err, ctx) => {
   if (err.name === 'TimeoutError') {
-    ctx.reply('⏱️ Генерація займає більше часу. Чекайте...');
+    ctx.reply('⏱️ Генерація триває. Чекайте...');
     return;
   }
 

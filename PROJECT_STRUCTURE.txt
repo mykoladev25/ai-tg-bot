@@ -7,7 +7,6 @@
 ./README.md
 ./config
 ./config/models.js
-./handlers
 ./index.js
 ./package.json
 ./services
