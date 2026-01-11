@@ -20,7 +20,7 @@ const models = require('./config/models');
 // Ініціалізація бота
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-const isDevelopment = process.env.NODE_ENV === 'development';
+const isDevelopment = false;
 const isShowBroadCast = process.env.SEND_STARTUP_BROADCAST === 'true' && false;
 
 
