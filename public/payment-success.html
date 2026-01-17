@@ -156,16 +156,28 @@
         window.BOT_USERNAME = 'neuro_lab_ai_bot';
 
         const urlParams = new URLSearchParams(window.location.search);
-        const sessionId = urlParams.get('session_id');
+        const sessionId = urlParams.get('session_id'); // Stripe
+        const orderId = urlParams.get('order_id'); // LiqPay
+        const paymentId = sessionId || orderId;
+        const paymentSystem = sessionId ? 'stripe' : 'liqpay';
+
+        console.log(`💳 Payment success page loaded:`, { sessionId, orderId, paymentSystem });
 
         async function processPayment() {
-            if (!sessionId) {
-                console.log('❌ No session ID provided');
-                return;
+            if (!paymentId) {
+                console.log('❌ No payment ID provided');
+                return null;
             }
 
+            // Для LiqPay не потребуємо обробки - webhook вже оброблює
+            if (paymentSystem === 'liqpay') {
+                console.log('ℹ️ LiqPay payment - webhook processes automatically');
+                return { success: true, message: 'LiqPay webhook processing' };
+            }
+
+            // Для Stripe обробляємо платіж
             try {
-                console.log(`🔄 Processing payment for session: ${sessionId}`);
+                console.log(`🔄 Processing Stripe payment for session: ${sessionId}`);
                 const response = await fetch(`/api/payment/process/${sessionId}`, {
                     method: 'POST',
                     headers: {
@@ -175,7 +187,7 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    console.log('✅ Payment processed successfully');
+                    console.log('✅ Stripe payment processed successfully');
                     return data;
                 } else {
                     console.warn('⚠️ Payment processing returned error:', data.error);
@@ -188,47 +200,103 @@
         }
 
         async function loadPaymentStatus() {
-            if (!sessionId) {
-                console.log('No session ID provided');
+            if (!paymentId) {
+                console.log('No payment ID provided');
                 return;
             }
 
             try {
-                // First, try to process the payment
-                const processResult = await processPayment();
+                // Для LiqPay - викликаємо API для обробки платежу
+                if (paymentSystem === 'liqpay') {
+                    console.log(`🔄 Processing LiqPay order via API: ${orderId}`);
+                    const processResponse = await fetch(`/api/liqpay/process/${orderId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
 
-                // Then get the status
-                const response = await fetch(`/api/payment/status/${sessionId}`);
-                const data = await response.json();
+                    const processData = await processResponse.json();
+                    console.log('📨 LiqPay process response:', processData);
 
-                if (data.success) {
-                    const metadata = data.metadata || {};
-
-                    document.getElementById('details').innerHTML = `
-                        <div class="detail-item">
-                            <span class="detail-label">Статус:</span>
-                            <span class="detail-value">✅ ${data.status === 'paid' ? 'Оплачено' : 'Обробляється'}</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">План:</span>
-                            <span class="detail-value">${metadata.plan || '—'}</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">Токенів:</span>
-                            <span class="detail-value">${metadata.tokens || '—'}⚡</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">Сесія:</span>
-                            <span class="detail-value">${sessionId.substring(0, 10)}...</span>
-                        </div>
-                    `;
+                    if (processData.success) {
+                        document.getElementById('details').innerHTML = `
+                            <div class="detail-item">
+                                <span class="detail-label">Статус:</span>
+                                <span class="detail-value">✅ Платіж оброблений</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Система:</span>
+                                <span class="detail-value">💳 LiqPay</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Токенів:</span>
+                                <span class="detail-value">${processData.tokens}⚡</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Баланс:</span>
+                                <span class="detail-value">${processData.balance.toFixed(2)}⚡</span>
+                            </div>
+                        `;
+                    } else {
+                        document.getElementById('details').innerHTML = `
+                            <div class="detail-item">
+                                <span class="detail-label">Статус:</span>
+                                <span class="detail-value">⏳ Платіж в обробці</span>
+                            </div>
+                            <div class="detail-item" style="font-size: 12px; color: #999;">
+                                Можливо займе деякий час.<br>
+                                Перевірте повідомлення в боті.
+                            </div>
+                        `;
+                    }
 
                     setTimeout(() => {
                         goToBot();
                     }, 3000);
+                } else {
+                    // Для Stripe обробляємо платіж
+                    const processResult = await processPayment();
+
+                    // Отримуємо статус
+                    const response = await fetch(`/api/payment/status/${sessionId}`);
+                    const data = await response.json();
+
+                    if (data.success) {
+                        const metadata = data.metadata || {};
+
+                        document.getElementById('details').innerHTML = `
+                            <div class="detail-item">
+                                <span class="detail-label">Статус:</span>
+                                <span class="detail-value">✅ ${data.status === 'paid' ? 'Оплачено' : 'Обробляється'}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">План:</span>
+                                <span class="detail-value">${metadata.plan || '—'}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Токенів:</span>
+                                <span class="detail-value">${metadata.tokens || '—'}⚡</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Сесія:</span>
+                                <span class="detail-value">${sessionId.substring(0, 10)}...</span>
+                            </div>
+                        `;
+
+                        setTimeout(() => {
+                            goToBot();
+                        }, 3000);
+                    }
                 }
             } catch (error) {
                 console.error('Error loading payment status:', error);
+                document.getElementById('details').innerHTML = `
+                    <div class="detail-item" style="color: #f00;">
+                        Помилка обробки платежу.<br>
+                        Перевірте повідомлення в боті або зверніться до підтримки.
+                    </div>
+                `;
             }
         }
 

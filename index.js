@@ -10,6 +10,7 @@ const claude = require('./services/claude');
 const midjourney = require('./services/midjourney');
 const replicate = require('./services/replicate');
 const payment = require('./services/payment');
+const exchangeRate = require('./services/exchangeRate');
 
 // Імпортуємо webhooks
 const stripeWebhook = require('./webhooks/stripe');
@@ -162,7 +163,7 @@ const INSTRUCTION_HTML = `
 
 Введіть команду <i>/info</i> для перегляду юридичної інформації.
 
-ℹ️ Використовуючи бота, ви погоджуєтесь з умовами обслуговування.
+ℹ️ Використовуючи бота, ви погоджуєтеся з умовами обслуговування.
 `;
 
 // ==================== КОМАНДИ ====================
@@ -572,35 +573,6 @@ bot.action(/^pay_stars_(starter|basic|pro|premium)$/, async (ctx) => {
   } catch (error) {
     console.error('Payment error:', error);
     await ctx.reply('❌ Помилка створення платежу. Спробуйте пізніше.');
-  }
-});
-
-// Payment handlers
-bot.on('pre_checkout_query', async (ctx) => {
-  await ctx.answerPreCheckoutQuery(true);
-});
-
-bot.on('successful_payment', async (ctx) => {
-  const userId = ctx.from.id;
-  const payload = JSON.parse(ctx.message.successful_payment.invoice_payload);
-  
-  if (payload.type === 'tokens_purchase') {
-    const planKey = payload.plan;
-    const sub = models.subscriptions[planKey];
-    
-    if (!sub) {
-      await ctx.reply('❌ Помилка: план не знайдено');
-      return;
-    }
-    
-    await userBalance.addTokens(userId, sub.tokens, 'tokens_purchase', { plan: sub.name, price: sub.price });
-
-    const user = await userBalance.getUser(userId, ctx.from);
-    
-    await ctx.reply(
-      `✅ Оплата успішна!\n\n🎉 Ви отримали ${sub.tokens}⚡ токенів\n💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n\nДякуємо за підтримку! 💙`,
-      keyboard.createMainMenu()
-    );
   }
 });
 
@@ -1360,13 +1332,18 @@ async function startBot() {
     const app = express();
     const PORT = process.env.PORT || 5500;
 
-    // Middleware для Stripe webhook (необхідно до express.json())
+    // Webhook для Stripe (необхідно до express.json())
     app.post('/webhook/stripe', express.raw({ type: 'application/json' }), (req, res) => {
       stripeWebhook.handleStripeWebhook(req, res, bot).catch(error => {
         console.error('Webhook handler error:', error);
         res.status(500).json({ error: 'Internal server error' });
       });
     });
+
+    // Webhook для LiqPay (передаємо bot instance для відправки повідомлень)
+    const createLiqPayRouter = require('./webhooks/liqpay');
+    const liqpayWebhook = createLiqPayRouter(bot);
+    app.use('/webhook', liqpayWebhook);
 
     // Інші middleware
     app.use(express.json());
@@ -1417,6 +1394,72 @@ async function startBot() {
         res.status(400).json({
           success: false,
           error: result.error
+        });
+      }
+    });
+
+    // ✅ LiqPay checkout page
+    app.get('/pay/liqpay', (req, res) => {
+      const plan = req.query.plan;
+
+      console.log(`📄 LiqPay checkout page requested: plan=${plan}`);
+
+      if (!plan) {
+        return res.status(400).send('План не обрано');
+      }
+
+      const filePath = __dirname + '/public/liqpay-checkout.html';
+      console.log(`📂 Sending file: ${filePath}`);
+      res.sendFile(filePath);
+    });
+
+    // ✅ LiqPay checkout API
+    app.post('/api/liqpay/checkout', async (req, res) => {
+      const { userId, plan, amount, tokens } = req.body;
+      const liqpay = require('./services/liqpay');
+
+      console.log(`📋 LiqPay checkout request:`, { userId, plan, amount, tokens });
+
+      if (!userId || !plan || !tokens || amount === undefined) {
+        console.error('❌ Missing required fields:', { userId, plan, tokens, amount });
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields: userId, plan, tokens, amount'
+        });
+      }
+
+      try {
+        // Генеруємо унікальний ID замовлення: userId_planKey_timestamp
+        const orderId = `${userId}_${plan}_${Date.now()}`;
+
+        // Параметри платежу для LiqPay
+        const checkoutParams = {
+          order_id: orderId,
+          amount: Math.round(amount),
+          currency: 'UAH',
+          description: `neuro.lab.ai - ${plan} (${tokens}⚡)`,
+          server_url: `${process.env.APP_URL || 'http://127.0.0.1:5500'}/webhook/liqpay`,
+          result_url: `${process.env.APP_URL || 'http://127.0.0.1:5500'}/payment/success?order_id=${orderId}`,
+          language: 'uk'
+        };
+
+        const checkout = await liqpay.createCheckout(checkoutParams);
+
+        console.log(`✅ LiqPay checkout created for user ${userId}: order_id=${orderId}`);
+
+        // Формуємо посилання на платіж
+        const checkoutUrl = `https://www.liqpay.ua/api/3/checkout?data=${checkout.data}&signature=${checkout.signature}`;
+
+        res.json({
+          success: true,
+          checkoutUrl: checkoutUrl,
+          orderId: orderId
+        });
+      } catch (error) {
+        console.error('❌ LiqPay checkout error:', error);
+        res.status(400).json({
+          success: false,
+          error: error.message
         });
       }
     });
@@ -1532,35 +1575,156 @@ async function startBot() {
       }
     });
 
+    // ✅ Process LiqPay payment by order_id (для синхронної обробки)
+    app.post('/api/liqpay/process/:orderId', async (req, res) => {
+      try {
+        const { orderId } = req.params;
+
+        console.log(`📋 Processing LiqPay order: ${orderId}`);
+
+        // Розпарсимо замовлення
+        const parts = orderId.split('_');
+        const userId = parseInt(parts[0]);
+        const planKey = parts[1];
+
+        if (!userId || !planKey) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid order_id format'
+          });
+        }
+
+        const sub = models.subscriptions[planKey];
+        if (!sub) {
+          return res.status(400).json({
+            success: false,
+            error: 'Plan not found'
+          });
+        }
+
+        // Додаємо токени
+        await userBalance.addTokens(
+          userId,
+          sub.tokens,
+          'liqpay_purchase',
+          {
+            plan: sub.name,
+            tokens: sub.tokens,
+            orderId: orderId
+          }
+        );
+
+        // Отримуємо користувача
+        const user = await userBalance.getUser(userId, { id: userId });
+
+        // Відправляємо повідомлення в Telegram
+        try {
+          await bot.telegram.sendMessage(
+            userId,
+            `✅ <b>Платіж успішно оброблений!</b>\n\n` +
+            `💳 Метод: LiqPay\n` +
+            `💎 Тариф: ${sub.name}\n` +
+            `⚡ Токенів нараховано: ${sub.tokens}\n` +
+            `💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
+            `Дякуємо за покупку! 🎉`,
+            { parse_mode: 'HTML' }
+          );
+          console.log(`📨 Success message sent to user ${userId}`);
+        } catch (error) {
+          console.error('Error sending message:', error.message);
+        }
+
+        res.json({
+          success: true,
+          message: 'Payment processed',
+          tokens: sub.tokens,
+          balance: user.tokens
+        });
+      } catch (error) {
+        console.error('Error processing LiqPay order:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // ✅ Health check
     app.get('/health', (req, res) => {
       res.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
 
-    // ✅ Get subscription plans
-    app.get('/api/plans', (req, res) => {
-      const subscriptions = models.subscriptions;
-      const plans = {};
+    // ✅ Get subscription plans with dynamic LiqPay prices
+    app.get('/api/plans', async (req, res) => {
+      try {
+        const subscriptions = models.subscriptions;
+        const plans = {};
 
-      ['starter', 'basic', 'pro', 'premium'].forEach(planKey => {
-        const sub = subscriptions[planKey];
-        if (sub) {
-          plans[planKey] = {
-            name: sub.name,
-            tokens: sub.tokens,
-            price: sub.price / 100, // конвертуємо з центів в доларі
-            features: sub.features.filter(f => f.trim() && !f.startsWith('•') && f.length > 3)
-          };
-        }
-      });
+        // Отримуємо актуальний курс USD/UAH
+        const rate = await exchangeRate.getRate();
 
-      res.json({ success: true, plans });
+        ['starter', 'basic', 'pro', 'premium'].forEach(planKey => {
+          const sub = subscriptions[planKey];
+          if (sub) {
+            // Розраховуємо LiqPay ціну: priceUSD * реальний курс
+            const priceUAHDynamic = Math.round(sub.priceUSD * rate);
+
+            plans[planKey] = {
+              name: sub.name,
+              tokens: sub.tokens,
+              price: sub.price, // Telegram Stars
+              priceUSD: sub.priceUSD, // Базова ціна в USD
+              priceUAH: sub.priceUAH, // Фіксована ціна LiqPay (резервна)
+              priceUAHDynamic: priceUAHDynamic, // Динамічна ціна на основі реального курсу
+              exchangeRate: rate, // Поточний курс USD/UAH
+              features: sub.features.filter(f => f.trim() && !f.startsWith('•') && f.length > 3)
+            };
+          }
+        });
+
+        res.json({
+          success: true,
+          plans,
+          exchangeRate: rate,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error('Error fetching plans:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
     });
 
-    // ✅ Payment success page
+    // ✅ Get current USD/UAH exchange rate
+    app.get('/api/exchange-rate', async (req, res) => {
+      try {
+        const rate = await exchangeRate.getRate();
+        res.json({
+          success: true,
+          rate: rate,
+          pair: 'USD/UAH',
+          source: 'PrivatBank/NBU',
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error('Error getting exchange rate:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message,
+          fallbackRate: 45
+        });
+      }
+    });
+
+    // ✅ Get LiqPay prices calculated by exchange rate
     app.get('/payment/success', (req, res) => {
       const sessionId = req.query.session_id;
-      console.log(`✅ Payment success page requested for session: ${sessionId}`);
+      const orderId = req.query.order_id;
+      const paymentId = sessionId || orderId;
+
+      console.log(`✅ Payment success page requested:`, { sessionId, orderId });
 
       const filePath = __dirname + '/public/payment-success.html';
       res.sendFile(filePath);
@@ -1640,6 +1804,10 @@ async function startBot() {
       console.log(`🌍 Express server running on port ${PORT}`);
       console.log(`📝 Stripe webhook: POST http://127.0.0.1:${PORT}/webhook/stripe`);
       console.log(`🛒 Checkout API: POST http://127.0.0.1:${PORT}/api/stripe/checkout`);
+      console.log(`💳 LiqPay webhook: POST http://127.0.0.1:${PORT}/webhook/liqpay`);
+      console.log(`💳 LiqPay checkout: GET http://127.0.0.1:${PORT}/pay/liqpay?plan=starter`);
+      console.log(`💱 Exchange Rate API: GET http://127.0.0.1:${PORT}/api/exchange-rate`);
+      console.log(`📊 Plans API: GET http://127.0.0.1:${PORT}/api/plans`);
     });
 
     // ==================== START BOT ====================
@@ -1673,3 +1841,4 @@ bot.catch((err, ctx) => {
   console.error('Bot error:', err);
   ctx.reply(`❌ Сталася помилка. Спробуйте ще раз або зверніться до підтримки. ${SUPPORT_USERNAME}`);
 });
+

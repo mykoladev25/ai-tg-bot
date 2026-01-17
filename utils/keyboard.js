@@ -80,8 +80,18 @@ function createPaymentMenu(price, plan = 'basic', userId = null, telegramId = nu
     stripeUrl += `&tg_id=${telegramId}`;
   }
 
+  // LiqPay URL
+  let liqpayUrl = `${appUrl}/pay/liqpay?plan=${plan}`;
+  if (userId) {
+    liqpayUrl += `&userId=${userId}`;
+  }
+  if (telegramId) {
+    liqpayUrl += `&tg_id=${telegramId}`;
+  }
+
   return Markup.inlineKeyboard([
     [Markup.button.callback(`💫 Telegram Stars (${price}⭐)`, `pay_stars_${plan}`)],
+    [Markup.button.url(`💳 LiqPay (Карта/Apple/Google)`, liqpayUrl)],
     // Use webApp only in production (HTTPS), use regular URL for development
     // [isProduction
     //   ? Markup.button.webApp(`💳 Stripe (Card/Apple/Google)`, stripeUrl)

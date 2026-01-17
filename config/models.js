@@ -73,8 +73,10 @@ module.exports = {
     
     starter: {
       name: 'STARTER',
-      tokens: 240, // ✅ Profit $0.71 (19.8% margin)
-      price: 299,
+      tokens: 240,
+      price: 299, // Telegram Stars
+      priceUSD: 7, // Базова ціна в USD для LiqPay розрахунку
+      priceUAH: 199, // Фіксована ціна (якщо потрібна)
       features: [
         '🚀 240⚡ токенів',
         '💎 Доступ до всіх моделей',
@@ -98,8 +100,10 @@ module.exports = {
     
     basic: {
       name: 'BASIC',
-      tokens: 720, // ✅ Profit $2.15 (19.9% margin)
-      price: 899,
+      tokens: 720,
+      price: 899, // Telegram Stars (~$21.4)
+      priceUSD: 20, // Базова ціна в USD для LiqPay розрахунку
+      priceUAH: 499, // Фіксована ціна (якщо потрібна)
       features: [
         '💎 720⚡ токенів',
         '🎨 Для активних користувачів',
@@ -125,8 +129,10 @@ module.exports = {
     
     pro: {
       name: 'PRO',
-      tokens: 1600, // ✅ Profit $4.79 (20% margin)
-      price: 1999,
+      tokens: 1600,
+      price: 1999, // Telegram Stars (~$47.6)
+      priceUSD: 45, // Базова ціна в USD для LiqPay розрахунку
+      priceUAH: 999, // Фіксована ціна (якщо потрібна)
       features: [
         '🔥 1600⚡ токенів',
         '🚀 Для професіоналів',
@@ -152,8 +158,10 @@ module.exports = {
     
     premium: {
       name: 'PREMIUM',
-      tokens: 4000, // ✅ Profit $11.99 (20% margin)
-      price: 4999,
+      tokens: 4000,
+      price: 4999, // Telegram Stars (~$119.2)
+      priceUSD: 110, // Базова ціна в USD для LiqPay розрахунку
+      priceUAH: 1999, // Фіксована ціна (якщо потрібна)
       features: [
         '👑 4000⚡ токенів',
         '💫 Максимум можливостей',
