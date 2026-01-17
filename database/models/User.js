@@ -14,7 +14,6 @@ const userSchema = new mongoose.Schema({
   totalTokensSpent: { type: Number, default: 0 },
   totalTokensEarned: { type: Number, default: 75 },  // Включає початковий бонус
   
-  // Підписка
   subscription: {
     type: { type: String, enum: ['TRIAL', 'STARTER', 'BASIC', 'PRO', 'PREMIUM', null] },
     startedAt: Date,
@@ -62,14 +61,9 @@ const userSchema = new mongoose.Schema({
 
 // Індекси для швидкого пошуку
 userSchema.index({ lastActivityAt: -1 });
-userSchema.index({ 'subscription.expiresAt': 1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
 
-// Virtual для перевірки активної підписки
-userSchema.virtual('hasActiveSubscription').get(function() {
-  return this.subscription?.expiresAt && this.subscription.expiresAt > new Date();
-});
 
 // Метод для оновлення останньої активності
 userSchema.methods.updateActivity = function() {

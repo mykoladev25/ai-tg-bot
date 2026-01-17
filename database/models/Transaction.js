@@ -32,6 +32,9 @@ const transactionSchema = new mongoose.Schema({
     apiCost: Number       // Реальна вартість API
   },
   
+  // Для Stripe платежів
+  sessionId: { type: String, unique: true, sparse: true, index: true },
+
   // Додаткові дані
   metadata: {
     type: Map,

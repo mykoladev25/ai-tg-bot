@@ -5,7 +5,21 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/neurol
 
 async function connect() {
   try {
-    await mongoose.connect(MONGODB_URI);
+    // ⏱️ Set connection timeout to 10 seconds
+    const connectPromise = mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 10000,
+      connectTimeoutMS: 10000,
+    });
+
+    // Race: either connect or timeout after 10 seconds
+    await Promise.race([
+      connectPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('MongoDB connection timeout after 10s')), 10000)
+      )
+    ]);
+
     console.log('✅ Connected to MongoDB');
     
     mongoose.connection.on('error', (err) => {
@@ -18,7 +32,8 @@ async function connect() {
     
     return true;
   } catch (error) {
-    console.error('❌ Failed to connect to MongoDB:', error.message);
+    console.error('⚠️ Failed to connect to MongoDB:', error.message);
+    console.log('⚠️ Bot will continue without database (read-only mode)');
     return false;
   }
 }

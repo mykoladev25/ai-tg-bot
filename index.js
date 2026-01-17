@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
+const express = require('express');
 const groqWhisper = require('./services/groq-whisper');
 const adminNotifier = require('./utils/adminNotifier');
 
@@ -8,6 +9,10 @@ const adminNotifier = require('./utils/adminNotifier');
 const claude = require('./services/claude');
 const midjourney = require('./services/midjourney');
 const replicate = require('./services/replicate');
+const payment = require('./services/payment');
+
+// Імпортуємо webhooks
+const stripeWebhook = require('./webhooks/stripe');
 
 // Імпортуємо утиліти
 const keyboard = require('./utils/keyboard');
@@ -150,7 +155,14 @@ const INSTRUCTION_HTML = `
 - <b>Генерація може не відповідати очікуванням</b> — це особливість AI
 - <b>Повернення токенів за виконані дії не передбачено</b>
 
-ℹ️ Використовуючи бота, ви погоджуєтесь з цією політикою.
+📋 <b>Юридична інформація:</b>
+Перед оплатою ознайомтесь з нашими документами:
+- Угода користувача
+- Політика приватності
+
+Введіть команду <i>/info</i> для перегляду юридичної інформації.
+
+ℹ️ Використовуючи бота, ви погоджуєтесь з умовами обслуговування.
 `;
 
 // ==================== КОМАНДИ ====================
@@ -180,6 +192,7 @@ bot.command('help', async (ctx) => {
 /balance - Перевірити баланс
 /history - Історія використання
 /clear - Очистити історію розмови
+/info - Юридична інформація (Угода користувача)
 /help - Ця довідка
 
 💡 Як користуватися:
@@ -194,6 +207,8 @@ bot.command('help', async (ctx) => {
 👤 Підтримка:
 https://t.me/nnn_ddddddd
 
+📋 Для перегляду умов оплати: /info
+
 © 2025 neuro.lab.ai Всі права захищені.`;
 
   await ctx.reply(helpText, keyboard.createBackButton());
@@ -206,9 +221,7 @@ bot.command('profile', async (ctx) => {
 bot.command('balance', async (ctx) => {
   const user = await userBalance.getUser(ctx.from.id, ctx.from);
   await ctx.reply(
-    `💰 Ваш баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
-    `📦 Підписка: ${user.subscription?.type || 'Немає'}\n` +
-    `${user.subscription?.expiresAt ? `⏰ До: ${new Date(user.subscription.expiresAt).toLocaleDateString()}` : ''}`,
+    `💰 Ваш баланс: ${user.tokens.toFixed(2)}⚡`,
     keyboard.createBackButton()
   );
 });
@@ -237,6 +250,19 @@ bot.command('history', async (ctx) => {
 bot.command('clear', async (ctx) => {
   await userBalance.clearConversationHistory(ctx.from.id);
   await ctx.reply('✅ Історію розмови очищено!', keyboard.createMainMenu());
+});
+
+bot.command('info', async (ctx) => {
+  const message = `📋 <b>Юридична інформація</b>
+
+Перед оплатою будь ласка ознайомтесь з нашими юридичними документами:
+
+📋 <b>Угода користувача</b> - регулює взаємовідносини між мерчантом та власником картки
+🔒 <b>Політика приватності</b> - описує як ми обробляємо вашу персональну інформацію
+
+Натисніть на кнопку нижче щоб ознайомитися з повним текстом документів:`;
+
+  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createLegalMenu() });
 });
 
 // ==================== ГОЛОВНЕ МЕНЮ ====================
@@ -462,10 +488,10 @@ bot.action('video_menu', async (ctx) => {
   await ctx.reply('🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇', keyboard.createInlineMenu(models.video.models, 1));
 });
 
-// Subscription
+// Tokens purchase
 bot.action('buy_subscription', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.reply(`💎 Оберіть підписку\n\n Виберіть план 👇`, keyboard.createSubscriptionsMenu());
+  await ctx.reply(`⚡ Купити токени\n\n Виберіть пакет 👇`, keyboard.createSubscriptionsMenu());
 });
 
 bot.action('community', async (ctx) => {
@@ -486,23 +512,39 @@ bot.action('community', async (ctx) => {
   await ctx.reply(message, { parse_mode: 'HTML', disable_web_page_preview: false, ...keyboard.createBackButton() });
 });
 
+bot.action('legal_info', async (ctx) => {
+  await ctx.answerCbQuery();
+  const message = `📋 <b>Юридична інформація</b>
+
+Перед оплатою будь ласка ознайомтесь з нашими юридичними документами:
+
+📋 <b>Угода користувача</b> - регулює взаємовідносини між мерчантом та власником картки
+🔒 <b>Політика приватності</b> - описує як ми обробляємо вашу персональну інформацію
+
+Натисніть на кнопку нижче щоб ознайомитися з повним текстом документів:`;
+
+  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createLegalMenu() });
+});
+
 bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
   await ctx.answerCbQuery();
   
   const planKey = ctx.match[1];
   const sub = models.subscriptions[planKey];
-  
+  const userId = ctx.from.id;
+  const telegramId = ctx.from.id;
+
   if (!sub) {
-    await ctx.reply('❌ Підписка не знайдена');
+    await ctx.reply('❌ План не знайдено');
     return;
   }
   
-  let message = `💳 Підписка ${sub.name}\n\n`;
+  let message = `⚡ Пакет токенів ${sub.name}\n\n`;
   message += sub.features.join('\n') + '\n\n';
   message += `💰 Вартість: ${sub.price}⭐ (Telegram Stars)\n`;
   message += `🎁 Токенів: ${sub.tokens}⚡`;
   
-  await ctx.reply(message, keyboard.createPaymentMenu(sub.price, planKey));
+  await ctx.reply(message, keyboard.createPaymentMenu(sub.price, planKey, userId, telegramId));
 });
 
 bot.action(/^pay_stars_(starter|basic|pro|premium)$/, async (ctx) => {
@@ -512,17 +554,17 @@ bot.action(/^pay_stars_(starter|basic|pro|premium)$/, async (ctx) => {
   const sub = models.subscriptions[planKey];
   
   if (!sub) {
-    await ctx.reply('❌ Підписка не знайдена');
+    await ctx.reply('❌ План не знайдено');
     return;
   }
   
   const invoice = {
-    title: `${sub.name} Підписка`,
-    description: `Підписка на 1 місяць з ${sub.tokens} токенами`,
-    payload: JSON.stringify({ type: 'subscription', plan: planKey }),
+    title: `${sub.name} - ${sub.tokens}⚡ токенів`,
+    description: `Купити ${sub.tokens} токенів`,
+    payload: JSON.stringify({ type: 'tokens_purchase', plan: planKey }),
     provider_token: '',
     currency: 'XTR',
-    prices: [{ label: `${sub.name} підписка`, amount: sub.price }]
+    prices: [{ label: `${sub.name} пакет`, amount: sub.price }]
   };
   
   try {
@@ -542,22 +584,21 @@ bot.on('successful_payment', async (ctx) => {
   const userId = ctx.from.id;
   const payload = JSON.parse(ctx.message.successful_payment.invoice_payload);
   
-  if (payload.type === 'subscription') {
+  if (payload.type === 'tokens_purchase') {
     const planKey = payload.plan;
     const sub = models.subscriptions[planKey];
     
     if (!sub) {
-      await ctx.reply('❌ Помилка: підписка не знайдена');
+      await ctx.reply('❌ Помилка: план не знайдено');
       return;
     }
     
-    await userBalance.addTokens(userId, sub.tokens, 'subscription_purchase', { plan: sub.name, price: sub.price });
-    await userBalance.setSubscription(userId, sub.name, 30);
-    
+    await userBalance.addTokens(userId, sub.tokens, 'tokens_purchase', { plan: sub.name, price: sub.price });
+
     const user = await userBalance.getUser(userId, ctx.from);
     
     await ctx.reply(
-      `✅ Оплата успішна!\n\n🎉 Ви отримали ${sub.tokens}⚡ токенів\n💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n📦 Підписка: ${sub.name}\n\nДякуємо за підтримку! 💙`,
+      `✅ Оплата успішна!\n\n🎉 Ви отримали ${sub.tokens}⚡ токенів\n💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n\nДякуємо за підтримку! 💙`,
       keyboard.createMainMenu()
     );
   }
@@ -1225,16 +1266,12 @@ async function showProfile(ctx) {
   message += `🆔 ID: ${ctx.from.id}\n`;
   message += `👤 Ім'я: ${ctx.from.first_name}\n`;
   message += `💰 Баланс: ${stats.currentBalance.toFixed(2)}⚡\n`;
-  message += `📦 Підписка: ${stats.subscriptionType || 'Немає'}\n`;
-  if (stats.subscriptionExpiry) {
-    message += `⏰ До: ${stats.subscriptionExpiry.toLocaleDateString('uk-UA')}\n`;
-  }
   message += `\n📊 Статистика:\n`;
   message += `🎨 Генерацій: ${stats.generationCount}\n`;
   message += `💸 Витрачено: ${stats.totalSpent.toFixed(2)}⚡\n`;
   message += `📅 З нами: ${stats.memberSince.toLocaleDateString('uk-UA')}`;
   
-  await ctx.reply(message, keyboard.createSubscriptionMenu());
+  await ctx.reply(message, keyboard.createProfileMenu());
 }
 
 async function showInsufficientTokens(ctx, required) {
@@ -1288,8 +1325,15 @@ async function startBot() {
   try {
     console.log('🚀 Starting neuro.lab.ai Bot...');
     console.log('📡 Connecting to MongoDB...');
-    await db.connect();
-    
+
+    // Try to connect to MongoDB, but continue if it fails
+    const dbConnected = await db.connect();
+    if (dbConnected) {
+      console.log('✅ Database connected');
+    } else {
+      console.log('⚠️ Database connection failed - bot will work in limited mode');
+    }
+
     console.log('🤖 Starting bot...');
     console.log('✅ Bot started successfully!');
     console.log('📱 Bot username: @neuro_lab_ai_bot');
@@ -1312,6 +1356,293 @@ async function startBot() {
       }, 5000);
     }
 
+    // ==================== EXPRESS SERVER ====================
+    const app = express();
+    const PORT = process.env.PORT || 5500;
+
+    // Middleware для Stripe webhook (необхідно до express.json())
+    app.post('/webhook/stripe', express.raw({ type: 'application/json' }), (req, res) => {
+      stripeWebhook.handleStripeWebhook(req, res, bot).catch(error => {
+        console.error('Webhook handler error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+      });
+    });
+
+    // Інші middleware
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
+    app.use(express.static(__dirname + '/public'));
+
+    // ==================== PAGES ====================
+
+    // ✅ Stripe checkout page
+    app.get('/pay/stripe', (req, res) => {
+      const plan = req.query.plan;
+
+      console.log(`📄 Stripe checkout page requested: plan=${plan}`);
+
+      if (!plan) {
+        return res.status(400).send('План не обрано');
+      }
+
+      const filePath = __dirname + '/public/stripe-checkout.html';
+      console.log(`📂 Sending file: ${filePath}`);
+      res.sendFile(filePath);
+    });
+
+    // ✅ Stripe checkout route
+    app.post('/api/stripe/checkout', async (req, res) => {
+      const { userId, plan, tokens, amount } = req.body;
+
+      console.log(`📋 Checkout request:`, { userId, plan, tokens, amount });
+
+      if (!userId || !plan || !tokens || amount === undefined) {
+        console.error('❌ Missing required fields:', { userId, plan, tokens, amount });
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields: userId, plan, tokens, amount'
+        });
+      }
+
+      const result = await payment.createStripeCheckout(userId, plan, tokens, amount);
+
+      if (result.success) {
+        res.json({
+          success: true,
+          url: result.url,
+          sessionId: result.sessionId
+        });
+      } else {
+        console.error('❌ Stripe checkout error:', result.error);
+        res.status(400).json({
+          success: false,
+          error: result.error
+        });
+      }
+    });
+
+    // ✅ Check payment status
+    app.get('/api/payment/status/:sessionId', async (req, res) => {
+      const { sessionId } = req.params;
+
+      const result = await payment.getCheckoutSession(sessionId);
+
+      if (result.success) {
+        res.json({
+          success: true,
+          status: result.session.payment_status,
+          metadata: result.session.metadata
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          error: result.error
+        });
+      }
+    });
+
+    // ✅ Process completed payment (called from success page)
+    app.post('/api/payment/process/:sessionId', async (req, res) => {
+      const { sessionId } = req.params;
+
+      console.log(`🔄 Processing payment for session: ${sessionId}`);
+
+      try {
+        const result = await payment.getCheckoutSession(sessionId);
+
+        if (!result.success) {
+          return res.status(400).json({
+            success: false,
+            error: 'Failed to retrieve session'
+          });
+        }
+
+        const session = result.session;
+
+        // Check if payment was actually completed
+        if (session.payment_status !== 'paid') {
+          return res.json({
+            success: false,
+            error: 'Payment not completed yet',
+            status: session.payment_status
+          });
+        }
+
+        // Extract metadata
+        const { userId, plan, tokens } = session.metadata || {};
+
+        if (!userId || !tokens) {
+          console.error('❌ Missing metadata in session:', session.metadata);
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid session metadata'
+          });
+        }
+
+        // Check if already processed (idempotency)
+        const Transaction = require('./database/models/Transaction');
+        const existingTransaction = await Transaction.findOne({ sessionId });
+
+        if (existingTransaction) {
+          console.log(`⚠️ Transaction already processed for session ${sessionId}`);
+          return res.json({
+            success: true,
+            message: 'Already processed',
+            tokens: tokens
+          });
+        }
+
+        // Credit tokens to user
+        await userBalance.addTokens(
+          parseInt(userId),
+          parseInt(tokens),
+          'stripe_payment',
+          { plan, sessionId: session.id, amount: session.amount_total }
+        );
+
+        // Send message to user
+        try {
+          await bot.telegram.sendMessage(
+            userId,
+            `✅ Оплату отримано!\n\n` +
+            `💳 Метод: Stripe\n` +
+            `💎 Тариф: ${plan}\n` +
+            `⚡ Токенів нараховано: ${tokens}\n` +
+            `💰 Сума: $${(session.amount_total / 100).toFixed(2)}\n\n` +
+            `Дякуємо за покупку! 🎉`,
+            { parse_mode: 'HTML' }
+          );
+        } catch (error) {
+          console.error('Error sending message to user:', error.message);
+        }
+
+        console.log(`✅ Payment processed successfully for user ${userId}: +${tokens}⚡`);
+
+        res.json({
+          success: true,
+          message: 'Tokens credited successfully',
+          tokens: tokens
+        });
+      } catch (error) {
+        console.error('❌ Error processing payment:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // ✅ Health check
+    app.get('/health', (req, res) => {
+      res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    });
+
+    // ✅ Get subscription plans
+    app.get('/api/plans', (req, res) => {
+      const subscriptions = models.subscriptions;
+      const plans = {};
+
+      ['starter', 'basic', 'pro', 'premium'].forEach(planKey => {
+        const sub = subscriptions[planKey];
+        if (sub) {
+          plans[planKey] = {
+            name: sub.name,
+            tokens: sub.tokens,
+            price: sub.price / 100, // конвертуємо з центів в доларі
+            features: sub.features.filter(f => f.trim() && !f.startsWith('•') && f.length > 3)
+          };
+        }
+      });
+
+      res.json({ success: true, plans });
+    });
+
+    // ✅ Payment success page
+    app.get('/payment/success', (req, res) => {
+      const sessionId = req.query.session_id;
+      console.log(`✅ Payment success page requested for session: ${sessionId}`);
+
+      const filePath = __dirname + '/public/payment-success.html';
+      res.sendFile(filePath);
+    });
+
+    // ✅ Payment cancel page
+    app.get('/payment/cancel', (req, res) => {
+      const sessionId = req.query.session_id;
+      console.log(`❌ Payment cancelled for session: ${sessionId}`);
+
+      res.send(`
+        <!DOCTYPE html>
+        <html lang="uk">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>❌ Платіж скасовано</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              min-height: 100vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              padding: 20px;
+            }
+            .container {
+              background: white;
+              border-radius: 12px;
+              box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+              max-width: 500px;
+              width: 100%;
+              padding: 40px;
+              text-align: center;
+            }
+            h1 { color: #c33; font-size: 28px; margin-bottom: 20px; }
+            p { color: #666; font-size: 16px; margin-bottom: 30px; line-height: 1.5; }
+            .button {
+              display: inline-block;
+              padding: 14px 32px;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white;
+              text-decoration: none;
+              border-radius: 8px;
+              font-weight: 600;
+              transition: transform 0.2s;
+            }
+            .button:hover { transform: translateY(-2px); }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>❌ Платіж скасовано</h1>
+            <p>Ви скасували платіж. Спробуйте знову, коли будете готові.</p>
+            <a href="javascript:history.back()" class="button">← Повернутись</a>
+          </div>
+        </body>
+        </html>
+      `);
+    });
+
+    // ✅ Catch-all 404
+    app.use((req, res) => {
+      res.status(404).json({ error: 'Not found' });
+    });
+
+    // ==================== ERROR HANDLING ====================
+    app.use((err, req, res, next) => {
+      console.error('Express error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    });
+
+    // ==================== START SERVER ====================
+    const server = app.listen(PORT, () => {
+      console.log(`🌍 Express server running on port ${PORT}`);
+      console.log(`📝 Stripe webhook: POST http://127.0.0.1:${PORT}/webhook/stripe`);
+      console.log(`🛒 Checkout API: POST http://127.0.0.1:${PORT}/api/stripe/checkout`);
+    });
+
+    // ==================== START BOT ====================
     await bot.launch();
     
     process.once('SIGINT', async () => {

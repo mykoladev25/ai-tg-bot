@@ -133,7 +133,7 @@ async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
     user.tokens += amount;
     const balanceAfter = user.tokens;
     
-    if (reason === 'purchase' || reason === 'subscription_purchase') {
+    if (reason === 'purchase' || reason === 'subscription_purchase' || reason === 'stripe_payment') {
       user.totalTokensPurchased += amount;
     }
     user.totalTokensEarned += amount;
@@ -142,7 +142,7 @@ async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
     
     // Визначаємо категорію
     let category = 'bonus';
-    if (reason.includes('subscription') || reason.includes('purchase')) {
+    if (reason.includes('subscription') || reason.includes('purchase') || reason.includes('stripe')) {
       category = 'subscription';
     } else if (reason.includes('admin')) {
       category = 'admin';
@@ -151,7 +151,7 @@ async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
     }
     
     // Створюємо транзакцію
-    await Transaction.create({
+    const transactionData = {
       userId,
       type: 'addition',
       category,
@@ -160,8 +160,15 @@ async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
       balanceAfter,
       description: reason,
       metadata
-    });
-    
+    };
+
+    // Додаємо sessionId якщо це Stripe платіж
+    if (metadata.sessionId) {
+      transactionData.sessionId = metadata.sessionId;
+    }
+
+    await Transaction.create(transactionData);
+
     return balanceAfter;
   } catch (error) {
     console.error('Error in addTokens:', error);
@@ -193,19 +200,6 @@ async function setSubscription(userId, subscriptionType, durationDays = 30) {
   } catch (error) {
     console.error('Error in setSubscription:', error);
     return null;
-  }
-}
-
-/**
- * Перевірити чи активна підписка
- */
-async function hasActiveSubscription(userId) {
-  try {
-    const user = await User.findById(userId);
-    return user?.hasActiveSubscription || false;
-  } catch (error) {
-    console.error('Error in hasActiveSubscription:', error);
-    return false;
   }
 }
 
@@ -288,10 +282,7 @@ async function getUserStats(userId) {
       audioRequests: user.stats.audioRequests,
       visionRequests: user.stats.visionRequests,
       memberSince: user.createdAt,
-      lastActivity: user.lastActivityAt,
-      hasSubscription: user.hasActiveSubscription,
-      subscriptionType: user.subscription?.type,
-      subscriptionExpiry: user.subscription?.expiresAt
+      lastActivity: user.lastActivityAt
     };
   } catch (error) {
     console.error('Error in getUserStats:', error);
@@ -308,10 +299,6 @@ async function getAllUsers(filters = {}) {
     
     if (filters.isBanned !== undefined) {
       query.isBanned = filters.isBanned;
-    }
-    
-    if (filters.hasSubscription) {
-      query['subscription.expiresAt'] = { $gt: new Date() };
     }
     
     return await User.find(query)
@@ -345,7 +332,6 @@ module.exports = {
   deductTokens,
   addTokens,
   setSubscription,
-  hasActiveSubscription,
   saveConversationMessage,
   getConversationHistory,
   clearConversationHistory,

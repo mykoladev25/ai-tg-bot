@@ -54,11 +54,11 @@ function createGPTActionsMenu(actions) {
 }
 
 /**
- * Меню покупки підписки
+ * Меню покупки токенів
  */
 function createSubscriptionMenu() {
   return Markup.inlineKeyboard([
-    [Markup.button.callback('💳 Купити підписку', 'buy_subscription')],
+    [Markup.button.callback('💰 Купити токени', 'buy_subscription')],
     [Markup.button.callback('👥 Спільнота', 'community')],
     [Markup.button.callback('🏠 Головне меню', 'main_menu')]
   ]);
@@ -67,9 +67,26 @@ function createSubscriptionMenu() {
 /**
  * Меню оплати
  */
-function createPaymentMenu(price, plan = 'basic') {
+function createPaymentMenu(price, plan = 'basic', userId = null, telegramId = null) {
+  const appUrl = process.env.APP_URL || 'http://127.0.0.1:5500';
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  // Build URL with both userId and telegramId
+  let stripeUrl = `${appUrl}/pay/stripe?plan=${plan}`;
+  if (userId) {
+    stripeUrl += `&userId=${userId}`;
+  }
+  if (telegramId) {
+    stripeUrl += `&tg_id=${telegramId}`;
+  }
+
   return Markup.inlineKeyboard([
-    [Markup.button.callback(`✨ Оплатити ${price}⭐`, `pay_stars_${plan}`)],
+    [Markup.button.callback(`💫 Telegram Stars (${price}⭐)`, `pay_stars_${plan}`)],
+    // Use webApp only in production (HTTPS), use regular URL for development
+    // [isProduction
+    //   ? Markup.button.webApp(`💳 Stripe (Card/Apple/Google)`, stripeUrl)
+    //   : Markup.button.url(`💳 Stripe (Card/Apple/Google)`, stripeUrl)
+    // ],
     [Markup.button.callback('🔙 Назад', 'buy_subscription')],
     [Markup.button.callback('🏠 Головне меню', 'main_menu')]
   ]);
@@ -135,7 +152,7 @@ function createSubscriptionsMenu() {
       
       buttons.push([
         Markup.button.callback(
-          `${emoji} ${sub.name} (${sub.tokens}⚡) - $${priceUSD}`,
+          `${emoji} ${sub.name} (${sub.tokens}⚡ токенів) - ${sub.price}⭐`,
           `sub_${planKey}`
         )
       ]);
@@ -147,6 +164,32 @@ function createSubscriptionsMenu() {
   return Markup.inlineKeyboard(buttons);
 }
 
+/**
+ * Меню з юридичною інформацією (Угода користувача, Політика приватності)
+ */
+function createLegalMenu() {
+  const termsUrl = process.env.TERMS_OF_SERVICE_URL || 'https://neurolab.fun/terms';
+  const privacyUrl = process.env.PRIVACY_POLICY_URL || 'https://neurolab.fun/privacy';
+
+  return Markup.inlineKeyboard([
+    [Markup.button.url('📋 Угода користувача', termsUrl)],
+    [Markup.button.url('🔒 Політика приватності', privacyUrl)],
+    [Markup.button.callback('🏠 Головне меню', 'main_menu')]
+  ]);
+}
+
+/**
+ * Кнопки для профілю з доступом до юридичної інформації
+ */
+function createProfileMenu() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('💰 Купити токени', 'buy_subscription')],
+    [Markup.button.callback('👥 Спільнота', 'community')],
+    [Markup.button.callback('📋 Юридична інформація', 'legal_info')],
+    [Markup.button.callback('🏠 Головне меню', 'main_menu')]
+  ]);
+}
+
 module.exports = {
   createMainMenu,
   createInlineMenu,
@@ -156,5 +199,7 @@ module.exports = {
   createPaymentMenu,
   createGenerationActionsMenu,
   createConfirmationMenu,
-  createSubscriptionsMenu
+  createSubscriptionsMenu,
+  createLegalMenu,
+  createProfileMenu
 };
