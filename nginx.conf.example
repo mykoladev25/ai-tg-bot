@@ -44,6 +44,10 @@ server {
     # Обмеження розміру тіла запиту (для файлів)
     client_max_body_size 50M;
 
+    # Корінь для статичних файлів
+    root /var/www/neurolab.fun;
+    index index.html;
+
     # Webhook для LiqPay
     location /webhook/liqpay {
         proxy_pass http://neuro_lab_api;
@@ -123,15 +127,20 @@ server {
         access_log off;
     }
 
-    # Статичні файли (public)
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        proxy_pass http://neuro_lab_api;
+    # Статичні файли напряму з диску
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|mp4|webm|ogg)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
+        try_files $uri =404;
     }
 
-    # Все інше
+    # Головна сторінка та інші статичні файли
     location / {
+        try_files $uri $uri/ @nodejs;
+    }
+
+    # Проксі на Node.js якщо файл не знайдено
+    location @nodejs {
         proxy_pass http://neuro_lab_api;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -162,4 +171,3 @@ server {
         return 301 https://$server_name$request_uri;
     }
 }
-
