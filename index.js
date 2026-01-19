@@ -1688,11 +1688,13 @@ async function startBot() {
     // ✅ Get subscription plans with dynamic LiqPay prices
     app.get('/api/plans', async (req, res) => {
       try {
+        const startTime = Date.now();
         const subscriptions = models.subscriptions;
         const plans = {};
 
-        // Отримуємо актуальний курс USD/UAH
+        // Отримуємо актуальний курс USD/UAH (з кешем для швидкості)
         const rate = await exchangeRate.getRate();
+        const fetchTime = Date.now() - startTime;
 
         // Telegram Stars rate: 1 Star = $0.024 (офіційний курс)
         const tgStarRate = 0.024;
@@ -1716,10 +1718,13 @@ async function startBot() {
               priceUAHDynamic: priceUAHDynamic, // LiqPay динамічна ціна
               exchangeRate: rate, // Поточний курс USD/UAH
               tgStarRate: tgStarRate, // Курс TG Star до USD
-              features: sub.features.filter(f => f.trim() && !f.startsWith('•') && f.length > 3)
+              features: sub.features  // Показуємо всі features як є
             };
           }
         });
+
+        const totalTime = Date.now() - startTime;
+        console.log(`📊 /api/plans response time: ${totalTime}ms (rate fetch: ${fetchTime}ms)`);
 
         res.json({
           success: true,
@@ -1728,6 +1733,7 @@ async function startBot() {
             'USD/UAH': rate,
             'USD/TGStar': tgStarRate
           },
+          responseTime: totalTime,
           timestamp: new Date().toISOString()
         });
       } catch (error) {

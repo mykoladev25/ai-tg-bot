@@ -80,8 +80,6 @@
         border-radius: 12px;
         padding: 20px;
         margin-bottom: 30px;
-        max-height: 200px;
-        overflow-y: auto;
       }
 
       .features li {
@@ -206,6 +204,16 @@
         100% {
           transform: rotate(360deg);
         }
+      }
+
+      #features {
+        line-height: 1.6;
+        font-size: 14px;
+        color: #333;
+      }
+
+      #features div {
+        padding: 2px 0;
       }
 
       .error {
@@ -442,8 +450,8 @@
 
     <div class="terms">
         Натискаючи "Оплатити", ви погоджуєтесь з
-        <a href="/terms" target="_blank">умовами обслуговування</a> та
-        <a href="/privacy" target="_blank">політикою приватності</a>
+        <a href="https://neurolab.fun/bot/terms" target="_blank">умовами обслуговування</a> та
+        <a href="https://neurolab.fun/bot/privacy" target="_blank">політикою приватності</a>
     </div>
 
     <div class="loading" id="loading">
@@ -460,24 +468,32 @@
     const tg_id = urlParams.get('tg_id');
 
     // Карта планів (буде замінена на дані з серверу)
-    let plans = {
-        starter: { name: 'STARTER', price: 199, tokens: 240, exchangeRate: 45, features: ['240⚡ токенів', 'Доступ до всіх моделей', 'Токени не мають терміну дії'] },
-        basic: { name: 'BASIC', price: 499, tokens: 720, exchangeRate: 45, features: ['720⚡ токенів', 'Для активних користувачів', 'Токени не мають терміну дії'] },
-        pro: { name: 'PRO', price: 999, tokens: 1600, exchangeRate: 45, features: ['1600⚡ токенів', 'Для професіоналів', 'Токени не мають терміну дії'] },
-        premium: { name: 'PREMIUM', price: 1999, tokens: 4000, exchangeRate: 45, features: ['4000⚡ токенів', 'Максимум можливостей', 'Токени не мають терміну дії'] }
-    };
+    let plans = {};
 
     let selectedMethod = 'card';
 
     // Завантажуємо ціни з серверу
     async function loadPlans() {
         try {
+            // Показуємо загрузник
+            const loadingEl = document.getElementById('loading');
+            if (loadingEl) {
+                loadingEl.style.display = 'block';
+                loadingEl.innerHTML = '<div class="spinner"></div>Завантаження планів...';
+            }
+
             const response = await fetch('/api/plans');
             const data = await response.json();
 
             console.log('📊 API response:', data);
 
             if (data.success && data.plans) {
+                // Приховуємо загрузник
+                const loadingEl = document.getElementById('loading');
+                if (loadingEl) {
+                    loadingEl.style.display = 'none';
+                }
+
                 // Конвертуємо дані з API у формат для нашої сторінки
                 plans = {};
                 for (const [key, planData] of Object.entries(data.plans)) {
@@ -502,14 +518,33 @@
             init();
         } catch (error) {
             console.error('❌ Error loading plans:', error);
-            // Fallback: використовуємо дефолтні ціни (вже ініціалізовані вище)
-            init();
+
+            // Приховуємо загрузник
+            const loadingEl = document.getElementById('loading');
+            if (loadingEl) {
+                loadingEl.style.display = 'none';
+            }
+
+            showError('❌ Помилка завантаження даних про плани. Спробуйте перезагрузити сторінку.');
         }
     }
 
     // Ініціалізація
     function init() {
-        const selectedPlan = plans[plan] || plans.starter;
+        // Перевіряємо чи плани завантажені
+        if (!plans || Object.keys(plans).length === 0) {
+            console.error('❌ Plans are not loaded yet');
+            showError('❌ Плани не завантажені. Спробуйте перезагрузити сторінку.');
+            return;
+        }
+
+        const selectedPlan = plans[plan];
+        if (!selectedPlan) {
+            console.error('❌ Plan not found:', plan);
+            showError('❌ План не знайдено.');
+            return;
+        }
+
         console.log('📍 Selected plan:', plan, selectedPlan);
 
         document.getElementById('amount').textContent = selectedPlan.price + ' ₴';
@@ -522,8 +557,18 @@
         }
         document.getElementById('tokensInfo').innerHTML = tokensText;
 
-        const featuresList = selectedPlan.features.map(f => `<li>${f}</li>`).join('');
-        document.getElementById('features').innerHTML = `<ul>${featuresList}</ul>`;
+        // Виводимо features з правильним форматуванням
+        const featuresList = selectedPlan.features
+            .map(f => {
+                if (!f.trim()) {
+                    return ''; // Порожні строки
+                }
+                // Всі строки як-є (з маркерами та емодзі)
+                return `<div style="margin: 4px 0;">${f}</div>`;
+            })
+            .filter(f => f.trim()) // Видаляємо порожні
+            .join('');
+        document.getElementById('features').innerHTML = featuresList;
 
         // Показуємо поточний курс якщо доступний
         if (selectedPlan.exchangeRate) {
@@ -561,7 +606,28 @@
     }
 
     function goBack() {
-        window.history.back();
+        // Спробуємо закрити через Telegram Web App API
+        if (window.Telegram && window.Telegram.WebApp) {
+            try {
+                // Для Web App - використовуємо close() або BackButton
+                if (window.Telegram.WebApp.BackButton) {
+                    window.Telegram.WebApp.BackButton.click();
+                    return;
+                }
+                window.Telegram.WebApp.close();
+                return;
+            } catch (e) {
+                console.warn('⚠️ Web App API failed, falling back to history:', e);
+            }
+        }
+
+        // Fallback: повертаємось у історії браузера
+        if (window.history.length > 1) {
+            window.history.back();
+        } else {
+            // Якщо історії немає, показуємо інструкцію
+            alert('📱 Клацніть кнопку меню Telegram (☰) щоб повернутися до бота');
+        }
     }
 
     async function processPayment() {
@@ -570,7 +636,11 @@
             return;
         }
 
-        const selectedPlan = plans[plan] || plans.starter;
+        const selectedPlan = plans[plan];
+        if (!selectedPlan) {
+            showError('❌ План не знайдено. Спробуйте перезагрузити сторінку.');
+            return;
+        }
 
         showLoading(true);
 

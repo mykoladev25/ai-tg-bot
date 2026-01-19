@@ -15,7 +15,7 @@ class ExchangeRateService {
     try {
       // API ПриватБанку для отримання курсів валют
       const response = await axios.get('https://api.privatbank.ua/p24api/pubinfo?json&exchange&coursid=5', {
-        timeout: 5000
+        timeout: 3000  // Скоротили з 5000 до 3000ms
       });
 
       if (response.data && Array.isArray(response.data)) {
@@ -48,7 +48,7 @@ class ExchangeRateService {
     try {
       // API НБУ для отримання курсів валют
       const response = await axios.get('https://bank.gov.ua/NBUStatService/v1/statdataandtimeofchange?valuecode=USD', {
-        timeout: 5000
+        timeout: 3000  // Скоротили з 5000 до 3000ms
       });
 
       if (response.data && response.data.length > 0) {
@@ -72,15 +72,23 @@ class ExchangeRateService {
   async getRate() {
     const now = Date.now();
 
-    // Якщо кеш ще свіжий, повертаємо його
+    // Якщо кеш ще свіжий (менше 1 години), повертаємо його одразу
     if (this.cachedRate && (now - this.lastUpdateTime) < this.cacheExpirationMs) {
-      console.log(`💰 Using cached rate: ${this.cachedRate.toFixed(2)} (age: ${Math.round((now - this.lastUpdateTime) / 1000)}s)`);
+      console.log(`💰 Using cached rate: ${this.cachedRate.toFixed(2)}`);
       return this.cachedRate;
     }
 
     console.log('🔄 Fetching fresh exchange rate...');
 
     try {
+      // Якщо є кеш, повертаємо його а потім оновлюємо у фоні
+      if (this.cachedRate) {
+        // Запускаємо оновлення у фоні, але одразу повертаємо кеш
+        setImmediate(() => this.updateRateInBackground());
+        return this.cachedRate;
+      }
+
+      // Якщо кешу немає, чекаємо оновлення
       // Спробуємо ПриватБанк спочатку (швидше)
       try {
         this.cachedRate = await this.getUSDtoUAHFromPrivatBank();
@@ -98,16 +106,29 @@ class ExchangeRateService {
       console.error('❌ Both exchange rate APIs failed:', error.message);
 
       // Якщо обидва API не працюють, використовуємо дефолтний курс
-      // або повертаємо кешований (навіть якщо старий)
-      if (this.cachedRate) {
-        console.warn(`⚠️ Using stale cached rate: ${this.cachedRate.toFixed(2)}`);
-        return this.cachedRate;
-      }
-
-      // Дефолтний курс (для екстремальних випадків)
       const defaultRate = 45;
       console.warn(`⚠️ Using default rate: ${defaultRate}`);
       return defaultRate;
+    }
+  }
+
+  /**
+   * Оновити курс у фоні (не блокує виконання)
+   */
+  async updateRateInBackground() {
+    try {
+      console.log('🔄 Updating exchange rate in background...');
+      try {
+        this.cachedRate = await this.getUSDtoUAHFromPrivatBank();
+        this.lastUpdateTime = Date.now();
+        console.log(`✅ Background update complete: ${this.cachedRate.toFixed(2)}`);
+      } catch (error) {
+        this.cachedRate = await this.getUSDtoUAHFromNBU();
+        this.lastUpdateTime = Date.now();
+        console.log(`✅ Background update complete (from NBU): ${this.cachedRate.toFixed(2)}`);
+      }
+    } catch (error) {
+      console.warn('⚠️ Background update failed:', error.message);
     }
   }
 
