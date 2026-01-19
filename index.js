@@ -542,9 +542,20 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
   
   let message = `⚡ Пакет токенів ${sub.name}\n\n`;
   message += sub.features.join('\n') + '\n\n';
-  message += `💰 Вартість: ${sub.price}⭐ (Telegram Stars)\n`;
-  message += `🎁 Токенів: ${sub.tokens}⚡`;
-  
+  message += `💰 Вартість:\n`;
+  message += `  ⭐ ${sub.price}⭐ Telegram Stars\n`;
+  message += `  💳 ${Math.round(sub.priceUSD * 45)}₴ LiqPay`;
+  if (sub.tokensLiqPay) {
+    message += ` (+${sub.tokensLiqPay - sub.tokens}⚡ бонус)`;
+  }
+  message += `\n\n`;
+  message += `🎁 Токенів:\n`;
+  message += `  ⭐ ${sub.tokens}⚡ за Telegram Stars\n`;
+  if (sub.tokensLiqPay) {
+    message += `  💳 ${sub.tokensLiqPay}⚡ за LiqPay (економія на комісіях) 🎁\n`;
+  }
+  message += `\n📱 Оберіть спосіб оплати 👇`;
+
   await ctx.reply(message, keyboard.createPaymentMenu(sub.price, planKey, userId, telegramId));
 });
 
@@ -1415,27 +1426,47 @@ async function startBot() {
 
     // ✅ LiqPay checkout API
     app.post('/api/liqpay/checkout', async (req, res) => {
-      const { userId, plan, amount, tokens } = req.body;
+      const { userId, plan, tokens } = req.body;
       const liqpay = require('./services/liqpay');
 
-      console.log(`📋 LiqPay checkout request:`, { userId, plan, amount, tokens });
+      console.log(`📋 LiqPay checkout request:`, { userId, plan, tokens });
 
-      if (!userId || !plan || !tokens || amount === undefined) {
-        console.error('❌ Missing required fields:', { userId, plan, tokens, amount });
+      if (!userId || !plan || !tokens) {
+        console.error('❌ Missing required fields:', { userId, plan, tokens });
         return res.status(400).json({
           success: false,
-          error: 'Missing required fields: userId, plan, tokens, amount'
+          error: 'Missing required fields: userId, plan, tokens'
         });
       }
 
       try {
+        // Отримуємо інформацію про план
+        const sub = models.subscriptions[plan];
+        if (!sub) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid plan'
+          });
+        }
+
+        // Отримуємо реальний курс USD/UAH
+        const rate = await exchangeRate.getRate();
+
+        // Розраховуємо суму в UAH на основі priceUSD та поточного курсу
+        const amountUAH = Math.round(sub.priceUSD * rate);
+
+        // Використовуємо tokensLiqPay (бонус для LiqPay платежу) або звичайні tokens
+        const tokenCount = sub.tokensLiqPay || sub.tokens;
+
+        console.log(`📊 LiqPay pricing: priceUSD=${sub.priceUSD}, rate=${rate.toFixed(2)}, amountUAH=${amountUAH}, tokens=${tokenCount}`);
+
         // Генеруємо унікальний ID замовлення: userId_planKey_timestamp
         const orderId = `${userId}_${plan}_${Date.now()}`;
 
         // Параметри платежу для LiqPay
         const checkoutParams = {
           order_id: orderId,
-          amount: Math.round(amount),
+          amount: amountUAH,
           currency: 'UAH',
           description: `neuro.lab.ai - ${plan} (${tokens}⚡)`,
           server_url: `${process.env.APP_URL || 'http://127.0.0.1:5500'}/webhook/liqpay`,
@@ -1663,20 +1694,28 @@ async function startBot() {
         // Отримуємо актуальний курс USD/UAH
         const rate = await exchangeRate.getRate();
 
+        // Telegram Stars rate: 1 Star = $0.024 (офіційний курс)
+        const tgStarRate = 0.024;
+
         ['starter', 'basic', 'pro', 'premium'].forEach(planKey => {
           const sub = subscriptions[planKey];
           if (sub) {
+            // Розраховуємо TG Stars динамічно: priceUSD / 0.024
+            const priceStarsDynamic = Math.round(sub.priceUSD / tgStarRate);
+
             // Розраховуємо LiqPay ціну: priceUSD * реальний курс
             const priceUAHDynamic = Math.round(sub.priceUSD * rate);
 
             plans[planKey] = {
               name: sub.name,
               tokens: sub.tokens,
-              price: sub.price, // Telegram Stars
+              tokensLiqPay: sub.tokensLiqPay,
+              price: sub.price, // Telegram Stars (оригінальна)
               priceUSD: sub.priceUSD, // Базова ціна в USD
-              priceUAH: sub.priceUAH, // Фіксована ціна LiqPay (резервна)
-              priceUAHDynamic: priceUAHDynamic, // Динамічна ціна на основі реального курсу
+              priceStarsDynamic: priceStarsDynamic, // TG Stars динамічна ціна
+              priceUAHDynamic: priceUAHDynamic, // LiqPay динамічна ціна
               exchangeRate: rate, // Поточний курс USD/UAH
+              tgStarRate: tgStarRate, // Курс TG Star до USD
               features: sub.features.filter(f => f.trim() && !f.startsWith('•') && f.length > 3)
             };
           }
@@ -1685,7 +1724,10 @@ async function startBot() {
         res.json({
           success: true,
           plans,
-          exchangeRate: rate,
+          rates: {
+            'USD/UAH': rate,
+            'USD/TGStar': tgStarRate
+          },
           timestamp: new Date().toISOString()
         });
       } catch (error) {

@@ -484,8 +484,10 @@
                     plans[key] = {
                         name: planData.name,
                         // Використовуємо динамічну ціну на основі реального курсу
-                        price: planData.priceUAHDynamic || planData.priceUAH || Math.round(planData.price * 0.4),
-                        tokens: planData.tokens,
+                        price: planData.priceUAHDynamic || Math.round(planData.priceUSD * 45),
+                        tokens: planData.tokensLiqPay || planData.tokens,
+                        originalTokens: planData.tokens,
+                        bonusTokens: planData.tokensLiqPay ? (planData.tokensLiqPay - planData.tokens) : 0,
                         exchangeRate: data.exchangeRate,
                         features: planData.features.length > 0 ? planData.features : ['Доступ до всіх моделей', 'Токени не мають терміну дії']
                     };
@@ -511,7 +513,14 @@
         console.log('📍 Selected plan:', plan, selectedPlan);
 
         document.getElementById('amount').textContent = selectedPlan.price + ' ₴';
-        document.getElementById('tokensInfo').textContent = selectedPlan.tokens + '⚡ токенів';
+
+        // Показуємо токени з бонусом
+        let tokensText = selectedPlan.tokens + '⚡ токенів';
+        if (selectedPlan.bonusTokens > 0) {
+            tokensText = `<span>${selectedPlan.tokens}⚡ токенів</span><br/>
+                         <span style="color: #4CAF50; font-size: 12px;">+${selectedPlan.bonusTokens}⚡ бонус LiqPay 🎁</span>`;
+        }
+        document.getElementById('tokensInfo').innerHTML = tokensText;
 
         const featuresList = selectedPlan.features.map(f => `<li>${f}</li>`).join('');
         document.getElementById('features').innerHTML = `<ul>${featuresList}</ul>`;
@@ -574,7 +583,6 @@
                 body: JSON.stringify({
                     userId: userId,
                     plan: plan,
-                    amount: selectedPlan.price,
                     tokens: selectedPlan.tokens,
                     paymentMethod: selectedMethod
                 })

@@ -10,18 +10,18 @@ module.exports = {
     ],
     actions: [
       { name: '🎙️ Говоріть', key: 'voice', cost: 0, apiCost: 0 },
-      { name: '✍️ Пишіть', key: 'text', cost: 1, apiCost: 0.008 }, // ✅ $0.012 user, 20% margin, але не важливий (LLM безкоштовні)
-      { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 5, apiCost: 0.048 } // ✅ $0.060 user, 20% margin
+      { name: '✍️ Пишіть', key: 'text', cost: 1, apiCost: 0.008 },
+      { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 5, apiCost: 0.048 }
     ]
   },
 
   video: {
     models: [
-      { name: '🎬 RunWay: Gen-4 Turbo ⚡', key: 'runway_turbo', cost: 26, apiCost: 0.25, available: true, requiresImage: true }, // ✅ $0.31 user, 20% margin, УНІКАЛЬНА
-      { name: '🎭 Kling', key: 'kling', cost: 37, apiCost: 0.35, available: true, requiresImage: false }, // ✅ $0.44 user vs $1.50 Higgsfield = 3.4x ДЕШЕВШЕ!
-      { name: '🔥 Kling Motion <10s', key: 'kling_motion_minimal', cost: 104, apiCost: 1, available: true, requiresImage: true }, // ✅ $1.25 user, 20% margin, УНІКАЛЬНА
-      { name: '🔥 Kling Motion 20s+ 💎', key: 'kling_motion', cost: 256, apiCost: 2.46, available: true, requiresImage: true }, // ✅ $3.07 user, 20% margin, УНІКАЛЬНА
-      { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 94, apiCost: 0.9, available: false, requiresImage: true }, // ✅ $1.13 user, 20% margin, УНІКАЛЬНА
+      { name: '🎬 RunWay: Gen-4 Turbo ⚡', key: 'runway_turbo', cost: 26, apiCost: 0.25, available: true, requiresImage: true },
+      { name: '🎭 Kling', key: 'kling', cost: 37, apiCost: 0.35, available: true, requiresImage: false },
+      { name: '🔥 Kling Motion <10s', key: 'kling_motion_minimal', cost: 104, apiCost: 1, available: true, requiresImage: true },
+      { name: '🔥 Kling Motion 20s+ 💎', key: 'kling_motion', cost: 256, apiCost: 2.46, available: true, requiresImage: true },
+      { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 94, apiCost: 0.9, available: false, requiresImage: true },
       { name: '🌊 MidJourney Video', key: 'midjourney_video', cost: 15, apiCost: 0, available: false },
       { name: '💜 HeyGen', key: 'heygen', cost: 12, apiCost: 0, available: false }
     ]
@@ -29,13 +29,13 @@ module.exports = {
 
   design: {
     models: [
-      { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 1, apiCost: 0.01, available: true }, // ✅ $0.012 user vs $0.041 Higgsfield = 3.4x ДЕШЕВШЕ!
-      { name: '🍌 Nano Banana PRO 2K', key: 'nano_banana_2k', cost: 16, apiCost: 0.15, resolution: '2K', maxImages: 14, available: true }, // ✅ $0.19 user vs $0.15 Higgsfield, КОНКУРЕНТНА!, 20% margin
-      { name: '🍌🍌 Nano Banana PRO 4K', key: 'nano_banana_4k', cost: 31, apiCost: 0.30, resolution: '4K', maxImages: 14, available: true }, // ✅ $0.37 user vs $0.20 Higgsfield, трохи дорожче але токени НЕ згорають!, 20% margin
-      { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 3, apiCost: 0.03, size: '2K', maxImages: 14, available: true }, // ✅ $0.036 user vs $0.075 Higgsfield = 2x ДЕШЕВШЕ!
-      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 6, apiCost: 0.06, size: '4K', maxImages: 14, available: true }, // ✅ $0.072 user vs $0.123 Higgsfield = 1.7x ДЕШЕВШЕ!
-      { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 2, apiCost: 0.02, maxImages: 1, available: true }, // ✅ $0.024 user vs $0.05 Higgsfield = 2x ДЕШЕВШЕ!
-      { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 3, apiCost: 0.03, maxImages: 1, available: true }, // ✅ $0.036 user vs $0.082 Higgsfield = 2.3x ДЕШЕВШЕ!
+      { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 1, apiCost: 0.01, available: true },
+      { name: '🍌 Nano Banana PRO 2K', key: 'nano_banana_2k', cost: 16, apiCost: 0.15, resolution: '2K', maxImages: 14, available: true },
+      { name: '🍌🍌 Nano Banana PRO 4K', key: 'nano_banana_4k', cost: 31, apiCost: 0.30, resolution: '4K', maxImages: 14, available: true },
+      { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 3, apiCost: 0.03, size: '2K', maxImages: 14, available: true },
+      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 6, apiCost: 0.06, size: '4K', maxImages: 14, available: true },
+      { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 2, apiCost: 0.02, maxImages: 1, available: true },
+      { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 3, apiCost: 0.03, maxImages: 1, available: true },
       { name: '🖼️ MidJourney', key: 'midjourney', cost: 3, apiCost: 0, available: false }
     ]
   },
@@ -51,7 +51,7 @@ module.exports = {
   subscriptions: {
     trial: {
       name: 'TRIAL',
-      tokens: 75, // ✅ Loss $0.90, acceptable для trial
+      tokens: 75,
       price: 0,
       features: [
         '🎁 75⚡ безкоштовних токенів',
@@ -60,23 +60,23 @@ module.exports = {
         '💡 Що можна згенерувати:',
         '• 75× Stable Diffusion (1⚡)',
         '• 25× Seedream 2K (3⚡)',
+        '• 12× Seedream 4K (6⚡)',
         '• 25× Ideogram (3⚡)',
         '• 37× Clarity (2⚡)',
         '• 4× Nano Banana 2K (16⚡)',
         '• 2× Nano Banana 4K (31⚡)',
         '• 2× Kling відео (37⚡)',
-        '• 2× Runway Turbo (26⚡)',
         '',
         '⚡ Токени НЕ згорають!'
       ]
     },
-    
+
     starter: {
       name: 'STARTER',
       tokens: 240,
-      price: 299, // Telegram Stars
-      priceUSD: 7, // Базова ціна в USD для LiqPay розрахунку
-      priceUAH: 199, // Фіксована ціна (якщо потрібна)
+      tokensLiqPay: 290,
+      price: 299,
+      priceUSD: 7,
       features: [
         '🚀 240⚡ токенів',
         '💎 Доступ до всіх моделей',
@@ -97,13 +97,13 @@ module.exports = {
         '✨ Комбінуйте як завгодно!'
       ]
     },
-    
+
     basic: {
       name: 'BASIC',
       tokens: 720,
-      price: 899, // Telegram Stars (~$21.4)
-      priceUSD: 20, // Базова ціна в USD для LiqPay розрахунку
-      priceUAH: 499, // Фіксована ціна (якщо потрібна)
+      tokensLiqPay: 870,
+      price: 899,
+      priceUSD: 20,
       features: [
         '💎 720⚡ токенів',
         '🎨 Для активних користувачів',
@@ -126,13 +126,13 @@ module.exports = {
         '🎬 Акцент на відео та зображення'
       ]
     },
-    
+
     pro: {
       name: 'PRO',
       tokens: 1600,
-      price: 1999, // Telegram Stars (~$47.6)
-      priceUSD: 45, // Базова ціна в USD для LiqPay розрахунку
-      priceUAH: 999, // Фіксована ціна (якщо потрібна)
+      tokensLiqPay: 1930,
+      price: 1999,
+      priceUSD: 45,
       features: [
         '🔥 1600⚡ токенів',
         '🚀 Для професіоналів',
@@ -155,13 +155,13 @@ module.exports = {
         '⚡ Найкраще співвідношення'
       ]
     },
-    
+
     premium: {
       name: 'PREMIUM',
       tokens: 4000,
-      price: 4999, // Telegram Stars (~$119.2)
-      priceUSD: 110, // Базова ціна в USD для LiqPay розрахунку
-      priceUAH: 1999, // Фіксована ціна (якщо потрібна)
+      tokensLiqPay: 4830,
+      price: 4999,
+      priceUSD: 110,
       features: [
         '👑 4000⚡ токенів',
         '💫 Максимум можливостей',

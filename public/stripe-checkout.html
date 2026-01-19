@@ -444,10 +444,11 @@
                 <h2>${planData.name}</h2>
                 <p>${planData.tokens}⚡ токенів для всіх генерацій</p>
                 <div class="price">
-                    <span class="amount">$${planData.price.toFixed(2)}</span>
-                    <span class="currency">USD</span>
+                    <span class="amount">⭐ ${planData.priceStarsDynamic || planData.price}</span>
+                    <span class="currency">Telegram Stars</span>
                     <span class="tokens">${planData.tokens}⚡</span>
                 </div>
+                ${planData.exchangeRate ? `<p style="font-size: 12px; color: #999; margin-top: 10px;">💱 Курс: 1 USD = ${planData.exchangeRate.toFixed(2)} ₴</p>` : ''}
             `;
 
             document.getElementById('planInfo').innerHTML = planHtml;

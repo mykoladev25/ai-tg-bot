@@ -152,8 +152,6 @@ function createSubscriptionsMenu() {
   paidPlans.forEach(planKey => {
     const sub = subscriptions[planKey];
     if (sub) {
-      const priceUSD = Math.round(sub.price * 0.024);
-      
       let emoji = '';
       if (planKey === 'starter') emoji = '🚀';
       else if (planKey === 'basic') emoji = '💎';
@@ -162,7 +160,7 @@ function createSubscriptionsMenu() {
       
       buttons.push([
         Markup.button.callback(
-          `${emoji} ${sub.name} (${sub.tokens}⚡ токенів) - ${sub.price}⭐`,
+          `${emoji} ${sub.name}\n ${sub.tokens}⚡ | ⭐ ${sub.price}`,
           `sub_${planKey}`
         )
       ]);
