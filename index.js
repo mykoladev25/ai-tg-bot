@@ -18,6 +18,7 @@ const stripeWebhook = require('./webhooks/stripe');
 // Імпортуємо утиліти
 const keyboard = require('./utils/keyboard');
 const userBalance = require('./utils/userBalance');
+const blockedUsersUtil = require('./utils/blockedUsers');
 const db = require('./database/connection');
 
 // Імпортуємо конфігурацію
@@ -29,6 +30,9 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const isDevelopment = false;
 const isShowBroadCast = process.env.SEND_STARTUP_BROADCAST === 'true' && false;
 
+// ==================== DATA STORAGE ====================
+// Для збирання feedback від користувачів
+const feedbackData = new Map(); // userId -> { type, message, timestamp }
 
 // ✅ МАСИВ МОДЕЛЕЙ З БАГАТОКРОКОВИМ ПРОЦЕСОМ
 const MODELS_WITH_STATE = [
@@ -61,9 +65,141 @@ bot.on('callback_query', async (ctx, next) => {
   return next();
 });
 
+// ==================== FEEDBACK HANDLER ====================
+
+// Обробник для текстового feedback
+bot.on('text', async (ctx, next) => {
+  const userId = ctx.from.id;
+  const text = ctx.message.text;
+
+  // Якщо користувач заповнює feedback
+  if (feedbackData.has(userId) && !text.startsWith('/')) {
+    const feedback = feedbackData.get(userId);
+
+    if (text.length > 1000) {
+      await ctx.reply('⚠️ Занадто довгий текст! Максимум 1000 символів.');
+      return;
+    }
+
+    await sendFeedbackToAdmin(feedback, text, ctx);
+    feedbackData.delete(userId);
+    return;
+  }
+
+  // Перевіряємо чи користувач заблокований
+  const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
+  if (isBlocked) {
+    await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+    return;
+  }
+
+  return next();
+});
+
+// Обробник для зображень/фото у feedback
+bot.on(['photo', 'document'], async (ctx, next) => {
+  const userId = ctx.from.id;
+
+  // Якщо користувач заповнює feedback та надсилає фото/документ
+  if (feedbackData.has(userId)) {
+    const feedback = feedbackData.get(userId);
+
+    // Отримуємо caption як текст feedback
+    const text = ctx.message.caption || '[Скрін з помилкою/проблемою]';
+
+    if (text.length > 1000) {
+      await ctx.reply('⚠️ Занадто довгий текст! Максимум 1000 символів.');
+      return;
+    }
+
+    // Отримуємо ID зображення для пересилання
+    let fileId = null;
+    if (ctx.message.photo) {
+      // Беремо найбільше фото
+      fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+    } else if (ctx.message.document) {
+      fileId = ctx.message.document.file_id;
+    }
+
+    await sendFeedbackToAdmin(feedback, text, ctx, fileId);
+    feedbackData.delete(userId);
+    return;
+  }
+
+  return next();
+});
+
+// Допоміжна функція для відправки feedback адміну
+async function sendFeedbackToAdmin(feedback, text, ctx, fileId = null) {
+  feedback.message = text;
+  feedback.timestamp = new Date();
+
+  // Відправляємо feedback адміну
+  const adminId = process.env.ADMIN_TELEGRAM_ID;
+  if (adminId) {
+    const adminMessage = `📨 <b>Новий ${feedback.typeName.toLowerCase()}</b>
+
+👤 Від: @${feedback.username} (${feedback.firstName})
+🆔 ID: ${feedback.userId}
+⏰ ${feedback.timestamp.toLocaleString('uk-UA')}
+
+📝 <b>Текст:</b>
+${feedback.message}`;
+
+    const adminKeyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('✅ Прийняти', `feedback_confirm_${feedback.userId}`)],
+      [Markup.button.callback('❌ Відхилити', `feedback_decline_${feedback.userId}`)],
+      [Markup.button.callback('🚫 Заблокувати', `feedback_block_${feedback.userId}`)]
+    ]);
+
+    try {
+      // Якщо є зображення/документ, пересилаємо його з текстом
+      if (fileId) {
+        if (ctx.message.photo) {
+          await bot.telegram.sendPhoto(adminId, fileId, {
+            caption: adminMessage,
+            parse_mode: 'HTML',
+            reply_markup: adminKeyboard.reply_markup
+          });
+        } else if (ctx.message.document) {
+          await bot.telegram.sendDocument(adminId, fileId, {
+            caption: adminMessage,
+            parse_mode: 'HTML',
+            reply_markup: adminKeyboard.reply_markup
+          });
+        }
+      } else {
+        // Якщо немає зображення, просто надсилаємо текст
+        await bot.telegram.sendMessage(adminId, adminMessage, {
+          parse_mode: 'HTML',
+          ...adminKeyboard
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error sending feedback to admin:', error.message);
+    }
+  }
+
+  // Відповідаємо користувачу
+  await ctx.reply(
+    `✅ <b>Дякуємо за ваш ${feedback.typeName.toLowerCase()}!</b>
+
+Ми отримали ваше звернення и розглянемо його найближчим часом.`,
+    { parse_mode: 'HTML', ...keyboard.createMainMenu() }
+  );
+}
+
 bot.on('text', async (ctx, next) => {
   const text = ctx.message.text;
   const userId = ctx.from.id;
+
+  // Перевіряємо чи користувач заблокований
+  const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
+  if (isBlocked) {
+    await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+    return;
+  }
+
   const currentModel = userCurrentModel.get(userId);
   const state = userState.get(userId);
   
@@ -75,6 +211,7 @@ bot.on('text', async (ctx, next) => {
     '🎙️ Аудіо з AI',
     '👤 Профіль',
     '❓ Допомога',
+    '📝 Feedback',
     '📄 Інструкція'
   ];
   
@@ -169,8 +306,17 @@ const INSTRUCTION_HTML = `
 // ==================== КОМАНДИ ====================
 
 bot.start(async (ctx) => {
-  const user = await userBalance.getUser(ctx.from.id, ctx.from);
-  
+  const userId = ctx.from.id;
+
+  // Перевіряємо чи користувач заблокований
+  const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
+  if (isBlocked) {
+    await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+    return;
+  }
+
+  const user = await userBalance.getUser(userId, ctx.from);
+
   const welcomeMessage = `🏠 Головне меню
 
 Привіт, ${ctx.from.first_name}!
@@ -193,6 +339,7 @@ bot.command('help', async (ctx) => {
 /balance - Перевірити баланс
 /history - Історія використання
 /clear - Очистити історію розмови
+/feedback - Форма зворотнього зв'язку
 /info - Юридична інформація (Угода користувача)
 /help - Ця довідка
 
@@ -266,6 +413,303 @@ bot.command('info', async (ctx) => {
   await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createLegalMenu() });
 });
 
+bot.command('feedback', async (ctx) => {
+  const feedbackMenu = `📝 <b>Форма зворотнього зв'язку</b>
+
+Яка причина вашого звернення?
+
+Оберіть категорію 👇`;
+
+  const feedbackKeyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('💡 Побажання', 'feedback_suggestion')],
+    [Markup.button.callback('🐛 Проблема', 'feedback_problem')],
+    [Markup.button.callback('⭐ Відгук', 'feedback_review')],
+    [Markup.button.callback('🔙 Назад', 'main_menu')]
+  ]);
+
+  await ctx.reply(feedbackMenu, { parse_mode: 'HTML', ...feedbackKeyboard });
+});
+
+// ==================== ADMIN COMMANDS ====================
+
+bot.command('blocklist', async (ctx) => {
+  const adminId = process.env.ADMIN_TELEGRAM_ID;
+
+  // Тільки адмін має доступ
+  if (ctx.from.id.toString() !== adminId) {
+    await ctx.reply('❌ Доступ заборонений');
+    return;
+  }
+
+  const blockedUsers = await blockedUsersUtil.getAllBlockedUsers();
+
+  if (blockedUsers.length === 0) {
+    await ctx.reply('✅ Заблокованих користувачів немає');
+    return;
+  }
+
+  let message = `🚫 <b>Список заблокованих користувачів</b> (${blockedUsers.length})\n\n`;
+
+  for (let index = 0; index < blockedUsers.length; index++) {
+    const user = blockedUsers[index];
+    message += `${index + 1}. ID: <code>${user._id}</code>\n`;
+    message += `   👤 @${user.username || 'unknown'} (${user.firstName || 'No name'})\n`;
+    message += `   🚫 Причина: ${user.reason}\n`;
+    message += `   📅 ${new Date(user.blockedAt).toLocaleString('uk-UA')}\n`;
+    message += `   /unblock_${user._id}\n\n`;
+  }
+
+  await ctx.reply(message, { parse_mode: 'HTML' });
+});
+
+bot.command(/^unblock_(\d+)$/, async (ctx) => {
+  const adminId = process.env.ADMIN_TELEGRAM_ID;
+  const userId = parseInt(ctx.match[1]);
+
+  // Тільки адмін має доступ
+  if (ctx.from.id.toString() !== adminId) {
+    await ctx.reply('❌ Доступ заборонений');
+    return;
+  }
+
+  // Перевіряємо чи користувач заблокований
+  const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
+  if (!isBlocked) {
+    await ctx.reply(`ℹ️ Користувач ${userId} не заблокований`);
+    return;
+  }
+
+  // Розблокуємо користувача
+  const success = await blockedUsersUtil.unblockUser(userId);
+
+  if (success) {
+    await ctx.reply(`✅ Користувач ${userId} розблокований`);
+
+    // Спробуємо повідомити користувача
+    try {
+      await bot.telegram.sendMessage(
+        userId,
+        `✅ <b>Ви були розблоковані!</b>
+
+Ви знову можете користуватися ботом. Приносимо вибачення за незручності.
+
+Введіть /start щоб почати`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (error) {
+      console.warn(`⚠️ Could not notify user ${userId}:`, error.message);
+    }
+
+    console.log(`✅ User ${userId} unblocked by admin`);
+  } else {
+    await ctx.reply(`❌ Помилка при розблокуванні користувача`);
+  }
+});
+
+// Обробники feedback категорій
+bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const feedbackType = ctx.match[1];
+  const typeNames = {
+    suggestion: '💡 Побажання',
+    problem: '🐛 Проблема',
+    review: '⭐ Відгук'
+  };
+
+  // Зберігаємо тип в sessionStorage
+  feedbackData.set(ctx.from.id, {
+    type: feedbackType,
+    typeName: typeNames[feedbackType],
+    userId: ctx.from.id,
+    username: ctx.from.username || 'unknown',
+    firstName: ctx.from.first_name
+  });
+
+  const message = `<b>${typeNames[feedbackType]}</b>
+
+Розскажіть детальніше 👇
+(максимум 1000 символів)`;
+
+  await ctx.reply(message, { parse_mode: 'HTML' });
+});
+
+// ==================== ADMIN FEEDBACK HANDLERS ====================
+
+// Адмін підтверджує feedback
+bot.action(/^feedback_confirm_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const userId = parseInt(ctx.match[1]);
+  const adminId = process.env.ADMIN_TELEGRAM_ID;
+
+  if (ctx.from.id.toString() !== adminId) {
+    await ctx.answerCbQuery('❌ Доступ заборонений', true);
+    return;
+  }
+
+  // Оновлюємо повідомлення (якщо це текстове)
+  const messageText = ctx.callbackQuery?.message?.text;
+  if (messageText) {
+    await ctx.editMessageText(
+      messageText + '\n\n✅ <b>Статус: Прийнято</b>',
+      { parse_mode: 'HTML' }
+    );
+  } else {
+    // Якщо це фото/документ, просто рідим reply
+    await ctx.reply('✅ <b>Feedback прийнято</b>', { parse_mode: 'HTML' });
+  }
+
+  // Повідомляємо користувачу
+  try {
+    await bot.telegram.sendMessage(
+      userId,
+      `✅ <b>Ваше звернення прийнято в роботу</b>
+
+Дякуємо за звернення! Ми розглянули ваше повідомлення та почнемо над ним працювати.
+
+Якщо у вас ще є питання, можете написати нам ще раз командою /feedback`,
+      { parse_mode: 'HTML' }
+    );
+  } catch (error) {
+    console.error('❌ Error notifying user:', error.message);
+  }
+
+  console.log(`✅ Feedback confirmed from user ${userId}`);
+});
+
+// Адмін відхиляє feedback
+bot.action(/^feedback_decline_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const userId = parseInt(ctx.match[1]);
+  const adminId = process.env.ADMIN_TELEGRAM_ID;
+
+  if (ctx.from.id.toString() !== adminId) {
+    await ctx.answerCbQuery('❌ Доступ заборонений', true);
+    return;
+  }
+
+  // Оновлюємо повідомлення (якщо це текстове)
+  const messageText = ctx.callbackQuery?.message?.text;
+  if (messageText) {
+    await ctx.editMessageText(
+      messageText + '\n\n❌ <b>Статус: Відхилено</b>\n<i>Не на часі або порушує політику</i>',
+      { parse_mode: 'HTML' }
+    );
+  } else {
+    // Якщо це фото/документ, просто рідим reply
+    await ctx.reply('❌ <b>Feedback відхилено</b>', { parse_mode: 'HTML' });
+  }
+
+  // Повідомляємо користувачу
+  try {
+    await bot.telegram.sendMessage(
+      userId,
+      `❌ <b>Ваше звернення було розглянуто</b>
+
+На жаль, ваше звернення не відповідає нашій політиці або зараз не актуальне.
+
+Якщо у вас ще є питання, ми завжди готові вислухати 💬`,
+      { parse_mode: 'HTML' }
+    );
+  } catch (error) {
+    console.error('❌ Error notifying user:', error.message);
+  }
+
+  console.log(`❌ Feedback declined from user ${userId}`);
+});
+
+// Адмін блокує користувача
+bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const userId = parseInt(ctx.match[1]);
+  const adminId = process.env.ADMIN_TELEGRAM_ID;
+
+  if (ctx.from.id.toString() !== adminId) {
+    await ctx.answerCbQuery('❌ Доступ заборонений', true);
+    return;
+  }
+
+  // Перевіряємо що адмін не блокує себе
+  if (userId === parseInt(adminId)) {
+    await ctx.answerCbQuery('❌ Ви не можете заблокувати себе!', true);
+    return;
+  }
+
+  // Блокуємо користувача в БД
+  const success = await blockedUsersUtil.blockUser(
+    userId,
+    'unknown',
+    'Unknown',
+    parseInt(adminId),
+    'Spam or inappropriate behavior',
+    'Blocked via feedback system'
+  );
+
+  if (success) {
+    // Оновлюємо повідомлення (якщо це текстове)
+    const messageText = ctx.callbackQuery?.message?.text;
+    if (messageText) {
+      await ctx.editMessageText(
+        messageText + '\n\n🚫 <b>Статус: Користувач заблокований</b>\n<i>Спам або неадекватна поведінка</i>',
+        { parse_mode: 'HTML' }
+      );
+    } else {
+      // Якщо це фото/документ, просто рідим reply
+      await ctx.reply('🚫 <b>Користувач заблокований</b>', { parse_mode: 'HTML' });
+    }
+
+    // Повідомляємо користувачу про блокування
+    try {
+      await bot.telegram.sendMessage(
+        userId,
+        `🚫 <b>Ви були заблоковані</b>
+
+Ваш акаунт був заблокований через порушення правил нашого сервісу (спам, неадекватна поведінка або інші порушення).
+
+Якщо вважаєте це помилкою, зв'яжіться з технічною підтримкою.`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (error) {
+      console.error('❌ Error notifying user about block:', error.message);
+    }
+
+    console.log(`🚫 User ${userId} blocked`);
+  } else {
+    await ctx.answerCbQuery('❌ Помилка при блокуванні користувача', true);
+  }
+});
+
+// Обробники feedback категорій
+bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const feedbackType = ctx.match[1];
+  const typeNames = {
+    suggestion: '💡 Побажання',
+    problem: '🐛 Проблема',
+    review: '⭐ Відгук'
+  };
+
+  // Зберігаємо тип в sessionStorage
+  feedbackData.set(ctx.from.id, {
+    type: feedbackType,
+    typeName: typeNames[feedbackType],
+    userId: ctx.from.id,
+    username: ctx.from.username || 'unknown',
+    firstName: ctx.from.first_name
+  });
+
+  const message = `<b>${typeNames[feedbackType]}</b>
+
+Розскажіть детальніше 👇
+(максимум 1000 символів)`;
+
+  await ctx.reply(message, { parse_mode: 'HTML' });
+});
+
 // ==================== ГОЛОВНЕ МЕНЮ ====================
 
 bot.hears('💡 Базові помічники', async (ctx) => {
@@ -309,6 +753,23 @@ bot.hears('📄 Інструкція', async (ctx) => {
     parse_mode: 'HTML',
     ...keyboard.createBackButton()
   });
+});
+
+bot.hears('📝 Feedback', async (ctx) => {
+  const feedbackMenu = `📝 <b>Форма зворотнього зв'язку</b>
+
+Яка причина вашого звернення?
+
+Оберіть категорію 👇`;
+
+  const feedbackKeyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('💡 Побажання', 'feedback_suggestion')],
+    [Markup.button.callback('🐛 Проблема', 'feedback_problem')],
+    [Markup.button.callback('⭐ Відгук', 'feedback_review')],
+    [Markup.button.callback('🔙 Назад', 'main_menu')]
+  ]);
+
+  await ctx.reply(feedbackMenu, { parse_mode: 'HTML', ...feedbackKeyboard });
 });
 
 // ==================== CALLBACK HANDLERS ====================

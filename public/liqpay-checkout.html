@@ -497,10 +497,14 @@
                 // Конвертуємо дані з API у формат для нашої сторінки
                 plans = {};
                 for (const [key, planData] of Object.entries(data.plans)) {
+                    // Використовуємо динамічний курс з API, або дефолтний 45
+                    const exchangeRateForCalc = data.exchangeRate || 45;
+                    const dynamicPrice = planData.priceUAHDynamic || Math.round(planData.priceUSD * exchangeRateForCalc);
+
                     plans[key] = {
                         name: planData.name,
                         // Використовуємо динамічну ціну на основі реального курсу
-                        price: planData.priceUAHDynamic || Math.round(planData.priceUSD * 45),
+                        price: dynamicPrice,
                         tokens: planData.tokensLiqPay || planData.tokens,
                         originalTokens: planData.tokens,
                         bonusTokens: planData.tokensLiqPay ? (planData.tokensLiqPay - planData.tokens) : 0,
