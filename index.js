@@ -539,12 +539,16 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
     await ctx.reply('❌ План не знайдено');
     return;
   }
-  
+
+  // Отримуємо актуальний курс USD/UAH для розрахунку LiqPay ціни
+  const rate = await exchangeRate.getRate();
+  const priceUAH = Math.round(sub.priceUSD * rate);
+
   let message = `⚡ Пакет токенів ${sub.name}\n\n`;
   message += sub.features.join('\n') + '\n\n';
   message += `💰 Вартість:\n`;
   message += `  ⭐ ${sub.price}⭐ Telegram Stars\n`;
-  message += `  💳 ${Math.round(sub.priceUSD * 45)}₴ LiqPay`;
+  message += `  💳 ${priceUAH}₴ LiqPay`;
   if (sub.tokensLiqPay) {
     message += ` (+${sub.tokensLiqPay - sub.tokens}⚡ бонус)`;
   }
