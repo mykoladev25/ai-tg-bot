@@ -206,9 +206,9 @@ bot.on('text', async (ctx, next) => {
   // Кнопки головного меню (обнуляють стан)
   const menuButtons = [
     '💡 Базові помічники',
+    '🎨 Готові креативи',
     '🎬 Створення відео',
     '🎨 Створення/редагування зображень',
-    '🎙️ Аудіо з AI',
     '👤 Профіль',
     '❓ Допомога',
     '📝 Feedback',
@@ -719,6 +719,13 @@ bot.hears('💡 Базові помічники', async (ctx) => {
   );
 });
 
+bot.hears('🖼️ Базові зображення', async (ctx) => {
+  await ctx.reply(
+    `🖼️ Базові зображення\n\nОберіть модель для створення зображень 👇`,
+    keyboard.createInlineMenu(models.image.models, 1)
+  );
+});
+
 bot.hears('🎬 Створення відео', async (ctx) => {
   await ctx.reply(
     '🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇',
@@ -755,6 +762,23 @@ bot.hears('📄 Інструкція', async (ctx) => {
   });
 });
 
+bot.hears('🎨 Готові креативи', async (ctx) => {
+  const creativesMenu = `🎨 <b>Готові креативи</b>
+
+Вибери готовий креатив - будуть згенеровані фотосесії з вшитими промптами 👇`;
+
+  const creativesKeyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('❤️ Романтика', 'creative_romance')],
+    [Markup.button.callback('🏎️ Стиль & Техніка', 'creative_tech')],
+    [Markup.button.callback('🌃 Urban Vibes', 'creative_urban')],
+    [Markup.button.callback('✨ Фентезі', 'creative_fantasy')],
+    [Markup.button.callback('🔄 Mash-up', 'creative_mashup')],
+    [Markup.button.callback('🏠 Головне меню', 'main_menu')]
+  ]);
+
+  await ctx.reply(creativesMenu, { parse_mode: 'HTML', ...creativesKeyboard });
+});
+
 bot.hears('📝 Feedback', async (ctx) => {
   const feedbackMenu = `📝 <b>Форма зворотнього зв'язку</b>
 
@@ -772,6 +796,302 @@ bot.hears('📝 Feedback', async (ctx) => {
   await ctx.reply(feedbackMenu, { parse_mode: 'HTML', ...feedbackKeyboard });
 });
 
+// Отримуємо ціну моделі
+const nanoBanana4kModel = models.design.models.find(m => m.key === 'nano_banana_4k');
+const CREATIVE_COST = nanoBanana4kModel?.cost || 31;
+
+// Романтична фотосесія
+bot.action('creative_romance', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST);
+    return;
+  }
+
+  userState.set(userId, {
+    creative: 'romance',
+    step: 'waiting_photo',
+    model: 'nano_banana_4k'
+  });
+
+  await ctx.reply(
+      `❤️ <b>Готовий креатив: Романтична фотосесія</b>\n\n` +
+      `📸 <b>Крок 1/2:</b> Надішліть своє фото\n\n` +
+      `💡 <b>Що буде:</b>\n` +
+      `• Романтична сцена на заході сонця\n` +
+      `• Ніжне тепле світло\n` +
+      `• Професійна якість\n` +
+      `• Ваші риси обличчя збережуться ✨\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
+      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `👉 Надішліть фото зараз`,
+      {
+        parse_mode: 'HTML',
+        ...keyboard.createBackButton('main_menu')
+      }
+  );
+});
+
+// Стиль & Техніка
+bot.action('creative_tech', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST);
+    return;
+  }
+
+  userState.set(userId, {
+    creative: 'tech',
+    step: 'waiting_photo',
+    model: 'nano_banana_4k'
+  });
+
+  await ctx.reply(
+      `🏎️ <b>Готовий креатив: Стиль & Техніка</b>\n\n` +
+      `📸 <b>Крок 1/2:</b> Надішліть своє фото\n\n` +
+      `💡 <b>Що буде:</b>\n` +
+      `• Ви поруч зі спортивним автомобілем\n` +
+      `• Стиль модного журналу\n` +
+      `• Контрастне професійне освітлення\n` +
+      `• Ваші риси обличчя збережуться ✨\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
+      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `👉 Надішліть фото зараз`,
+      {
+        parse_mode: 'HTML',
+        ...keyboard.createBackButton('main_menu')
+      }
+  );
+});
+
+// Urban Vibes
+bot.action('creative_urban', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST);
+    return;
+  }
+
+  userState.set(userId, {
+    creative: 'urban',
+    step: 'waiting_photo',
+    model: 'nano_banana_4k'
+  });
+
+  await ctx.reply(
+      `🌃 <b>Готовий креатив: Urban Vibes</b>\n\n` +
+      `📸 <b>Крок 1/2:</b> Надішліть своє фото\n\n` +
+      `💡 <b>Що буде:</b>\n` +
+      `• Ви серед нічного міста з неоном\n` +
+      `• Стиль cyberpunk/fashion\n` +
+      `• Яскраві кольори, урбаністична естетика\n` +
+      `• Ваші риси обличчя збережуться ✨\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
+      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `👉 Надішліть фото зараз`,
+      {
+        parse_mode: 'HTML',
+        ...keyboard.createBackButton('main_menu')
+      }
+  );
+});
+
+// Фентезі
+bot.action('creative_fantasy', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST);
+    return;
+  }
+
+  userState.set(userId, {
+    creative: 'fantasy',
+    step: 'waiting_photo',
+    model: 'nano_banana_4k'
+  });
+
+  await ctx.reply(
+      `✨ <b>Готовий креатив: Фентезі</b>\n\n` +
+      `📸 <b>Крок 1/2:</b> Надішліть своє фото\n\n` +
+      `💡 <b>Що буде:</b>\n` +
+      `• Ви з магічним артефактом у лісі\n` +
+      `• Магічна атмосфера, містичне світло\n` +
+      `• Деталізація одягу та оточення\n` +
+      `• Ваші риси обличчя збережуться ✨\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
+      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `👉 Надішліть фото зараз`,
+      {
+        parse_mode: 'HTML',
+        ...keyboard.createBackButton('main_menu')
+      }
+  );
+});
+
+// Mash-up
+bot.action('creative_mashup', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST);
+    return;
+  }
+
+  userState.set(userId, {
+    creative: 'mashup',
+    step: 'waiting_photo',
+    model: 'nano_banana_4k'
+  });
+
+  await ctx.reply(
+      `🔄 <b>Готовий креатив: Mash-up</b>\n\n` +
+      `📸 <b>Крок 1/2:</b> Надішліть своє фото\n\n` +
+      `💡 <b>Що буде:</b>\n` +
+      `• Ви + фантастичний об'єкт/тварина\n` +
+      `• Сюрреалістичний стиль\n` +
+      `• Оригінальна креативна композиція\n` +
+      `• Ваші риси обличчя збережуться ✨\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
+      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `👉 Надішліть фото зараз`,
+      {
+        parse_mode: 'HTML',
+        ...keyboard.createBackButton('main_menu')
+      }
+  );
+});
+
+// ==================== ОБРОБКА ФОТО ДЛЯ КРЕАТИВІВ ====================
+// Вставити ПЕРЕД bot.on('photo') handler
+
+async function handleCreativePhoto(ctx, imageUrl) {
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || !state.creative) return false;
+
+  const creativeType = state.creative;
+  const model = models.design.models.find(m => m.key === 'nano_banana_4k');
+
+  // Промпти (АНГЛІЙСЬКА + збереження рис обличчя)
+  const prompts = {
+    romance: `Professional romantic photoshoot at golden hour sunset. Two people holding hands, warm soft lighting, carefully designed outfit details, cinematic quality. Based on uploaded photo, preserve facial features, identity and likeness. High detail portrait, 4K quality.`,
+
+    tech: `Fashion magazine style photoshoot with luxury sports car. One person posing near vehicle, dramatic lighting with strong shadows, high-end lookbook aesthetic. Based on uploaded photo, preserve facial features, identity and likeness. Professional lighting, 4K quality.`,
+
+    urban: `Cyberpunk fashion photoshoot in neon-lit night city. One person among bright neon lights, experimental lighting, urban details in background, vivid colors. Based on uploaded photo, preserve facial features, identity and likeness. Urban aesthetic, 4K quality.`,
+
+    fantasy: `Fantasy fairy tale photoshoot. Person with magical artifact in misty forest, magical atmosphere, mystical lighting, detailed costume design. Based on uploaded photo, preserve facial features, identity and likeness. High detail, 4K quality.`,
+
+    mashup: `Creative surrealist composition. Person with fantastical object or creature, harmonious interaction, vibrant colors, detailed rendering. Based on uploaded photo, preserve facial features, identity and likeness. Original creative style, 4K quality.`
+  };
+
+  const prompt = prompts[creativeType];
+  const creativeNames = {
+    romance: '❤️ Романтика',
+    tech: '🏎️ Стиль & Техніка',
+    urban: '🌃 Urban Vibes',
+    fantasy: '✨ Фентезі',
+    mashup: '🔄 Mash-up'
+  };
+
+  const statusMsg = await ctx.reply(
+      `🎨 <b>Генерую ${creativeNames[creativeType]}...</b>\n\n` +
+      `📷 Ваше фото отримано\n` +
+      `✨ Зберігаю ваші риси обличчя\n` +
+      `⏱️ Це займе ~30-40 секунд\n\n` +
+      `💰 Списується: ${model.cost}⚡`,
+      { parse_mode: 'HTML' }
+  );
+
+  try {
+    const result = await replicate.generateWithNanoBanana(prompt, imageUrl, '4K');
+
+    if (!result.success) {
+      await adminNotifier.notifyAdmin(
+          bot,
+          new Error(result.error),
+          { userId, username: ctx.from.username, action: `creative_${creativeType}`, model: 'Nano Banana 4K' }
+      );
+      await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          `❌ Помилка генерації.\n\nСпробуйте ще раз або оберіть іншу модель.`
+      );
+      userState.delete(userId);
+      return true;
+    }
+
+    await userBalance.deductTokens(
+        userId,
+        model.cost,
+        `${creativeNames[creativeType]} generation`,
+        { modelKey: 'nano_banana_4k', modelName: 'Nano Banana Pro 4K', apiCost: model.apiCost }
+    );
+
+    // Перевірити розмір файлу
+    const fileSize = await getFileSize(result.imageUrl);
+    const maxPhotoSize = 10 * 1024 * 1024; // 10MB
+
+    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+
+    if (fileSize > maxPhotoSize) {
+      // Файл завеликий - віддати посиланням
+      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+
+      await ctx.reply(
+          `✅ <b>${creativeNames[creativeType]}</b>\n\n` +
+          `📊 <b>Розмір:</b> ${fileSizeMB} MB\n` +
+          `⚠️ Файл завеликий для Telegram\n\n` +
+          `🔗 <a href="${result.imageUrl}">📥 Натисніть для завантаження PNG</a>\n\n` +
+          `💡 <b>Як завантажити:</b>\n` +
+          `• Натисніть на посилання ☝️\n` +
+          `• Файл автоматично завантажиться\n\n` +
+          `⏰ Посилання активне 1 годину\n` +
+          `💰 Витрачено: ${model.cost}⚡`,
+          {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
+            ...keyboard.createBackButton('main_menu')
+          }
+      );
+    } else {
+      // Файл нормальний - відправити як фото
+      await ctx.replyWithPhoto(
+          { url: result.imageUrl },
+          {
+            caption: `✅ ${creativeNames[creativeType]}\n\n💰 Витрачено: ${model.cost}⚡`,
+            ...keyboard.createBackButton('main_menu')
+          }
+      );
+    }
+
+    userState.delete(userId);
+    return true;
+
+  } catch (error) {
+    console.error(`Creative ${creativeType} generation failed:`, error);
+    await adminNotifier.notifyAdmin(bot, error, { userId, username: ctx.from.username, action: `creative_${creativeType}` });
+    await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        '❌ Помилка генерації. Спробуйте ще раз.'
+    );
+    userState.delete(userId);
+    return true;
+  }
+}
 // ==================== CALLBACK HANDLERS ====================
 
 bot.action('gpt_text', async (ctx) => {
@@ -1149,9 +1469,15 @@ bot.on('voice', async (ctx) => {
 bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
   const currentModel = userCurrentModel.get(userId);
+  const state = userState.get(userId);  // ← 1. ДОДАТИ
   const mediaGroupId = ctx.message.media_group_id;
 
-  // Обробка альбомів
+  if (state?.creative && state?.step === 'waiting_photo') {
+    const imageUrl = await getImageUrl(ctx);
+    const handled = await handleCreativePhoto(ctx, imageUrl);
+    if (handled) return;
+  }
+
   if (mediaGroupId) {
     if (!mediaGroups.has(mediaGroupId)) {
       mediaGroups.set(mediaGroupId, { photos: [], caption: ctx.message.caption || '', userId, currentModel, timeout: null });
