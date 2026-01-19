@@ -12,11 +12,22 @@ starter: {
 }
 ```
 
-### 2. **Фронтенд (stripe-checkout.html, liqpay-checkout.html)**
-- Завантажує дані з `/api/plans`
-- Отримує динамічні ціни для обох методів оплати
-- Показує ціни з поточним курсом
-- НЕ розраховує суми самостійно
+### 2. **Три джерела динамічних курсів:**
+
+#### 💱 Exchange Rate API (USD/UAH)
+- **Джерело:** ПриватБанк або НБУ
+- **Оновлення:** кожну годину
+- **Фолбек:** дефолтний курс 45 UAH
+
+#### ⭐ Telegram Stars API (USD/TGStar)
+- **Джерело:** Telegram Bot API (getStarRate)
+- **Оновлення:** кожну годину
+- **Фолбек:** дефолтний курс 0.024 USD
+- **Сервіс:** `services/telegramStars.js`
+
+#### 💳 LiqPay (USD/UAH)
+- **Розрахунок:** priceUSD × exchangeRate
+- **Приклад:** 7 USD × 45 = 315 ₴
 
 ### 3. **API Plans (/api/plans)**
 Повертає динамічні ціни обома методами:
@@ -28,43 +39,27 @@ starter: {
       "priceStarsDynamic": 292,      // 7 / 0.024 = 292 ⭐
       "priceUAHDynamic": 315,        // 7 * 45 = 315 ₴
       "exchangeRate": 45,
-      "tgStarRate": 0.024
+      "tgStarRate": 0.024            // Динамічно з Telegram API!
     }
+  },
+  "rates": {
+    "USD/UAH": 45,
+    "USD/TGStar": "0.0240"          // Динамічна ціна TG Stars
   }
 }
 ```
 
-### 4. **LiqPay Checkout API (/api/liqpay/checkout)**
+### 4. **Фронтенд (liqpay-checkout.html, stripe-checkout.html)**
+- Завантажує дані з `/api/plans`
+- Отримує динамічні ціни для обох методів оплати
+- Показує ціни з поточними курсами
+
+### 5. **LiqPay Checkout API (/api/liqpay/checkout)**
 Розраховує суму в гривнях на сервері:
 ```javascript
-const rate = await exchangeRate.getRate();  // Реальний курс
+const rate = await exchangeRate.getRate();  // Реальний курс USD/UAH
 const amountUAH = Math.round(sub.priceUSD * rate);  // Динамічна сума
 ```
-
-### 5. **Telegram Stars - тепер динамічні!**
-```javascript
-// Раніше: фіксовано 299⭐
-// Тепер: розраховується як
-const priceStarsDynamic = Math.round(priceUSD / 0.024);
-// Наприклад: 7$ / 0.024 = 292⭐ (замість 299⭐)
-```
-
----
-
-## Переваги
-
-✅ **ВСІ ЦІНИ актуальні**
-- Telegram Stars розраховується по офіційному курсу (1⭐ = $0.024)
-- LiqPay розраховується по курсу ПриватБанку/НБУ
-- Оновлюються кожну годину
-
-✅ **Справедливі ціни для користувача**
-- Користувач бачить реальну ціну до оплати
-- Немає "прихованих" комісій
-
-✅ **Безпека**
-- Amount розраховується на сервері (не на клієнті)
-- Клієнт не може змінити суму
 
 ---
 
@@ -83,19 +78,56 @@ const priceStarsDynamic = Math.round(priceUSD / 0.024);
 ## Потік даних
 
 ```
-User -> Telegram Stars або LiqPay
+User -> /api/plans
    ↓
-Фронтенд: GET /api/plans
+1. Отримуємо USD/UAH курс (ПриватБанк)
+2. Отримуємо USD/TGStar курс (Telegram Bot API)
    ↓
-Показує: ⭐ 292 або 💳 315₴
+Розраховуємо:
+- priceStarsDynamic = priceUSD / tgStarRate
+- priceUAHDynamic = priceUSD * uahRate
    ↓
-User клацає "Оплатити"
+Повертаємо з обома цінами
    ↓
-Backend розраховує реальну суму по курсам
+Фронтенд показує:
+⭐ 292 Telegram Stars
+💳 315₴ LiqPay
    ↓
-Payment Gateway обробляє платіж
+User вибирає спосіб оплати
    ↓
 Успіх!
 ```
+
+---
+
+## Кешування
+
+```
+На старті сервера:
+💱 Exchange rate cache → 1 USD = 45.00 UAH (свіже)
+⭐ TG Stars cache → 1 Star = $0.0240 (свіже)
+
+При запиті (менше за 1 годину):
+💰 Using cached rate: 45.00 UAH (age: 5min)
+⭐ Using cached rate: 0.0240 (age: 3min)
+
+Після 1 години:
+🔄 Fetching fresh exchange rate...
+🔄 Fetching fresh Telegram Stars rate...
+```
+
+---
+
+## Важливо!
+
+⚠️ **BACKEND розраховує ціни, не фронтенд!**
+- Фронтенд показує інформацію з API
+- Фронтенд НЕ розраховує курси
+- Бекенд розраховує суми самостійно
+
+✅ **Це забезпечує:**
+- Безпеку (клієнт не може змінити ціну)
+- Актуальність (завжди свіжі курси)
+- Справедливість (користувач платить реальну ціну)
 
 
