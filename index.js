@@ -34,11 +34,22 @@ const isShowBroadCast = process.env.SEND_STARTUP_BROADCAST === 'true' && false;
 // Для збирання feedback від користувачів
 const feedbackData = new Map(); // userId -> { type, message, timestamp }
 
+// ✅ МОДЕЛІ КОТРІ ПІДТРИМУЮТЬ ВИБІР ASPECT RATIO
+const MODELS_WITH_ASPECT_RATIO = [
+  'nano_banana_2k',
+  'nano_banana_4k',
+  'seedream_2k',
+  'seedream_4k',
+  'stable_diffusion',
+  'ideogram'
+];
+
 // ✅ МАСИВ МОДЕЛЕЙ З БАГАТОКРОКОВИМ ПРОЦЕСОМ
 const MODELS_WITH_STATE = [
   'kling_motion',           // фото + відео (20s+)
   'kling_motion_minimal',   // фото + відео (<10s)
-  'nano_banana_pro'         // вибір розміру (майбутнє)
+  'nano_banana_pro',        // вибір розміру (майбутнє)
+  ...MODELS_WITH_ASPECT_RATIO // добавляємо моделі з вибором aspect ratio
 ];
 
 // ✅ MIDDLEWARE: обнуляти стан при callback (крім моделей зі станами)
@@ -48,6 +59,11 @@ bot.on('callback_query', async (ctx, next) => {
   const currentModel = userCurrentModel.get(userId);
   const state = userState.get(userId);
   
+  // ✅ ДОЗВОЛЯЄМО ASPECT RATIO CALLBACKS
+  if (callbackData.startsWith('aspect_ratio_')) {
+    return next();
+  }
+
   if (MODELS_WITH_STATE.includes(callbackData)) {
     return next();
   }
@@ -203,12 +219,12 @@ bot.on('text', async (ctx, next) => {
   const currentModel = userCurrentModel.get(userId);
   const state = userState.get(userId);
   
-  // Кнопки головного меню (обнуляють стан)
+  // Кнопки головного меню (обнуляють стан) - тільки короткі версії
   const menuButtons = [
-    '💡 Базові помічники',
-    '🎨 Готові креативи',
-    '🎬 Створення відео',
-    '🎨 Створення/редагування зображень',
+    '💡 Помічники',
+    '🎨 Креативи',
+    '🎬 Відео',
+    '🎨 Зображення',
     '👤 Профіль',
     '❓ Допомога',
     '📝 Feedback',
@@ -712,7 +728,7 @@ bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
 
 // ==================== ГОЛОВНЕ МЕНЮ ====================
 
-bot.hears('💡 Базові помічники', async (ctx) => {
+bot.hears('💡 Помічники', async (ctx) => {
   await ctx.reply(
     `💡 Claude\n\n💎 Claude - преміум якість\n\nОберіть режим роботи 👇`,
     keyboard.createGPTActionsMenu(models.gpt.actions)
@@ -726,14 +742,14 @@ bot.hears('🖼️ Базові зображення', async (ctx) => {
   );
 });
 
-bot.hears('🎬 Створення відео', async (ctx) => {
+bot.hears('🎬 Відео', async (ctx) => {
   await ctx.reply(
     '🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇',
     keyboard.createInlineMenu(models.video.models, 1)
   );
 });
 
-bot.hears('🎨 Створення/редагування зображень', async (ctx) => {
+bot.hears('🎨 Зображення', async (ctx) => {
   await ctx.reply(
     '🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇',
     keyboard.createInlineMenu(models.design.models, 1)
@@ -762,7 +778,7 @@ bot.hears('📄 Інструкція', async (ctx) => {
   });
 });
 
-bot.hears('🎨 Готові креативи', async (ctx) => {
+bot.hears('🎨 Креативи', async (ctx) => {
   const creativesMenu = `🎨 <b>Готові креативи</b>
 
 Вибери готовий креатив - будуть згенеровані фотосесії з вшитими промптами 👇`;
@@ -1137,6 +1153,48 @@ bot.action('new_conversation', async (ctx) => {
     '✅ Нову розмову розпочато! 👋\n\nНадішліть своє повідомлення.',
     keyboard.createGPTActionsMenu(models.gpt.actions)
   );
+});
+
+// ==================== ASPECT RATIO SELECTION ====================
+bot.action(/^aspect_ratio_(.+?)_(1:1|4:5|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const callbackData = ctx.callbackQuery.data;
+  const match = callbackData.match(/^aspect_ratio_(.+?)_(1:1|4:5|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/);
+  const userId = ctx.from.id;
+
+  console.log(`📐 Aspect ratio callback: ${callbackData}`);
+  console.log(`📐 User ID: ${userId}`);
+  console.log(`📐 Regex match result:`, match);
+  console.log(`📐 Current userState Map size:`, userState.size);
+  console.log(`📐 All userState keys:`, Array.from(userState.keys()));
+
+  if (!match) {
+    console.error('❌ Regex не спрацював');
+    await ctx.reply('❌ Помилка обробки запиту.');
+    return;
+  }
+
+  const modelKey = match[1];
+  const aspectRatio = match[2];
+  const state = userState.get(userId);
+
+  console.log(`📐 Model: ${modelKey}, Ratio: ${aspectRatio}`);
+  console.log(`📐 Retrieved state for userId ${userId}:`, state);
+
+  if (!state || !state.imageUrl || !state.prompt) {
+    console.error(`❌ Стан відсутній або неповний. State:`, state);
+    await ctx.reply('❌ Помилка. Спробуйте завантажити фото знову.');
+    userState.delete(userId);
+    return;
+  }
+
+  console.log(`📐 Aspect ratio selected: ${aspectRatio} for model: ${modelKey}`);
+
+  // Генеруємо з вибраним aspect ratio
+  await handleImageGeneration(ctx, state.prompt, modelKey, state.imageUrl, aspectRatio);
+
+  userState.delete(userId);
 });
 
 // Design Models
@@ -1524,7 +1582,66 @@ bot.on('photo', async (ctx) => {
       keyboard.createBackButton('video_menu')
     );
   } else if (imageModels.includes(currentModel)) {
-    await handleImageGeneration(ctx, prompt, currentModel);
+    // ✅ ЯК ЩО ЦЕ МОДЕЛЬ З ASPECT RATIO - ПОКАЗАТИ МЕНЮ ВИБОРУ
+    if (MODELS_WITH_ASPECT_RATIO.includes(currentModel)) {
+      const imageUrl = await getImageUrl(ctx);
+
+      // Зберігаємо дані для подальшої генерації
+      const stateData = {
+        model: currentModel,
+        step: 'waiting_aspect_ratio',
+        imageUrl: imageUrl,
+        prompt: prompt
+      };
+
+      userState.set(userId, stateData);
+      console.log(`💾 State saved for user ${userId}:`, stateData);
+      console.log(`💾 Checking state immediately:`, userState.get(userId));
+
+      // Дозволені aspect ratio для різних моделей
+      const aspectRatios = {
+        'seedream_2k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
+        'seedream_4k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
+        'nano_banana_2k': ['1:1', '4:5', '9:16', 'match_input_image'],
+        'nano_banana_4k': ['1:1', '4:5', '9:16', 'match_input_image'],
+        'stable_diffusion': ['1:1', '4:5', '9:16', 'match_input_image'],
+        'ideogram': ['1:1', '4:5', '9:16', 'match_input_image']
+      };
+
+      const validRatios = aspectRatios[currentModel] || ['1:1', 'match_input_image'];
+
+      // Маппінг для красивого виведення
+      const ratioLabels = {
+        '1:1': '📐 1:1 (Square)',
+        '4:5': '📱 4:5 (Portrait)',
+        '4:3': '🎬 4:3 (Landscape)',
+        '3:4': '📱 3:4 (Portrait)',
+        '16:9': '🎥 16:9 (Widescreen)',
+        '9:16': '📱 9:16 (Vertical)',
+        '3:2': '🖼️ 3:2 (Classic)',
+        '2:3': '🖼️ 2:3 (Classic Portrait)',
+        '21:9': '🎬 21:9 (Ultrawide)',
+        'match_input_image': '🔄 Match Input Image'
+      };
+
+      // Показуємо меню вибору aspect ratio
+      const buttons = validRatios.map(ratio => [
+        Markup.button.callback(ratioLabels[ratio], `aspect_ratio_${currentModel}_${ratio}`)
+      ]);
+      buttons.push([Markup.button.callback('🔙 Назад', 'design_menu')]);
+
+      const aspectRatioMenu = Markup.inlineKeyboard(buttons);
+
+      await ctx.reply(
+        `📐 <b>Оберіть пропорції зображення (Aspect Ratio):</b>\n\n` +
+        `Модель: ${models.design.models.find(m => m.key === currentModel)?.name || currentModel}\n` +
+        `Доступні формати: ${validRatios.join(', ')}`,
+        { parse_mode: 'HTML', ...aspectRatioMenu }
+      );
+    } else {
+      // Для інших моделей просто генерувати
+      await handleImageGeneration(ctx, prompt, currentModel);
+    }
   } else if (videoModels.includes(currentModel)) {
     await handleVideoGeneration(ctx, prompt, currentModel);
   } else {
@@ -1634,12 +1751,65 @@ bot.on('video', async (ctx) => {
 // ==================== UNIFIED HANDLERS ====================
 
 async function handleMediaGroup(ctx, group) {
-  const { photos, caption, currentModel } = group;
+  const { photos, caption, currentModel, userId } = group;
   const model = models.design.models.find(m => m.key === currentModel);
 
   // ✅ Перевірити чи модель підтримує багато зображень
   if (model?.maxImages && model.maxImages > 1) {
-    await handleImageGeneration(ctx, caption, currentModel, photos);
+    // ✅ ЯК ЩО ЦЕ МОДЕЛЬ З ASPECT RATIO - ПОКАЗИТИ МЕНЮ ВИБОРУ
+    if (MODELS_WITH_ASPECT_RATIO.includes(currentModel)) {
+      // Зберігаємо дані для подальшої генерації
+      userState.set(userId, {
+        model: currentModel,
+        step: 'waiting_aspect_ratio',
+        imageUrl: photos, // передаємо масив фото
+        prompt: caption || 'transform these images, masterpiece quality, highly detailed'
+      });
+
+      // Дозволені aspect ratio для різних моделей
+      const aspectRatios = {
+        'seedream_2k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
+        'seedream_4k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
+        'nano_banana_2k': ['1:1', '4:5', '9:16', 'match_input_image'],
+        'nano_banana_4k': ['1:1', '4:5', '9:16', 'match_input_image'],
+        'stable_diffusion': ['1:1', '4:5', '9:16', 'match_input_image'],
+        'ideogram': ['1:1', '4:5', '9:16', 'match_input_image']
+      };
+
+      const validRatios = aspectRatios[currentModel] || ['1:1', 'match_input_image'];
+
+      // Маппінг для красивого виведення
+      const ratioLabels = {
+        '1:1': '📐 1:1 (Square)',
+        '4:5': '📱 4:5 (Portrait)',
+        '4:3': '🎬 4:3 (Landscape)',
+        '3:4': '📱 3:4 (Portrait)',
+        '16:9': '🎥 16:9 (Widescreen)',
+        '9:16': '📱 9:16 (Vertical)',
+        '3:2': '🖼️ 3:2 (Classic)',
+        '2:3': '🖼️ 2:3 (Classic Portrait)',
+        '21:9': '🎬 21:9 (Ultrawide)',
+        'match_input_image': '🔄 Match Input Image'
+      };
+
+      // Показуємо меню вибору aspect ratio
+      const buttons = validRatios.map(ratio => [
+        Markup.button.callback(ratioLabels[ratio], `aspect_ratio_${currentModel}_${ratio}`)
+      ]);
+      buttons.push([Markup.button.callback('🔙 Назад', 'design_menu')]);
+
+      const aspectRatioMenu = Markup.inlineKeyboard(buttons);
+
+      await ctx.reply(
+        `📐 <b>Оберіть пропорції зображення (Aspect Ratio):</b>\n\n` +
+        `📸 Отримано ${photos.length} фото\n` +
+        `Модель: ${model?.name || currentModel}\n` +
+        `Доступні формати: ${validRatios.join(', ')}`,
+        { parse_mode: 'HTML', ...aspectRatioMenu }
+      );
+    } else {
+      await handleImageGeneration(ctx, caption, currentModel, photos);
+    }
   } else {
     await ctx.reply(
       `📸 Отримано ${photos.length} фото.\n\n` +
@@ -1664,7 +1834,7 @@ async function validateImageCount(photos, maxCount = 14) {
   return photos.slice(0, maxCount);
 }
 
-async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null) {
+async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, aspectRatio = '1:1') {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
   const model = models.design.models.find(m => m.key === modelKey);
@@ -1699,12 +1869,12 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null) {
   try {
     const replicateFunctions = {
       flux: () => replicate.generateWithFlux(prompt),
-      stable_diffusion: () => replicate.generateWithStableDiffusion(prompt, imageInput),
-      nano_banana_2k: () => replicate.generateWithNanoBanana(prompt, imageInput, '2K'),
-      nano_banana_4k: () => replicate.generateWithNanoBanana(prompt, imageInput, '4K'),
-      seedream_2k: () => replicate.generateWithSeedream(prompt, imageInput, '2K'),
-      seedream_4k: () => replicate.generateWithSeedream(prompt, imageInput, '4K'),
-      ideogram: () => replicate.generateWithIdeogram(prompt, imageInput, 0.5)
+      stable_diffusion: () => replicate.generateWithStableDiffusion(prompt, imageInput, 0.8, aspectRatio),
+      nano_banana_2k: () => replicate.generateWithNanoBanana(prompt, imageInput, '2K', aspectRatio),
+      nano_banana_4k: () => replicate.generateWithNanoBanana(prompt, imageInput, '4K', aspectRatio),
+      seedream_2k: () => replicate.generateWithSeedream(prompt, imageInput, '2K', aspectRatio),
+      seedream_4k: () => replicate.generateWithSeedream(prompt, imageInput, '4K', aspectRatio),
+      ideogram: () => replicate.generateWithIdeogram(prompt, imageInput, 0.5, aspectRatio)
     };
 
     const result = await replicateFunctions[modelKey]();
