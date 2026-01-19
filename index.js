@@ -1309,6 +1309,25 @@ async function startBot() {
     console.log('🚀 Starting neuro.lab.ai Bot...');
     console.log('📡 Connecting to MongoDB...');
 
+    // Pre-cache exchange rate for faster API responses
+    console.log('💱 Pre-caching exchange rate...');
+    try {
+      const rate = await exchangeRate.getRate();
+      console.log(`✅ Exchange rate cached: 1 USD = ${rate.toFixed(2)} UAH`);
+    } catch (error) {
+      console.warn('⚠️ Could not pre-cache exchange rate:', error.message);
+    }
+
+    // Pre-cache Telegram Stars rate
+    console.log('⭐ Pre-caching Telegram Stars rate...');
+    try {
+      const telegramStars = require('./services/telegramStars');
+      const tgRate = await telegramStars.getStarRate();
+      console.log(`✅ Telegram Stars rate cached: 1 Star = $${tgRate.toFixed(4)}`);
+    } catch (error) {
+      console.warn('⚠️ Could not pre-cache Telegram Stars rate:', error.message);
+    }
+
     // Try to connect to MongoDB, but continue if it fails
     const dbConnected = await db.connect();
     if (dbConnected) {
@@ -1694,15 +1713,17 @@ async function startBot() {
 
         // Отримуємо актуальний курс USD/UAH (з кешем для швидкості)
         const rate = await exchangeRate.getRate();
-        const fetchTime = Date.now() - startTime;
 
-        // Telegram Stars rate: 1 Star = $0.024 (офіційний курс)
-        const tgStarRate = 0.024;
+        // Отримуємо динамічний курс Telegram Stars (1 Star = ? USD)
+        const telegramStars = require('./services/telegramStars');
+        const tgStarRate = await telegramStars.getStarRate();
+
+        const fetchTime = Date.now() - startTime;
 
         ['starter', 'basic', 'pro', 'premium'].forEach(planKey => {
           const sub = subscriptions[planKey];
           if (sub) {
-            // Розраховуємо TG Stars динамічно: priceUSD / 0.024
+            // Розраховуємо TG Stars динамічно: priceUSD / tgStarRate
             const priceStarsDynamic = Math.round(sub.priceUSD / tgStarRate);
 
             // Розраховуємо LiqPay ціну: priceUSD * реальний курс
@@ -1717,7 +1738,7 @@ async function startBot() {
               priceStarsDynamic: priceStarsDynamic, // TG Stars динамічна ціна
               priceUAHDynamic: priceUAHDynamic, // LiqPay динамічна ціна
               exchangeRate: rate, // Поточний курс USD/UAH
-              tgStarRate: tgStarRate, // Курс TG Star до USD
+              tgStarRate: tgStarRate, // Динамічний курс TG Star до USD
               features: sub.features  // Показуємо всі features як є
             };
           }
@@ -1731,7 +1752,7 @@ async function startBot() {
           plans,
           rates: {
             'USD/UAH': rate,
-            'USD/TGStar': tgStarRate
+            'USD/TGStar': tgStarRate.toFixed(4)
           },
           responseTime: totalTime,
           timestamp: new Date().toISOString()

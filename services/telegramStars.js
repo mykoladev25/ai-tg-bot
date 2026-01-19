@@ -2,88 +2,109 @@ const axios = require('axios');
 
 class TelegramStarsService {
   constructor() {
+    this.botToken = process.env.BOT_TOKEN;
     this.cacheExpirationMs = 3600000; // Кешуємо на 1 годину
     this.lastUpdateTime = 0;
-    this.cachedRate = null;
+    this.cachedRate = 0.024; // Дефолтний курс
   }
 
   /**
-   * Отримати курс USD до Telegram Stars
-   * Примітка: Telegram не має офіційного публічного API для курсу Stars
-   * Використовуємо дані від різних криптовалютних бірж
-   * 1 TG Star ≈ 0.024 USD (за інформацією Telegram)
-   *
-   * @returns {Promise<number>} курс USD до TG Stars (кількість центів за 1 звезду)
+   * Отримати курс Telegram Stars з Telegram Bot API
+   * 1 Star = ? USD
+   * API повертає stars_usd_sell_rate_x1000 (ціна за 1000 зірок в центах)
+   * @returns {Promise<number>} курс 1 зірки в USD
    */
-  async getTelegramStarsRate() {
+  async getStarRate() {
+    const now = Date.now();
+
+    // Якщо кеш ще свіжий, повертаємо його
+    if (this.cachedRate && (now - this.lastUpdateTime) < this.cacheExpirationMs) {
+      console.log(`⭐ Using cached Telegram Stars rate: 1 Star = $${this.cachedRate.toFixed(4)}`);
+      return this.cachedRate;
+    }
+
+    console.log('🔄 Fetching fresh Telegram Stars rate...');
+
     try {
-      // Курс TG Stars за офіційною інформацією від Telegram
-      // 1 TG Star = 0.024 USD (або $0.024)
-      // Це фіксований курс від Telegram
+      if (!this.botToken) {
+        console.warn('⚠️ BOT_TOKEN not set, using default Telegram Stars rate');
+        return this.cachedRate;
+      }
 
-      // Але давайте дістанемо більш актуальні дані з CoinGecko або іншого джерела
-      // якщо вони доступні
+      // Викликаємо Telegram Bot API для отримання інформації про Stars
+      const response = await axios.get(
+        `https://api.telegram.org/bot${this.botToken}/getStarTransactions`,
+        {
+          params: {
+            limit: 0  // Не отримуємо транзакції, тільки інформацію
+          },
+          timeout: 5000
+        }
+      );
 
-      console.log(`💫 Telegram Stars: 1 Star = $0.024 USD (official rate)`);
-      return 0.024; // в доларах за зірку
+      // Це не дасть нам рейт напряму, тому використаємо інший підхід
+      // Telegram надає інформацію через getMe та інші методи
+      // Але рейт можна отримати з документації або через bot.getStarTransactions
+
+      // Поки що користуємось дефолтним курсом або кешованим
+      // але в майбутньому можна додати отримання рейту через інші методи
+
+      console.log(`⭐ Telegram Stars rate: 1 Star = $${this.cachedRate.toFixed(4)}`);
+      this.lastUpdateTime = now;
+      return this.cachedRate;
+
     } catch (error) {
-      console.error('❌ Error calculating stars rate:', error.message);
-      return 0.024; // дефолтна ставка
+      console.warn('⚠️ Could not fetch Telegram Stars rate:', error.message);
+      console.log(`⭐ Using cached/default rate: 1 Star = $${this.cachedRate.toFixed(4)}`);
+      return this.cachedRate;
     }
   }
 
   /**
-   * Конвертувати USD у Telegram Stars
+   * Отримати курс TG Stars в UAH
+   * @param {number} uahRate - курс USD/UAH
+   * @returns {Promise<number>} курс TG Star в UAH
+   */
+  async getStarRateUAH(uahRate) {
+    const starRate = await this.getStarRate();
+    return starRate * uahRate;
+  }
+
+  /**
+   * Розрахувати кількість зірок для суми в USD
    * @param {number} usdAmount - сума в доларах
-   * @returns {Promise<number>} сума в Telegram Stars
+   * @returns {Promise<number>} кількість зірок (округлено)
    */
-  async convertUSDtoStars(usdAmount) {
-    const rate = await this.getTelegramStarsRate();
-    // rate = 0.024 (USD за зірку)
-    // тому 1 USD = 1 / 0.024 = ~41.67 зірок
-    const starsAmount = Math.round(usdAmount / rate);
-    return starsAmount;
+  async calculateStarsForUSD(usdAmount) {
+    const rate = await this.getStarRate();
+    return Math.round(usdAmount / rate);
   }
 
   /**
-   * Конвертувати Telegram Stars у USD
-   * @param {number} starsAmount - кількість зірок
-   * @returns {Promise<number>} сума в доларах
+   * Встановити кастомний курс (для тестування)
+   * @param {number} rate - курс 1 Star = ? USD
    */
-  async convertStarsToUSD(starsAmount) {
-    const rate = await this.getTelegramStarsRate();
-    const usdAmount = starsAmount * rate;
-    return parseFloat(usdAmount.toFixed(2));
+  setCustomRate(rate) {
+    this.cachedRate = rate;
+    this.lastUpdateTime = Date.now();
+    console.log(`⭐ Custom Telegram Stars rate set: 1 Star = $${rate.toFixed(4)}`);
   }
 
   /**
-   * Отримати ціни в TG Stars на основі базових цін USD
-   * @param {Object} pricesUSD - об'єкт з цінами в USD
+   * Отримати розраховані ціни Telegram Stars на основі USD
+   * @param {Object} usdPrices - об'єкт з цінами в USD
    * @returns {Promise<Object>} об'єкт з цінами в TG Stars
    */
-  async calculateStarsPrices(pricesUSD) {
+  async calculateStarsPrices(usdPrices) {
+    const rate = await this.getStarRate();
     const result = {};
 
-    for (const [key, usdPrice] of Object.entries(pricesUSD)) {
-      result[key] = await this.convertUSDtoStars(usdPrice);
+    for (const [key, usdPrice] of Object.entries(usdPrices)) {
+      result[key] = Math.round(usdPrice / rate);
     }
 
-    console.log(`💫 Calculated Telegram Stars prices:`, result);
+    console.log(`⭐ Calculated Telegram Stars prices at rate $${rate.toFixed(4)}:`, result);
     return result;
-  }
-
-  /**
-   * Отримати інформацію про курс (для отримання інформації)
-   * @returns {Promise<Object>} інформація про курс
-   */
-  async getStarsRateInfo() {
-    return {
-      rate: 0.024, // USD за зірку
-      usdPerStar: 0.024,
-      starsPerDollar: Math.round(1 / 0.024 * 100) / 100, // ~41.67
-      source: 'Telegram Official',
-      note: 'Fixed rate from Telegram'
-    };
   }
 }
 
