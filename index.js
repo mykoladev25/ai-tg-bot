@@ -369,8 +369,6 @@ bot.command('help', async (ctx) => {
 📦 Купіть підписку для отримання більше токенів
 
 👤 Підтримка:
-📧 Email: cherevan.n.s@gmail.com
-📱 Телефон: +34 605 260 851
 💬 Telegram: https://t.me/nnn_ddddddd
 
 📋 Важлива інформація:
