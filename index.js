@@ -356,7 +356,7 @@ bot.command('help', async (ctx) => {
 /history - Історія використання
 /clear - Очистити історію розмови
 /feedback - Форма зворотнього зв'язку
-/info - Юридична інформація (Угода користувача)
+/info - Юридична інформація та угода користувача
 /help - Ця довідка
 
 💡 Як користуватися:
@@ -369,11 +369,16 @@ bot.command('help', async (ctx) => {
 📦 Купіть підписку для отримання більше токенів
 
 👤 Підтримка:
-https://t.me/nnn_ddddddd
+📧 Email: cherevan.n.s@gmail.com
+📱 Телефон: +34 605 260 851
+💬 Telegram: https://t.me/nnn_ddddddd
 
-📋 Для перегляду умов оплати: /info
+📋 Важлива інформація:
+🔗 Угода користувача: /info
+🔗 Політика приватності: /info
+🔗 Інформація про компанію: /info
 
-© 2025 neuro.lab.ai Всі права захищені.`;
+© 2026 neuro.lab.ai Всі права захищені.`;
 
   await ctx.reply(helpText, keyboard.createBackButton());
 });
@@ -417,12 +422,22 @@ bot.command('clear', async (ctx) => {
 });
 
 bot.command('info', async (ctx) => {
-  const message = `📋 <b>Юридична інформація</b>
+  const message = `📋 <b>Юридична інформація та Угода користувача</b>
 
-Перед оплатою будь ласка ознайомтесь з нашими юридичними документами:
+Перед використанням сервісу ознайомтесь з нашими юридичними документами:
 
-📋 <b>Угода користувача</b> - регулює взаємовідносини між мерчантом та власником картки
-🔒 <b>Політика приватності</b> - описує як ми обробляємо вашу персональну інформацію
+<b>📋 Угода користувача</b>
+Регулює умови надання послуг та взаємовідносини між користувачем та компанією. Включає описання всіх товарів/послуг та їхні вартості.
+
+<b>🔒 Політика приватності</b>
+Описує як ми збираємо, обробляємо та захищаємо вашу персональну інформацію.
+
+<b>ℹ️ Інформація про компанію</b>
+ФОП Черевань А. О.
+📍 м. Полтава, вул. Європейська, 20
+📧 cherevan.n.s@gmail.com
+📱 +34 605 260 851
+💬 @nnn_ddddddd
 
 Натисніть на кнопку нижче щоб ознайомитися з повним текстом документів:`;
 
@@ -2809,6 +2824,24 @@ async function startBot() {
         </body>
         </html>
       `);
+    });
+
+    // ✅ Legal pages - Terms of Service
+    app.get('/bot/terms', (req, res) => {
+      const filePath = __dirname + '/public/terms.html';
+      res.sendFile(filePath);
+    });
+
+    // ✅ Legal pages - Privacy Policy
+    app.get('/bot/privacy', (req, res) => {
+      const filePath = __dirname + '/public/privacy.html';
+      res.sendFile(filePath);
+    });
+
+    // ✅ Company Information
+    app.get('/bot/info', (req, res) => {
+      const filePath = __dirname + '/public/info.html';
+      res.sendFile(filePath);
     });
 
     // ✅ Catch-all 404

@@ -172,15 +172,17 @@ function createSubscriptionsMenu() {
 }
 
 /**
- * Меню з юридичною інформацією (Угода користувача, Політика приватності)
+ * Меню з юридичною інформацією (Угода користувача, Політика приватності, Інформація про компанію)
  */
 function createLegalMenu() {
-  const termsUrl = process.env.TERMS_OF_SERVICE_URL || 'https://neurolab.fun/terms';
-  const privacyUrl = process.env.PRIVACY_POLICY_URL || 'https://neurolab.fun/privacy';
+  const termsUrl = process.env.TERMS_OF_SERVICE_URL || 'https://neurolab.fun/bot/terms';
+  const privacyUrl = process.env.PRIVACY_POLICY_URL || 'https://neurolab.fun/bot/privacy';
+  const infoUrl = process.env.COMPANY_INFO_URL || 'https://neurolab.fun/bot/info';
 
   return Markup.inlineKeyboard([
     [Markup.button.url('📋 Угода користувача', termsUrl)],
     [Markup.button.url('🔒 Політика приватності', privacyUrl)],
+    [Markup.button.url('ℹ️ Інформація про компанію', infoUrl)],
     [Markup.button.callback('🏠 Головне меню', 'main_menu')]
   ]);
 }
