@@ -1,7 +1,7 @@
 module.exports = {
   gpt: {
     models: [
-      { name: '💡 Базові помічники', key: 'gpt_claude', cost: 0, apiCost: 0 },
+      { name: '🧠 Базові помічники', key: 'gpt_claude', cost: 0, apiCost: 0 },
       { name: '👨‍💼 Активувати GPT Editor', key: 'gpt_editor', cost: 0, apiCost: 0 },
       { name: '🤖 Керування', key: 'gpt_manage', cost: 0, apiCost: 0 },
       { name: '💬 Нова розмова', key: 'new_chat', cost: 0, apiCost: 0 },

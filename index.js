@@ -221,10 +221,10 @@ bot.on('text', async (ctx, next) => {
   
   // Кнопки головного меню (обнуляють стан) - тільки короткі версії
   const menuButtons = [
-    '💡 Помічники',
+    '🧠 Помічники',
     '🎨 Креативи',
     '🎬 Відео',
-    '🎨 Зображення',
+    '🖼️ Зображення',
     '👤 Профіль',
     '❓ Допомога',
     '📝 Feedback',
@@ -728,17 +728,10 @@ bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
 
 // ==================== ГОЛОВНЕ МЕНЮ ====================
 
-bot.hears('💡 Помічники', async (ctx) => {
+bot.hears('🧠 Помічники', async (ctx) => {
   await ctx.reply(
-    `💡 Claude\n\n💎 Claude - преміум якість\n\nОберіть режим роботи 👇`,
+    `🧠 Claude\n\n💎 Claude - преміум якість\n\nОберіть режим роботи 👇`,
     keyboard.createGPTActionsMenu(models.gpt.actions)
-  );
-});
-
-bot.hears('🖼️ Базові зображення', async (ctx) => {
-  await ctx.reply(
-    `🖼️ Базові зображення\n\nОберіть модель для створення зображень 👇`,
-    keyboard.createInlineMenu(models.image.models, 1)
   );
 });
 
@@ -749,7 +742,7 @@ bot.hears('🎬 Відео', async (ctx) => {
   );
 });
 
-bot.hears('🎨 Зображення', async (ctx) => {
+bot.hears('🖼️ Зображення', async (ctx) => {
   await ctx.reply(
     '🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇',
     keyboard.createInlineMenu(models.design.models, 1)

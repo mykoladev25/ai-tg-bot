@@ -5,8 +5,8 @@ const { Markup } = require('telegraf');
  */
 function createMainMenu() {
   return Markup.keyboard([
-    ['💡 Помічники', '🎨 Креативи'],
-    ['🎬 Відео', '🎨 Зображення'],
+    ['🧠 Помічники', '🎨 Креативи'],
+    ['🎬 Відео', '🖼️ Зображення'],
     ['👤 Профіль', '❓ Допомога'],
     ['📝 Feedback', '📄 Інструкція']
   ]).resize();
