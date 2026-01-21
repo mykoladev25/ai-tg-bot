@@ -200,7 +200,7 @@ async function generateWithStableDiffusion(prompt, imageUrl = null, strength = 0
 /**
  * Генерувати зображення через Nano Banana Pro (підтримка до 14 зображень)
  */
-async function generateWithNanoBanana(prompt, imageInput = null, resolution = "2K", aspectRatio = "1:1") {
+async function generateWithNanoBanana(prompt, imageInput = null, resolution = "2K", aspectRatio = "match_input_image") {
   try {
     console.log('Generating with Nano Banana Pro:', prompt, `aspect_ratio: ${aspectRatio}`);
 
@@ -236,7 +236,7 @@ async function generateWithNanoBanana(prompt, imageInput = null, resolution = "2
 /**
  * Генерувати зображення через Seedream 4.5 (підтримка до 14 зображень)
  */
-async function generateWithSeedream(prompt, imageInput = null, size = "4K", aspectRatio = "1:1") {
+async function generateWithSeedream(prompt, imageInput = null, size = "4K", aspectRatio = "match_input_image") {
   try {
     console.log('Generating with Seedream 4.5:', prompt, `aspect_ratio: ${aspectRatio}`);
 
@@ -271,7 +271,7 @@ async function generateWithSeedream(prompt, imageInput = null, size = "4K", aspe
   }
 }
 
-async function generateWithIdeogram(prompt, imageInput = null, imageWeight = 0.5, aspectRatio = '1:1') {
+async function generateWithIdeogram(prompt, imageInput = null, imageWeight = 0.5, aspectRatio = "match_input_image") {
   try {
     console.log('Generating with Ideogram v3 Turbo:', prompt, `aspect_ratio: ${aspectRatio}`);
 

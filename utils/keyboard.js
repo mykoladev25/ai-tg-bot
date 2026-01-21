@@ -88,9 +88,18 @@ function createPaymentMenu(price, plan = 'basic', userId = null, telegramId = nu
     liqpayUrl += `&tg_id=${telegramId}`;
   }
 
+  // WayForPay URL
+  let wayforpayUrl = `${appUrl}/pay/wayforpay?plan=${plan}`;
+  if (userId) {
+    wayforpayUrl += `&userId=${userId}`;
+  }
+  if (telegramId) {
+    wayforpayUrl += `&tg_id=${telegramId}`;
+  }
+
   return Markup.inlineKeyboard([
     [Markup.button.callback(`💫 Telegram Stars (${price}⭐)`, `pay_stars_${plan}`)],
-    [Markup.button.url(`💳 LiqPay (Карта/Apple/Google)`, liqpayUrl)],
+    [Markup.button.url(`💳 WayForPay (Карта/Apple/Google)`, wayforpayUrl)],
     // Use webApp only in production (HTTPS), use regular URL for development
     // [isProduction
     //   ? Markup.button.webApp(`💳 Stripe (Card/Apple/Google)`, stripeUrl)

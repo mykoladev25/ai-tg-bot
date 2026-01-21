@@ -783,6 +783,7 @@ bot.hears('🎨 Креативи', async (ctx) => {
 Вибери готовий креатив - будуть згенеровані фотосесії з вшитими промптами 👇`;
 
   const creativesKeyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('💌 До Дня Закоханих', 'creative_love_is')],
     [Markup.button.callback('❤️ Романтика', 'creative_romance')],
     [Markup.button.callback('🏎️ Стиль & Техніка', 'creative_tech')],
     [Markup.button.callback('🌃 Urban Vibes', 'creative_urban')],
@@ -811,9 +812,12 @@ bot.hears('📝 Feedback', async (ctx) => {
   await ctx.reply(feedbackMenu, { parse_mode: 'HTML', ...feedbackKeyboard });
 });
 
-// Отримуємо ціну моделі
+// Отримуємо ціни моделей
+const nanoBanana2kModel = models.design.models.find(m => m.key === 'nano_banana_2k');
 const nanoBanana4kModel = models.design.models.find(m => m.key === 'nano_banana_4k');
-const CREATIVE_COST = nanoBanana4kModel?.cost || 31;
+const CREATIVE_COST_2K = nanoBanana2kModel?.cost || 16;
+const CREATIVE_COST_4K = nanoBanana4kModel?.cost || 31;
+const CREATIVE_COST = CREATIVE_COST_4K; // Default для інших креативів
 
 // Романтична фотосесія
 bot.action('creative_romance', async (ctx) => {
@@ -842,6 +846,99 @@ bot.action('creative_romance', async (ctx) => {
       `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
       `👉 Надішліть фото зараз`,
+      {
+        parse_mode: 'HTML',
+        ...keyboard.createBackButton('main_menu')
+      }
+  );
+});
+
+// ==================== UKRAINIAN ROMANTIC QUOTES FOR LOVE IS... ====================
+const UKRAINIAN_LOVE_QUOTES = [
+  "...коли ти п'єш каву вранці разом",
+  "...дивитися на зірки поруч",
+  "...сміятися над одними жартами",
+  "...ділити останній шматок торта",
+  "...знайти свій дім у чужих очах",
+  "...коли твоя рука знаходить мою",
+  "...танцювати на кухні під дощем",
+  "...коли ти відчуваєш себе коханою",
+  "...бути разом у будь-яку погоду",
+  "...ділити кожну мить щастя"
+];
+
+const ROMANTIC_SCENARIOS = [
+  "holding hands",
+  "hugging",
+  "sharing umbrella",
+  "dancing together",
+  "giving flowers",
+  "sitting together",
+  "walking together",
+  "looking at stars",
+  "sharing ice cream"
+];
+
+const BACKGROUND_COLORS = [
+  "soft pink",
+  "lavender",
+  "mint green",
+  "peach",
+  "light coral"
+];
+
+const HEART_COLORS = [
+  "pink, red, purple",
+  "pink, coral, magenta",
+  "red, crimson, scarlet",
+  "hot pink, purple, violet"
+];
+
+// До Дня Закоханих - Love is... комік
+bot.action('creative_love_is', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_2K))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST_2K);
+    return;
+  }
+
+  // Генеруємо випадкові елементи
+  const randomQuote = UKRAINIAN_LOVE_QUOTES[Math.floor(Math.random() * UKRAINIAN_LOVE_QUOTES.length)];
+  const randomScenario = ROMANTIC_SCENARIOS[Math.floor(Math.random() * ROMANTIC_SCENARIOS.length)];
+  const randomBgColor = BACKGROUND_COLORS[Math.floor(Math.random() * BACKGROUND_COLORS.length)];
+  const randomHeartColors = HEART_COLORS[Math.floor(Math.random() * HEART_COLORS.length)];
+
+  userState.set(userId, {
+    creative: 'love_is',
+    step: 'waiting_photo',
+    model: 'nano_banana_2k',
+    loveIsData: {
+      quote: randomQuote,
+      scenario: randomScenario,
+      bgColor: randomBgColor,
+      heartColors: randomHeartColors
+    }
+  });
+
+  // ✅ ВАЖНО: Встановити currentModel щоб система знала яку модель використовувати
+  userCurrentModel.set(userId, 'love_is');
+
+  await ctx.reply(
+      `💌 <b>Готовий креатив: День Закоханих "Love is..."</b>\n\n` +
+      `📸 <b>Крок 1/1:</b> Надішліть фото пари\n\n` +
+      `✨ <b>Що буде згенеровано:</b>\n` +
+      `• Чарівна комік-ілюстрація двох ківi персонажів\n` +
+      `• Сценарій: ${randomScenario}\n` +
+      `• Фон: ${randomBgColor} gradient з серцями (${randomHeartColors})\n` +
+      `• Текст: "Love is..." англійською на вершині\n` +
+      `• Українська цитата: "Love is ${randomQuote}"\n` +
+      `• Стиль: cute chibi, kawaii, vector art\n` +
+      `• Якість поздравки ✨\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST_2K}⚡\n` +
+      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `👉 Надішліть фото пари тепер`,
       {
         parse_mode: 'HTML',
         ...keyboard.createBackButton('main_menu')
@@ -995,7 +1092,6 @@ async function handleCreativePhoto(ctx, imageUrl) {
   if (!state || !state.creative) return false;
 
   const creativeType = state.creative;
-  const model = models.design.models.find(m => m.key === 'nano_banana_4k');
 
   // Промпти (АНГЛІЙСЬКА + збереження рис обличчя)
   const prompts = {
@@ -1007,11 +1103,22 @@ async function handleCreativePhoto(ctx, imageUrl) {
 
     fantasy: `Fantasy fairy tale photoshoot. Person with magical artifact in misty forest, magical atmosphere, mystical lighting, detailed costume design. Based on uploaded photo, preserve facial features, identity and likeness. High detail, 4K quality.`,
 
-    mashup: `Creative surrealist composition. Person with fantastical object or creature, harmonious interaction, vibrant colors, detailed rendering. Based on uploaded photo, preserve facial features, identity and likeness. Original creative style, 4K quality.`
+    mashup: `Creative surrealist composition. Person with fantastical object or creature, harmonious interaction, vibrant colors, detailed rendering. Based on uploaded photo, preserve facial features, identity and likeness. Original creative style, 4K quality.`,
+
+    love_is: (() => {
+      const data = state.loveIsData;
+      return `A cute romantic sticker-style illustration with a simple black border frame. At the top left "Love is..." text in elegant script font. At the top right, two small red heart symbols. In the center, two adorable cartoon characters in kawaii/chibi style with big eyes and sweet expressions, wearing casual clothes (t-shirts and jeans/pants), showing romantic interaction ${data.scenario}. Small red hearts floating around them. At the bottom, Ukrainian text completing the phrase with "${data.quote}". Clean white background, soft pastel colors, adorable cartoon art style, wholesome and sweet atmosphere, greeting card aesthetic. Based on uploaded photos, preserve facial features, identity and likeness of both people.`;
+    })()
   };
 
   const prompt = prompts[creativeType];
+
+  // Вибираємо правильну модель для кожного креативу
+  const modelKey = creativeType === 'love_is' ? 'nano_banana_2k' : 'nano_banana_4k';
+  const model = models.design.models.find(m => m.key === modelKey);
+
   const creativeNames = {
+    love_is: '💌 День Закоханих',
     romance: '❤️ Романтика',
     tech: '🏎️ Стиль & Техніка',
     urban: '🌃 Urban Vibes',
@@ -1029,13 +1136,15 @@ async function handleCreativePhoto(ctx, imageUrl) {
   );
 
   try {
-    const result = await replicate.generateWithNanoBanana(prompt, imageUrl, '4K');
+    // Вибираємо правильну точність для моделі
+    const resolution = modelKey === 'nano_banana_2k' ? '2K' : '4K';
+    const result = await replicate.generateWithNanoBanana(prompt, imageUrl, resolution);
 
     if (!result.success) {
       await adminNotifier.notifyAdmin(
           bot,
           new Error(result.error),
-          { userId, username: ctx.from.username, action: `creative_${creativeType}`, model: 'Nano Banana 4K' }
+          { userId, username: ctx.from.username, action: `creative_${creativeType}`, model: model.name }
       );
       await ctx.telegram.editMessageText(
           ctx.chat.id,
@@ -1051,7 +1160,7 @@ async function handleCreativePhoto(ctx, imageUrl) {
         userId,
         model.cost,
         `${creativeNames[creativeType]} generation`,
-        { modelKey: 'nano_banana_4k', modelName: 'Nano Banana Pro 4K', apiCost: model.apiCost }
+        { modelKey: modelKey, modelName: model.name, apiCost: model.apiCost }
     );
 
     // Перевірити розмір файлу
@@ -1386,7 +1495,7 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
   message += sub.features.join('\n') + '\n\n';
   message += `💰 Вартість:\n`;
   message += `  ⭐ ${sub.price}⭐ Telegram Stars\n`;
-  message += `  💳 ${priceUAH}₴ LiqPay`;
+  message += `  💳 ${priceUAH}₴ банківський платіж`;
   if (sub.tokensLiqPay) {
     message += ` (+${sub.tokensLiqPay - sub.tokens}⚡ бонус)`;
   }
@@ -1394,7 +1503,7 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
   message += `🎁 Токенів:\n`;
   message += `  ⭐ ${sub.tokens}⚡ за Telegram Stars\n`;
   if (sub.tokensLiqPay) {
-    message += `  💳 ${sub.tokensLiqPay}⚡ за LiqPay (економія на комісіях) 🎁\n`;
+    message += `  💳 ${sub.tokensLiqPay}⚡ за банківський платіж (економія на комісіях) 🎁\n`;
   }
   message += `\n📱 Оберіть спосіб оплати 👇`;
 
@@ -1526,14 +1635,40 @@ bot.on('voice', async (ctx) => {
 bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
   const currentModel = userCurrentModel.get(userId);
-  const state = userState.get(userId);  // ← 1. ДОДАТИ
-  const mediaGroupId = ctx.message.media_group_id;
+  const state = userState.get(userId);
+
+  // ✅ Перевірити чи користувач вибрав модель
+  if (!currentModel) {
+    await ctx.reply(
+      '❌ Спочатку виберіть модель для обробки фото.\n\n' +
+      '🎨 Оберіть один з розділів:',
+      keyboard.createInlineMenu(models.design.models, 1)
+    );
+    return;
+  }
+
+  // ✅ Спеціальний випадок: користувач обрав "🖼️ Завантажте зображення для аналізу" з гідлінгу Claude
+  if (currentModel === 'image') {
+    console.log(`🖼️ Image analysis mode selected, redirecting to Claude vision`);
+    await handleClaudeVision(ctx);
+    return;
+  }
+
+  // ✅ Спеціальний випадок: користувач обрав "💌 День Закоханих" креатив
+  if (currentModel === 'love_is') {
+    console.log(`💌 Love is... creative selected, handling creative photo`);
+    const imageUrl = await getImageUrl(ctx);
+    const handled = await handleCreativePhoto(ctx, imageUrl);
+    if (handled) return;
+  }
 
   if (state?.creative && state?.step === 'waiting_photo') {
     const imageUrl = await getImageUrl(ctx);
     const handled = await handleCreativePhoto(ctx, imageUrl);
     if (handled) return;
   }
+
+  const mediaGroupId = ctx.message.media_group_id;
 
   if (mediaGroupId) {
     if (!mediaGroups.has(mediaGroupId)) {
@@ -1753,8 +1888,15 @@ async function handleMediaGroup(ctx, group) {
   const { photos, caption, currentModel, userId } = group;
   const model = models.design.models.find(m => m.key === currentModel);
 
+  // ✅ Перевірити чи модель знайдена
+  if (!model) {
+    console.error(`❌ Model not found in handleMediaGroup: ${currentModel}`);
+    await ctx.reply('❌ Модель не знайдена. Спробуйте ще раз.');
+    return;
+  }
+
   // ✅ Перевірити чи модель підтримує багато зображень
-  if (model?.maxImages && model.maxImages > 1) {
+  if (model.maxImages && model.maxImages > 1) {
     // ✅ ЯК ЩО ЦЕ МОДЕЛЬ З ASPECT RATIO - ПОКАЗИТИ МЕНЮ ВИБОРУ
     if (MODELS_WITH_ASPECT_RATIO.includes(currentModel)) {
       // Зберігаємо дані для подальшої генерації
@@ -1837,6 +1979,13 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
   const model = models.design.models.find(m => m.key === modelKey);
+
+  // ✅ Перевіримо чи модель знайдена
+  if (!model) {
+    console.error(`❌ Model not found: ${modelKey}`);
+    await ctx.reply('❌ Модель не знайдена. Спробуйте ще раз.');
+    return;
+  }
 
   if (!(await userBalance.hasTokens(userId, model.cost))) {
     await showInsufficientTokens(ctx, model.cost);
@@ -2335,10 +2484,14 @@ async function startBot() {
     const liqpayWebhook = createLiqPayRouter(bot);
     app.use('/webhook', liqpayWebhook);
 
+    // Webhook для WayForPay (передаємо bot instance для відправки повідомлень)
+    const createWayForPayRouter = require('./webhooks/wayforpay');
+    const wayforpayWebhook = createWayForPayRouter(bot);
+    app.use('/webhook', wayforpayWebhook);
+
     // Інші middleware
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
-    app.use(express.static(__dirname + '/public'));
 
     // ==================== PAGES ====================
 
@@ -2405,16 +2558,16 @@ async function startBot() {
 
     // ✅ LiqPay checkout API
     app.post('/api/liqpay/checkout', async (req, res) => {
-      const { userId, plan, tokens } = req.body;
+      const { userId, plan } = req.body;
       const liqpay = require('./services/liqpay');
 
-      console.log(`📋 LiqPay checkout request:`, { userId, plan, tokens });
+      console.log(`📋 LiqPay checkout request:`, { userId, plan });
 
-      if (!userId || !plan || !tokens) {
-        console.error('❌ Missing required fields:', { userId, plan, tokens });
+      if (!userId || !plan) {
+        console.error('❌ Missing required fields:', { userId, plan });
         return res.status(400).json({
           success: false,
-          error: 'Missing required fields: userId, plan, tokens'
+          error: 'Missing required fields: userId, plan'
         });
       }
 
@@ -2435,6 +2588,7 @@ async function startBot() {
         const amountUAH = Math.round(sub.priceUSD * rate);
 
         // Використовуємо tokensLiqPay (бонус для LiqPay платежу) або звичайні tokens
+        // ✅ Отримуємо з плану, НЕ з клієнтського payload!
         const tokenCount = sub.tokensLiqPay || sub.tokens;
 
         console.log(`📊 LiqPay pricing: priceUSD=${sub.priceUSD}, rate=${rate.toFixed(2)}, amountUAH=${amountUAH}, tokens=${tokenCount}`);
@@ -2447,7 +2601,7 @@ async function startBot() {
           order_id: orderId,
           amount: amountUAH,
           currency: 'UAH',
-          description: `neuro.lab.ai - ${plan} (${tokens}⚡)`,
+          description: `neuro.lab.ai - ${plan} (${tokenCount}⚡)`,
           server_url: `${process.env.APP_URL || 'http://127.0.0.1:5500'}/webhook/liqpay`,
           result_url: `${process.env.APP_URL || 'http://127.0.0.1:5500'}/payment/success?order_id=${orderId}`,
           language: 'uk'
@@ -2468,6 +2622,258 @@ async function startBot() {
       } catch (error) {
         console.error('❌ LiqPay checkout error:', error);
         res.status(400).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // ✅ WayForPay checkout page
+    app.get('/pay/wayforpay', (req, res) => {
+      const plan = req.query.plan;
+
+      console.log(`📄 WayForPay checkout page requested: plan=${plan}`);
+
+      if (!plan) {
+        return res.status(400).send('План не обрано');
+      }
+
+      const filePath = __dirname + '/public/wayforpay-checkout.html';
+      console.log(`📂 Sending file: ${filePath}`);
+      res.sendFile(filePath);
+    });
+
+    // ✅ WayForPay checkout API
+    app.post('/api/wayforpay/checkout', async (req, res) => {
+      const { userId, plan } = req.body;
+      const wayforpay = require('./services/wayforpay');
+
+      console.log(`📋 WayForPay checkout request:`, { userId, plan });
+
+      if (!userId || !plan) {
+        console.error('❌ Missing required fields:', { userId, plan });
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields: userId, plan'
+        });
+      }
+
+      try {
+        // Перевіримо чи є такий план
+        const sub = models.subscriptions[plan];
+        if (!sub) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid plan'
+          });
+        }
+
+        // Отримуємо кількість токенів з плану (не з клієнтського payload!)
+        const tokens = sub.tokensLiqPay || sub.tokens;
+
+        // Отримуємо реальну ціну в UAH
+        const rate = await exchangeRate.getRate();
+        const amount = Math.round(sub.priceUSD * rate);
+
+        // Генеруємо унікальний ID замовлення: userId_planKey_timestamp
+        const orderReference = `${userId}_${plan}_${Date.now()}`;
+
+        // Параметри платежу для WayForPay
+        const checkoutParams = {
+          order_id: orderReference,
+          amount: amount,
+          currency: 'UAH',
+          description: `neuro.lab.ai - ${plan} (${tokens}⚡)`,
+          result_url: `${process.env.APP_URL || 'http://127.0.0.1:5500'}/payment/success?order_id=${orderReference}`,
+          decline_url: `${process.env.APP_URL || 'http://127.0.0.1:5500'}/payment/failed?order_id=${orderReference}`,
+          server_url: `${process.env.APP_URL || 'http://127.0.0.1:5500'}/webhook/wayforpay`
+        };
+
+        const checkout = await wayforpay.createCheckout(checkoutParams);
+
+        console.log(`✅ WayForPay checkout created for user ${userId}: order_id=${orderReference}`);
+
+        res.json({
+          success: true,
+          checkoutUrl: checkout.checkoutUrl,
+          params: checkout.params,
+          orderId: orderReference
+        });
+      } catch (error) {
+        console.error('❌ WayForPay checkout error:', error);
+        res.status(400).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // ✅ Verify WayForPay payment status
+    app.get('/api/payment/verify/:orderId', async (req, res) => {
+      const { orderId } = req.params;
+
+      try {
+        console.log(`🔍 Verifying payment status for order: ${orderId}`);
+
+        // Перевіряємо чи платіж вже обробленый
+        const Transaction = require('./database/models/Transaction');
+
+        if (!Transaction) {
+          // Якщо модель не існує, повертаємо успіх (webhook обробить)
+          return res.json({ success: true, status: 'pending' });
+        }
+
+        const transaction = await Transaction.findOne({
+          'metadata.orderId': orderId
+        });
+
+        if (transaction) {
+          console.log(`✅ Payment found in database:`, {
+            status: transaction.type,
+            orderId
+          });
+          return res.json({
+            success: true,
+            status: 'completed',
+            transaction: transaction
+          });
+        }
+
+        // Платіж не знайдено - можливо він відхилено
+        console.log(`⚠️ Payment not found in database:`, orderId);
+        res.json({
+          success: false,
+          status: 'failed',
+          message: 'Payment not found'
+        });
+      } catch (error) {
+        console.error('❌ Payment verification error:', error);
+        res.json({ success: false, status: 'error', error: error.message });
+      }
+    });
+
+    // ✅ Manual payment processing for WayForPay (fallback when webhook fails)
+    app.post('/api/payment/process-wayforpay/:orderId', async (req, res) => {
+      const { orderId } = req.params;
+
+      try {
+        console.log(`🔄 Manual processing WayForPay payment: ${orderId}`);
+
+        // Парсимо order_id: userId_plan_timestamp
+        const parts = orderId.split('_');
+        const userId = parseInt(parts[0]);
+        const plan = parts[1];
+
+        console.log(`📊 Parsed order: userId=${userId}, plan=${plan}, parts=${JSON.stringify(parts)}`);
+
+        if (!userId || !plan) {
+          console.error(`❌ Invalid order format: userId=${userId}, plan=${plan}`);
+          return res.json({
+            success: false,
+            error: 'Invalid order format'
+          });
+        }
+
+        // ⚠️ ВАЖНО: Спочатку перевіряємо статус платежу у WayForPay!
+        const wayforpay = require('./services/wayforpay');
+        const paymentStatus = await wayforpay.checkPaymentStatus(orderId);
+
+        console.log(`🔍 WayForPay payment status check result:`, {
+          transactionStatus: paymentStatus.transactionStatus,
+          orderReference: paymentStatus.orderReference
+        });
+
+        // Перевіряємо чи платіж дійсно успішний
+        if (paymentStatus.transactionStatus !== 'Completed') {
+          console.log(`❌ Payment was NOT completed: ${paymentStatus.transactionStatus}`);
+          return res.json({
+            success: false,
+            error: `Payment status: ${paymentStatus.transactionStatus}`,
+            status: paymentStatus.transactionStatus
+          });
+        }
+
+        // Отримуємо інформацію про план
+        const sub = models.subscriptions[plan];
+        if (!sub) {
+          console.error(`❌ Invalid plan: ${plan}`);
+          return res.json({
+            success: false,
+            error: 'Invalid plan'
+          });
+        }
+
+        console.log(`✅ Plan found: ${sub.name} (${sub.tokens} tokens)`);
+
+        // Перевіряємо чи вже оброблено
+        const Transaction = require('./database/models/Transaction');
+        const existing = await Transaction.findOne({
+          'metadata.orderId': orderId,
+          type: 'wayforpay_purchase'
+        });
+
+        if (existing) {
+          console.log(`⚠️ Order ${orderId} already processed`);
+          return res.json({
+            success: true,
+            message: 'Already processed',
+            tokens: existing.metadata.tokens
+          });
+        }
+
+        // Отримуємо кількість токенів
+        const tokens = sub.tokensLiqPay || sub.tokens;
+
+        console.log(`💰 Adding tokens: ${tokens} to user ${userId}`);
+
+        // Нараховуємо токени
+        await userBalance.addTokens(
+          userId,
+          tokens,
+          'wayforpay_purchase',
+          {
+            plan: sub.name,
+            planKey: plan,
+            orderId: orderId,
+            processedAt: new Date()
+          }
+        );
+
+        console.log(`✅ Manual: +${tokens}⚡ to user ${userId} (${sub.name})`);
+
+        // Отримуємо користувача для відправки повідомлення
+        const user = await userBalance.getUser(userId, { id: userId });
+
+        console.log(`👤 User retrieved: balance=${user.tokens}⚡`);
+
+        // Відправляємо повідомлення в бот
+        if (bot) {
+          try {
+            await bot.telegram.sendMessage(
+              userId,
+              `✅ <b>Оплату отримано!</b>\n\n` +
+              `💳 Метод: WayForPay\n` +
+              `💎 Тариф: ${sub.name}\n` +
+              `⚡ Токенів нараховано: ${tokens}\n` +
+              `💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
+              `Дякуємо за покупку! 🎉`,
+              { parse_mode: 'HTML' }
+            );
+            console.log(`📨 Success message sent to user ${userId}`);
+          } catch (err) {
+            console.error('Error sending message:', err.message);
+          }
+        }
+
+        res.json({
+          success: true,
+          message: 'Payment processed manually',
+          tokens: tokens,
+          balance: user.tokens
+        });
+      } catch (error) {
+        console.error('❌ Manual payment processing error:', error);
+        res.status(500).json({
           success: false,
           error: error.message
         });
@@ -2747,16 +3153,18 @@ async function startBot() {
       }
     });
 
-    // ✅ Get LiqPay prices calculated by exchange rate
-    app.get('/payment/success', (req, res) => {
+    app.all('/payment/success', (req, res) => {
       const sessionId = req.query.session_id;
-      const orderId = req.query.order_id;
-      const paymentId = sessionId || orderId;
+      const orderId = req.query.order_id || (req.body && req.body.orderReference);
+      console.log(`✅ Payment success page (${req.method}):`, { sessionId, orderId });
+      res.sendFile(__dirname + '/public/payment-success.html');
+    });
 
-      console.log(`✅ Payment success page requested:`, { sessionId, orderId });
-
-      const filePath = __dirname + '/public/payment-success.html';
-      res.sendFile(filePath);
+    // ✅ Payment failed page (for declined WayForPay payments)
+    app.all('/payment/failed', (req, res) => {
+      const orderId = req.query.order_id || (req.body && req.body.orderReference);
+      console.log(`❌ Payment failed page (${req.method}):`, { orderId });
+      res.sendFile(__dirname + '/public/payment-failed.html');
     });
 
     // ✅ Payment cancel page
@@ -2835,6 +3243,9 @@ async function startBot() {
       res.sendFile(filePath);
     });
 
+    // ✅ Static files (CSS, JS, images, etc.)
+    app.use(express.static(__dirname + '/public'));
+
     // ✅ Catch-all 404
     app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
@@ -2853,6 +3264,8 @@ async function startBot() {
       console.log(`🛒 Checkout API: POST http://127.0.0.1:${PORT}/api/stripe/checkout`);
       console.log(`💳 LiqPay webhook: POST http://127.0.0.1:${PORT}/webhook/liqpay`);
       console.log(`💳 LiqPay checkout: GET http://127.0.0.1:${PORT}/pay/liqpay?plan=starter`);
+      console.log(`💳 WayForPay webhook: POST http://127.0.0.1:${PORT}/webhook/wayforpay`);
+      console.log(`💳 WayForPay checkout: GET http://127.0.0.1:${PORT}/pay/wayforpay?plan=starter`);
       console.log(`💱 Exchange Rate API: GET http://127.0.0.1:${PORT}/api/exchange-rate`);
       console.log(`📊 Plans API: GET http://127.0.0.1:${PORT}/api/plans`);
     });

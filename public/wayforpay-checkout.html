@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WayForPay Checkout - neuro.lab.ai</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+      }
+      .container {
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        max-width: 500px;
+        width: 100%;
+        padding: 40px;
+        text-align: center;
+      }
+      .logo { font-size: 48px; margin-bottom: 20px; }
+      h1 { color: #333; margin-bottom: 10px; font-size: 28px; }
+      .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; }
+      .price-section {
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 30px;
+      }
+      .price-label { color: #666; font-size: 14px; margin-bottom: 8px; }
+      .price { font-size: 32px; font-weight: bold; color: #333; margin-bottom: 8px; }
+      .tokens { color: #667eea; font-weight: 600; font-size: 16px; }
+      .features {
+        text-align: left;
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 30px;
+      }
+      .features li.feature-item {
+        list-style: none;
+        margin-bottom: 8px;
+        color: #555;
+        font-size: 14px;
+      }
+      .features li.feature-item:before {
+        content: "✓ ";
+        color: #667eea;
+        font-weight: bold;
+        margin-right: 8px;
+      }
+      .features li.generation-header {
+        font-weight: 700;
+        color: #333;
+        margin-top: 12px;
+        margin-bottom: 12px;
+        padding: 10px 0;
+        border-top: 2px solid #667eea;
+        border-bottom: 2px solid #667eea;
+      }
+      .features li.generation-header:before {
+        display: none;
+      }
+      .features li.generation-item {
+        color: #666;
+        font-size: 13px;
+        background: linear-gradient(90deg, transparent 0%, rgba(102, 126, 234, 0.05) 100%);
+        padding: 6px 12px;
+        border-radius: 4px;
+        margin-bottom: 6px;
+        margin-left: 8px;
+      }
+      .features li.generation-item:before {
+        content: "";
+        display: none;
+      }
+      .error-message {
+        background: #fee;
+        color: #c33;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        display: none;
+        border-left: 4px solid #c33;
+      }
+      .loading { display: none; text-align: center; padding: 20px; }
+      .spinner {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #667eea;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 15px;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      button {
+        width: 100%;
+        padding: 14px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s;
+      }
+      button:hover:not(:disabled) { transform: translateY(-2px); }
+      button:disabled { opacity: 0.6; cursor: not-allowed; }
+      .back-link {
+        display: inline-block;
+        margin-top: 20px;
+        color: #667eea;
+        text-decoration: none;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .back-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="logo">🤖</div>
+    <h1 id="planName">Завантаження...</h1>
+    <p class="subtitle">neuro.lab.ai</p>
+
+    <div class="error-message" id="errorMessage"></div>
+    <div class="loading" id="loadingIndicator">
+        <div class="spinner"></div>
+        <p>Обробка платежу...</p>
+    </div>
+
+    <div id="checkoutContent">
+        <div class="price-section">
+            <div class="price-label">Сума до оплати</div>
+            <div class="price" id="priceDisplay">—</div>
+            <div class="tokens" id="tokensDisplay">—</div>
+        </div>
+
+        <div class="features" id="featuresContainer">
+            <ul id="featuresList"></ul>
+        </div>
+
+        <button id="payButton" onclick="processPayment()">💳 Перейти до оплати</button>
+    </div>
+
+    <span onclick="goToBot()" class="back-link">← Повернутись в бот</span>
+</div>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const plan = urlParams.get('plan');
+    const userId = urlParams.get('userId') || urlParams.get('tg_id');
+    window.BOT_USERNAME = 'neuro_lab_ai_bot';
+    let selectedPlan = null;
+
+    function showError(message) {
+        const errorDiv = document.getElementById('errorMessage');
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+    }
+
+    function hideError() {
+        document.getElementById('errorMessage').style.display = 'none';
+    }
+
+    function showLoading(show) {
+        document.getElementById('loadingIndicator').style.display = show ? 'block' : 'none';
+        document.getElementById('checkoutContent').style.display = show ? 'none' : 'block';
+        document.getElementById('payButton').disabled = show;
+    }
+
+    async function loadPlans() {
+        try {
+            const response = await fetch('/api/plans');
+            const data = await response.json();
+
+            if (!data.success || !data.plans) {
+                showError('Помилка завантаження планів');
+                return;
+            }
+
+            selectedPlan = data.plans[plan];
+
+            if (!selectedPlan) {
+                showError(`План "${plan}" не знайдено`);
+                return;
+            }
+
+            document.getElementById('planName').textContent = `💎 ${selectedPlan.name}`;
+            const priceUAH = selectedPlan.priceUAHDynamic || Math.round(selectedPlan.priceUSD * 43);
+            document.getElementById('priceDisplay').textContent = `${priceUAH} ₴`;
+            const tokenCount = selectedPlan.tokensLiqPay || selectedPlan.tokens;
+            document.getElementById('tokensDisplay').textContent = `${tokenCount}⚡ токенів`;
+
+            const featuresList = document.getElementById('featuresList');
+            featuresList.innerHTML = '';
+            if (selectedPlan.features && Array.isArray(selectedPlan.features)) {
+                let isGenerationSection = false;
+                // Показуємо ВСІ фічі, не тільки перші 5
+                selectedPlan.features.forEach(feature => {
+                    if (!feature) return;
+                    const li = document.createElement('li');
+                    li.classList.add('feature-item');
+
+                    // Визначаємо чи це заголовок "Що можна згенерувати:"
+                    if (feature.includes('Що можна згенерувати')) {
+                        li.classList.add('generation-header');
+                        isGenerationSection = true;
+                    }
+                    // Перевіряємо чи це елемент списку генерацій (починається з •, числа або Stable/Seedream/тощо)
+                    else if (isGenerationSection && (feature.startsWith('•') || /^\d+[×x]/.test(feature))) {
+                        li.classList.add('generation-item');
+                    }
+                    // VIP підтримка - це останній елемент, не в списку генерацій
+                    else if (feature.includes('VIP')) {
+                        isGenerationSection = false;
+                    }
+
+                    li.textContent = feature;
+                    featuresList.appendChild(li);
+                });
+            }
+
+            hideError();
+        } catch (error) {
+            console.error('Error loading plans:', error);
+            showError('Помилка завантаження даних.');
+        }
+    }
+
+    async function processPayment() {
+        if (!selectedPlan || !userId || !plan) {
+            showError('Невірні параметри платежу');
+            return;
+        }
+
+        showLoading(true);
+
+        try {
+            // ✅ Надсилаємо тільки userId і plan!
+            const payload = {
+                userId: userId,
+                plan: plan
+            };
+
+            const response = await fetch('/api/wayforpay/checkout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                showError(data.error || 'Помилка створення платежу');
+                showLoading(false);
+                return;
+            }
+
+            if (data.checkoutUrl && data.params) {
+                submitWayForPayForm(data);
+            } else {
+                showError('Помилка: не отримано параметри платежу');
+                showLoading(false);
+            }
+        } catch (error) {
+            console.error('Payment error:', error);
+            showError('Помилка обробки платежу: ' + error.message);
+            showLoading(false);
+        }
+    }
+
+    function submitWayForPayForm(paymentData) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = paymentData.checkoutUrl;
+        form.acceptCharset = 'utf-8';
+
+        const params = paymentData.params;
+        for (const key in params) {
+            if (params.hasOwnProperty(key)) {
+                const value = params[key];
+
+                if (Array.isArray(value)) {
+                    value.forEach((item) => {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = `${key}[]`;
+                        input.value = item;
+                        form.appendChild(input);
+                    });
+                } else {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = key;
+                    input.value = value;
+                    form.appendChild(input);
+                }
+            }
+        }
+
+        document.body.appendChild(form);
+        form.submit();
+    }
+
+    function goToBot() {
+        window.location.href = 'https://t.me/' + window.BOT_USERNAME;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadPlans);
+</script>
+</body>
+</html>
