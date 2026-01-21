@@ -855,6 +855,7 @@ bot.action('creative_romance', async (ctx) => {
 
 // ==================== UKRAINIAN ROMANTIC QUOTES FOR LOVE IS... ====================
 const UKRAINIAN_LOVE_QUOTES = [
+  // Романтичні класичні
   "...коли ти п'єш каву вранці разом",
   "...дивитися на зірки поруч",
   "...сміятися над одними жартами",
@@ -864,34 +865,279 @@ const UKRAINIAN_LOVE_QUOTES = [
   "...танцювати на кухні під дощем",
   "...коли ти відчуваєш себе коханою",
   "...бути разом у будь-яку погоду",
-  "...ділити кожну мить щастя"
+  "...ділити кожну мить щастя",
+
+  // Милі побутові
+  "...красти ковдру вночі, але це нічого",
+  "...будити одне одного поцілунками",
+  "...готувати сніданок удвох",
+  "...співати разом у душі",
+  "...коли вона носить твою футболку",
+  "...ділити навушники на вулиці",
+  "...коли він запам'ятав твій улюблений чай",
+  "...будувати подушкові фортеці",
+  "...коли вона сміється з твоїх жартів",
+
+  // Смішні та грайливі
+  "...крадькома їсти солодке вночі",
+  "...змагатися хто більше з'їсть піци",
+  "...робити смішні селфі разом",
+  "...коли він дозволяє тобі вибрати фільм",
+  "...грати в приставку до ранку",
+  "...влаштовувати подушкові бої",
+  "...притворятися що ти сердишся",
+  "...коли вона завжди виграє у тебе",
+  "...ділити останнє печиво і сперечатися",
+
+  // Сюрреалістичні милі
+  "...коли ваші душі обнімаються",
+  "...літати разом у мріях",
+  "...знаходити веселку у звичайному дні",
+  "...коли серця б'ються в унісон",
+  "...створювати свій власний всесвіт",
+  "...малювати одне одного зірками",
+  "...коли час зупиняється поруч",
+  "...говорити очима без слів",
+
+  // Ніжні моменти
+  "...засинати на твоєму плечі",
+  "...гладити волосся одне одному",
+  "...шептати солодкі речі на вушко",
+  "...обійматися під ранкове сонце",
+  "...цілувати кінчик носа",
+  "...коли він прокидається першим",
+  "...лежати обійнявшись години",
+
+  // Підтримка та турбота
+  "...приносити улюблену їжу коли сумно",
+  "...обнімати коли важко",
+  "...вірити одне в одного завжди",
+  "...бути поруч у складні часи",
+  "...коли вона розуміє без слів",
+  "...підтримувати твої мрії",
+
+  // Пригоди разом
+  "...гуляти під дощем без парасольки",
+  "...танцювати серед міста",
+  "...їсти морозиво взимку",
+  "...ловити сніжинки язиком",
+  "...збирати листя восени",
+  "...запускати паперові кораблики",
+  "...малювати на запітнілих вікнах",
+
+  // Щоденна магія
+  "...коли він пам'ятає дрібниці",
+  "...знаходити серця всюди",
+  "...посміхатися при згадці про неї",
+  "...коли день стає кращим з нею",
+  "...бачити красу в простих речах",
+  "...перетворювати буденність на свято",
+
+  // Кумедні quirks
+  "...коли вона краде всі твої толстовки",
+  "...ділити одну тарілку спагеті",
+  "...намагатися не сміятися разом",
+  "...коли він танцює тільки для тебе",
+  "...робити один одному смішні голоси",
+  "...коли вона знає всі твої паролі"
 ];
 
 const ROMANTIC_SCENARIOS = [
+  // Класичні романтичні
   "holding hands",
-  "hugging",
+  "hugging warmly",
   "sharing umbrella",
   "dancing together",
   "giving flowers",
   "sitting together",
   "walking together",
   "looking at stars",
-  "sharing ice cream"
+  "sharing ice cream",
+
+  // Ніжні жести
+  "gentle forehead kiss",
+  "playing with hair",
+  "nose to nose",
+  "piggyback ride",
+  "carried in arms",
+  "head on shoulder",
+  "intertwined fingers",
+  "whispering secrets",
+
+  // Веселі активності
+  "pillow fight",
+  "making funny faces",
+  "building blanket fort",
+  "taking silly selfie",
+  "sharing headphones",
+  "cooking together",
+  "playing video games",
+  "eating pizza together",
+
+  // Побутові милоти
+  "morning coffee together",
+  "breakfast in bed",
+  "doing dishes together",
+  "grocery shopping",
+  "reading books together",
+  "watching sunset",
+  "building snowman",
+  "catching raindrops",
+
+  // Сюрреалістичні
+  "floating with balloons",
+  "sitting on clouds",
+  "riding bicycle in sky",
+  "surrounded by hearts",
+  "standing on rainbow",
+  "flying with birds",
+  "dancing on stars",
+
+  // Пригоди
+  "running in rain",
+  "jumping in puddles",
+  "autumn leaf pile",
+  "beach walking",
+  "mountain hiking",
+  "picnic in park",
+  "riding tandem bike",
+
+  // Творчі моменти
+  "drawing each other",
+  "taking photos",
+  "making heart shapes",
+  "blowing bubbles",
+  "playing guitar together",
+  "singing karaoke",
+
+  // Затишні
+  "wrapped in blanket",
+  "cuddling on couch",
+  "sleeping together",
+  "sharing hot cocoa",
+  "warming by fireplace",
+  "under starry blanket",
+
+  // Playful
+  "feeding each other",
+  "sharing cotton candy",
+  "ice cream cone fight",
+  "stealing hoodie",
+  "tickle fight",
+  "rock paper scissors"
 ];
 
 const BACKGROUND_COLORS = [
+  // Пастельні рожеві
   "soft pink",
+  "blush pink",
+  "rose pink",
+  "peachy pink",
+  "baby pink",
+
+  // Фіолетові відтінки
   "lavender",
+  "lilac",
+  "light purple",
+  "periwinkle",
+  "mauve",
+
+  // Зелені та м'ятні
   "mint green",
+  "sage green",
+  "seafoam",
+  "pistachio",
+  "pale turquoise",
+
+  // Персикові та коралові
   "peach",
-  "light coral"
+  "apricot",
+  "light coral",
+  "salmon pink",
+  "melon",
+
+  // Блакитні
+  "sky blue",
+  "powder blue",
+  "baby blue",
+  "ice blue",
+  "aqua",
+
+  // Жовті та кремові
+  "cream yellow",
+  "butter yellow",
+  "lemon chiffon",
+  "vanilla",
+  "champagne",
+
+  // Особливі
+  "cotton candy",
+  "pearl white",
+  "rose gold",
+  "champagne pink",
+  "ivory cream"
 ];
 
 const HEART_COLORS = [
+  // Рожево-червоні
   "pink, red, purple",
   "pink, coral, magenta",
   "red, crimson, scarlet",
-  "hot pink, purple, violet"
+  "hot pink, purple, violet",
+
+  // Яскраві мікси
+  "fuchsia, pink, rose",
+  "coral, peach, pink",
+  "ruby, cherry, rose",
+  "magenta, pink, lavender",
+
+  // Пастельні комбінації
+  "baby pink, blush, rose",
+  "lavender, lilac, pink",
+  "peach, coral, cream",
+  "mint, pink, lavender",
+
+  // Теплі тони
+  "orange, coral, pink",
+  "gold, rose, pink",
+  "salmon, peach, coral",
+  "tangerine, pink, red",
+
+  // Холодні відтінки
+  "purple, violet, magenta",
+  "blue, purple, pink",
+  "teal, pink, purple",
+  "indigo, purple, pink",
+
+  // Яскраві контрасти
+  "neon pink, hot pink, magenta",
+  "electric pink, fuchsia, purple",
+  "bright red, pink, orange",
+
+  // Ніжні градієнти
+  "soft pink, rose, blush",
+  "cream, peach, pink",
+  "white, pink, rose",
+  "vanilla, coral, pink"
+];
+
+// Бонус: додаткові деталі для унікальності
+const CUTE_DETAILS = [
+  "with floating hearts around",
+  "with sparkles and stars",
+  "with small flowers in background",
+  "with musical notes floating",
+  "with cute clouds nearby",
+  "with ribbon or bow decoration",
+  "with small butterflies",
+  "with gentle glow effect",
+  "with confetti around",
+  "with small hearts and stars",
+  "with whimsical swirls",
+  "with little gift boxes",
+  "with feathers floating",
+  "with soap bubbles",
+  "with golden shimmer"
 ];
 
 // До Дня Закоханих - Love is... комік
@@ -909,6 +1155,7 @@ bot.action('creative_love_is', async (ctx) => {
   const randomScenario = ROMANTIC_SCENARIOS[Math.floor(Math.random() * ROMANTIC_SCENARIOS.length)];
   const randomBgColor = BACKGROUND_COLORS[Math.floor(Math.random() * BACKGROUND_COLORS.length)];
   const randomHeartColors = HEART_COLORS[Math.floor(Math.random() * HEART_COLORS.length)];
+  const randomDetail = CUTE_DETAILS[Math.floor(Math.random() * CUTE_DETAILS.length)];
 
   userState.set(userId, {
     creative: 'love_is',
@@ -918,7 +1165,8 @@ bot.action('creative_love_is', async (ctx) => {
       quote: randomQuote,
       scenario: randomScenario,
       bgColor: randomBgColor,
-      heartColors: randomHeartColors
+      heartColors: randomHeartColors,
+      detail: randomDetail
     }
   });
 
@@ -931,7 +1179,8 @@ bot.action('creative_love_is', async (ctx) => {
       `✨ <b>Що буде згенеровано:</b>\n` +
       `• Чарівна комік-ілюстрація двох ківi персонажів\n` +
       `• Сценарій: ${randomScenario}\n` +
-      `• Фон: ${randomBgColor} gradient з серцями (${randomHeartColors})\n` +
+      `• Деталі: ${randomDetail}\n` +
+      `• Кольори серець: ${randomHeartColors}\n` +
       `• Текст: "Love is..." англійською на вершині\n` +
       `• Українська цитата: "Love is ${randomQuote}"\n` +
       `• Стиль: cute chibi, kawaii, vector art\n` +
@@ -1107,7 +1356,7 @@ async function handleCreativePhoto(ctx, imageUrl) {
 
     love_is: (() => {
       const data = state.loveIsData;
-      return `A cute romantic sticker-style illustration with a simple black border frame. At the top left "Love is..." text in elegant script font. At the top right, two small red heart symbols. In the center, two adorable cartoon characters in kawaii/chibi style with big eyes and sweet expressions, wearing casual clothes (t-shirts and jeans/pants), showing romantic interaction ${data.scenario}. Small red hearts floating around them. At the bottom, Ukrainian text completing the phrase with "${data.quote}". Clean white background, soft pastel colors, adorable cartoon art style, wholesome and sweet atmosphere, greeting card aesthetic. Based on uploaded photos, preserve facial features, identity and likeness of both people.`;
+      return `A cute romantic sticker-style illustration with a simple black border frame. At the top left "Love is..." text in elegant script font. At the top right, two small red heart symbols. In the center, two adorable cartoon characters in kawaii/chibi style with big eyes and sweet expressions, wearing casual clothes (t-shirts and jeans/pants), showing romantic interaction ${data.scenario}. Small red hearts floating around them ${data.detail}. At the bottom, Ukrainian text completing the phrase with "${data.quote}". Clean white background, soft pastel colors, adorable cartoon art style, wholesome and sweet atmosphere, greeting card aesthetic. Based on uploaded photos, preserve facial features, identity and likeness of both people.`;
     })()
   };
 
