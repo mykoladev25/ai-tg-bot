@@ -854,92 +854,33 @@ bot.action('creative_romance', async (ctx) => {
 });
 
 // ==================== UKRAINIAN ROMANTIC QUOTES FOR LOVE IS... ====================
+// Точно 25 цитат, як запропоновано
 const UKRAINIAN_LOVE_QUOTES = [
-  // Романтичні класичні
-  "...коли ти п'єш каву вранці разом",
-  "...дивитися на зірки поруч",
-  "...сміятися над одними жартами",
-  "...ділити останній шматок торта",
-  "...знайти свій дім у чужих очах",
-  "...коли твоя рука знаходить мою",
-  "...танцювати на кухні під дощем",
-  "...коли ти відчуваєш себе коханою",
-  "...бути разом у будь-яку погоду",
-  "...ділити кожну мить щастя",
-
-  // Милі побутові
-  "...красти ковдру вночі, але це нічого",
-  "...будити одне одного поцілунками",
-  "...готувати сніданок удвох",
-  "...співати разом у душі",
-  "...коли вона носить твою футболку",
-  "...ділити навушники на вулиці",
-  "...коли він запам'ятав твій улюблений чай",
-  "...будувати подушкові фортеці",
-  "...коли вона сміється з твоїх жартів",
-
-  // Смішні та грайливі
-  "...крадькома їсти солодке вночі",
-  "...змагатися хто більше з'їсть піци",
-  "...робити смішні селфі разом",
-  "...коли він дозволяє тобі вибрати фільм",
-  "...грати в приставку до ранку",
-  "...влаштовувати подушкові бої",
-  "...притворятися що ти сердишся",
-  "...коли вона завжди виграє у тебе",
-  "...ділити останнє печиво і сперечатися",
-
-  // Сюрреалістичні милі
-  "...коли ваші душі обнімаються",
-  "...літати разом у мріях",
-  "...знаходити веселку у звичайному дні",
-  "...коли серця б'ються в унісон",
-  "...створювати свій власний всесвіт",
-  "...малювати одне одного зірками",
-  "...коли час зупиняється поруч",
-  "...говорити очима без слів",
-
-  // Ніжні моменти
-  "...засинати на твоєму плечі",
-  "...гладити волосся одне одному",
-  "...шептати солодкі речі на вушко",
-  "...обійматися під ранкове сонце",
-  "...цілувати кінчик носа",
-  "...коли він прокидається першим",
-  "...лежати обійнявшись години",
-
-  // Підтримка та турбота
-  "...приносити улюблену їжу коли сумно",
-  "...обнімати коли важко",
-  "...вірити одне в одного завжди",
-  "...бути поруч у складні часи",
-  "...коли вона розуміє без слів",
-  "...підтримувати твої мрії",
-
-  // Пригоди разом
-  "...гуляти під дощем без парасольки",
-  "...танцювати серед міста",
-  "...їсти морозиво взимку",
-  "...ловити сніжинки язиком",
-  "...збирати листя восени",
-  "...запускати паперові кораблики",
-  "...малювати на запітнілих вікнах",
-
-  // Щоденна магія
-  "...коли він пам'ятає дрібниці",
-  "...знаходити серця всюди",
-  "...посміхатися при згадці про неї",
-  "...коли день стає кращим з нею",
-  "...бачити красу в простих речах",
-  "...перетворювати буденність на свято",
-
-  // Кумедні quirks
-  "...коли вона краде всі твої толстовки",
-  "...ділити одну тарілку спагеті",
-  "...намагатися не сміятися разом",
-  "...коли він танцює тільки для тебе",
-  "...робити один одному смішні голоси",
-  "...коли вона знає всі твої паролі"
+  "засинати, тримаючись за руки",
+  "ділити останній шматочок і не шкодувати",
+  "сміятися з дурниць, які розумієте лише ви двоє",
+  "пити чай на кухні й говорити 'як ти?' по-справжньому",
+  "обіймати міцніше, коли день був важкий",
+  "пам'ятати про 'я з тобою' без зайвих слів",
+  "робити з дому місце, куди хочеться повертатися",
+  "підтримувати мрії одне одного, навіть маленькі",
+  "разом прибирати без драми і з музикою",
+  "приносити каву саме так, як ти любиш",
+  "писати 'я скучив/скучила' першими",
+  "вміти миритися швидше, ніж ображатися",
+  "радіти простим вечорам більше, ніж гучним планам",
+  "зберігати теплість навіть у дрібних клопотах",
+  "робити компліменти не 'за щось', а 'просто так'",
+  "ділити парасолю і сміятися під дощем",
+  "помічати одне одного в натовпі з першого погляду",
+  "планувати майбутнє й не поспішати — разом",
+  "підставляти плече, а не читати нотації",
+  "бути командою у всьому — навіть у дрібницях",
+  "цілувати в щоку, коли ти не очікуєш",
+  "берегти ваші 'маленькі традиції'",
+  "вміти слухати, а не лише відповідати",
+  "казати 'дякую' за буденні речі",
+  "робити фото смішними, а спогади — теплими"
 ];
 
 const ROMANTIC_SCENARIOS = [
@@ -1180,11 +1121,10 @@ bot.action('creative_love_is', async (ctx) => {
       `• Чарівна комік-ілюстрація двох ківi персонажів\n` +
       `• Сценарій: ${randomScenario}\n` +
       `• Деталі: ${randomDetail}\n` +
-      `• Кольори серець: ${randomHeartColors}\n` +
-      `• Текст: "Love is..." англійською на вершині\n` +
-      `• Українська цитата: "Love is ${randomQuote}"\n` +
-      `• Стиль: cute chibi, kawaii, vector art\n` +
-      `• Якість поздравки ✨\n\n` +
+      `• Текст: "Love is…" англійською на вершині\n` +
+      `• Українська цитата: "...${randomQuote}"\n` +
+      `• Стиль: vintage 1990s, chibi, cute\n` +
+      `• Якість: поздравка в стилі стікера ✨\n\n` +
       `💰 <b>Вартість:</b> ${CREATIVE_COST_2K}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
       `👉 Надішліть фото пари тепер`,
@@ -1356,7 +1296,46 @@ async function handleCreativePhoto(ctx, imageUrl) {
 
     love_is: (() => {
       const data = state.loveIsData;
-      return `A cute romantic sticker-style illustration with a simple black border frame. At the top left "Love is..." text in elegant script font. At the top right, two small red heart symbols. In the center, two adorable cartoon characters in kawaii/chibi style with big eyes and sweet expressions, wearing casual clothes (t-shirts and jeans/pants), showing romantic interaction ${data.scenario}. Small red hearts floating around them ${data.detail}. At the bottom, Ukrainian text completing the phrase with "${data.quote}". Clean white background, soft pastel colors, adorable cartoon art style, wholesome and sweet atmosphere, greeting card aesthetic. Based on uploaded photos, preserve facial features, identity and likeness of both people.`;
+      return `GOAL: Transform the uploaded photo of a real couple into a cute vintage bubblegum-wrapper "Love Is"-style sticker panel (romantic mini-comic). Keep the couple recognizable (hair, face proportions, key features), but simplify into classic chibi cartoon characters.
+
+STYLE (match the classic "Love Is" sticker vibe):
+- 1990s romantic sticker/comic illustration
+- big heads, small bodies, tiny hands/feet, simple rounded shapes
+- clean black outline with slightly varied line weight
+- soft pastel watercolor fills + minimal shading (gentle gradients)
+- subtle paper grain / print texture, tiny ink imperfections like vintage print
+- warm, innocent, playful mood; cute facial expressions; light blush on cheeks
+- no modern 3D, no anime, no hyperrealism, no painterly oil look
+
+COMPOSITION / LAYOUT (single panel):
+- Pure white background
+- A thin black rectangular frame around the whole panel (like a sticker card), even margins
+- Top-left header text: "Love is…" (exactly this, with three dots) in simple black print/handwritten-like feel, small size
+- Top-right: a small heart icon (solid red/pink) inside the frame
+- Illustration area: couple centered in the upper 65-70% of the panel, full bodies visible, no cropping
+- Caption area: lower 30-35% reserved for Ukrainian caption text
+
+COUPLE TRANSFORMATION RULES:
+- Preserve identity cues: hair color/style, skin tone, face shape, eyebrows, glasses (if any), beard/mustache (if any)
+- Keep the pose/interaction similar to the photo if it reads well; otherwise convert to a classic sweet pose: ${data.scenario}
+- Simplify clothing into solid pastel blocks; keep recognizable colors/pattern hints
+- Add small cute details typical for sticker comics: tiny hearts floating above, minimal props ${data.detail}
+
+TEXT RULES (CRITICAL):
+- Only two text elements:
+  1) Top-left: "Love is…" (exactly this format, not "Love is...")
+  2) Bottom: ONE Ukrainian sentence that MUST start with three dots "..."
+- The bottom sentence is: "...${data.quote}"
+- Do NOT add numbers, copyrights, signatures, watermarks, extra captions, or English translation
+- Typography: simple, clean, NOT fancy cursive
+
+NEGATIVE / AVOID:
+- no anime, no manga, no 3D render, no photorealism
+- no complex backgrounds, no gradients behind the panel, no colored backdrop
+- no extra text, no English line, no page numbers, no watermark, no copyright marks
+- no blurry lines, no messy typography, no distorted faces, no extra fingers/limbs
+
+OUTPUT: Single sticker-style panel with "Love is…" at top-left and Ukrainian caption at bottom.`;
     })()
   };
 
