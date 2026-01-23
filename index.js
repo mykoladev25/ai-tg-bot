@@ -3440,7 +3440,6 @@ async function startBot() {
     });
 
     app.all('/payment/success', (req, res) => {
-    app.all('/payment/success', (req, res) => {
       const sessionId = req.query.session_id;
       let orderId = req.query.order_id;
 
