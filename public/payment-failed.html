@@ -4,18 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>❌ Платіж не вдався</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
         min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 20px;
       }
+
       .container {
         background: white;
         border-radius: 12px;
@@ -25,173 +30,164 @@
         padding: 40px;
         text-align: center;
       }
+
       .error-icon {
-        font-size: 64px;
+        font-size: 80px;
         margin-bottom: 20px;
-        animation: shake 0.5s ease-in-out;
       }
-      @keyframes shake {
-        0%, 100% { transform: translateX(0); }
-        25% { transform: translateX(-10px); }
-        75% { transform: translateX(10px); }
+
+      h1 {
+        color: #c33;
+        font-size: 32px;
+        margin-bottom: 10px;
       }
-      h1 { color: #d32f2f; margin-bottom: 10px; font-size: 28px; }
-      .subtitle { color: #666; margin-bottom: 30px; font-size: 16px; line-height: 1.5; }
-      .details {
+
+      .subtitle {
+        color: #666;
+        font-size: 16px;
+        margin-bottom: 30px;
+        line-height: 1.5;
+      }
+
+      .info-box {
         background: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 15px;
+        border-radius: 4px;
+        text-align: left;
+        color: #856404;
+        font-size: 14px;
+        margin-bottom: 30px;
+      }
+
+      .info-box ul {
+        margin-left: 20px;
+        margin-top: 10px;
+      }
+
+      .info-box li {
+        margin: 5px 0;
+      }
+
+      .button {
+        display: inline-block;
+        padding: 14px 40px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        text-decoration: none;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 16px;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+        margin-right: 10px;
+      }
+
+      .button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+      }
+
+      .button-secondary {
+        display: inline-block;
+        padding: 14px 40px;
+        background: #f5f5f5;
+        color: #333;
+        text-decoration: none;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 16px;
+        cursor: pointer;
+        transition: transform 0.2s;
+      }
+
+      .button-secondary:hover {
+        transform: translateY(-2px);
+        background: #e0e0e0;
+      }
+
+      .details {
+        background: #f5f5f5;
         border-radius: 8px;
         padding: 20px;
         margin-bottom: 30px;
         text-align: left;
-        border-left: 4px solid #ffc107;
       }
+
       .detail-item {
         display: flex;
         justify-content: space-between;
         padding: 10px 0;
-        border-bottom: 1px solid #ffe0b2;
+        border-bottom: 1px solid #ddd;
       }
-      .detail-item:last-child { border-bottom: none; }
-      .detail-label { color: #666; font-weight: 500; }
-      .detail-value { color: #333; font-weight: 600; }
-      .button {
-        display: inline-block;
-        padding: 14px 32px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        text-decoration: none;
-        border-radius: 8px;
+
+      .detail-item:last-child {
+        border-bottom: none;
+      }
+
+      .detail-label {
+        color: #666;
+        font-weight: 500;
+      }
+
+      .detail-value {
+        color: #c33;
         font-weight: 600;
-        transition: transform 0.2s, box-shadow 0.2s;
-        border: none;
-        cursor: pointer;
-        font-size: 16px;
-        margin: 0 10px;
-      }
-      .button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
-      }
-      .button.secondary {
-        background: #e0e0e0;
-        color: #333;
-      }
-      .button.secondary:hover {
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-      }
-      .info-box {
-        background: #f3e5f5;
-        border-left: 4px solid #9c27b0;
-        padding: 15px;
-        border-radius: 4px;
-        margin-top: 20px;
-        text-align: left;
-        color: #6a1b9a;
-        font-size: 14px;
-      }
-      .info-box strong { display: block; margin-bottom: 5px; }
-      .button-group {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-        justify-content: center;
       }
     </style>
 </head>
 <body>
-<div class="container">
-    <div class="error-icon">❌</div>
-    <h1>Платіж не вдався</h1>
-    <div class="subtitle">
-        На жаль, платіж не може бути обробленим. Будь ласка, спробуйте ще раз або зверніться до підтримки.
-    </div>
+    <div class="container">
+        <div class="error-icon">❌</div>
+        <h1>Платіж не вдався</h1>
+        <div class="subtitle">
+            На жаль, платіж не був завершений. Спробуйте ще раз або виберіть інший спосіб оплати.
+        </div>
 
-    <div class="details" id="details">
-        <div class="detail-item">
-            <span class="detail-label">Статус:</span>
-            <span class="detail-value">❌ Платіж відхилено</span>
+        <div class="details">
+            <div class="detail-item">
+                <span class="detail-label">Статус:</span>
+                <span class="detail-value">❌ Відхилено</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">Токени:</span>
+                <span class="detail-value">❌ Не додані</span>
+            </div>
+        </div>
+
+        <div class="info-box">
+            <strong>💡 Що робити:</strong>
+            <ul>
+                <li>✓ Перевірте реквізити вашої картки</li>
+                <li>✓ Переконайтесь, що карта активна</li>
+                <li>✓ Спробуйте іншу карту</li>
+                <li>✓ Зверніться до вашого банку</li>
+                <li>✓ Спробуйте інший спосіб оплати (LiqPay, Telegram Stars)</li>
+            </ul>
+        </div>
+
+        <div>
+            <button class="button" onclick="goToBot()">
+                🤖 Повернутись в бот
+            </button>
+            <button class="button-secondary" onclick="history.back()">
+                ← Назад
+            </button>
         </div>
     </div>
 
-    <div class="button-group">
-        <button class="button" onclick="goToBot()">
-            🤖 Повернутись в бот
-        </button>
-    </div>
+    <script>
+        window.BOT_USERNAME = 'neuro_lab_ai_bot';
 
-    <div class="info-box">
-        <strong>💡 Що робити:</strong>
-        Спробуйте оплату знову через деякий час або виконайте одну з цих дій:
-        <br><br>
-        ✓ Перевірте реквізити вашої картки<br>
-        ✓ Переконайтесь, що карта активна<br>
-        ✓ Спробуйте іншу карту<br>
-        ✓ Зверніться до вашого банку<br>
-        ✓ Спробуйте інший спосіб оплати (LiqPay, Telegram Stars)
-    </div>
-</div>
+        console.log('❌ Payment failed page loaded');
+        console.log('⚠️ Payment was not completed');
 
-<script>
-    window.BOT_USERNAME = 'neuro_lab_ai_bot';
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const orderId = urlParams.get('order_id');
-
-    console.log('❌ Payment failed page loaded:', { orderId });
-
-    function parseOrderId(orderId) {
-        if (!orderId) return null;
-        const parts = orderId.split('_');
-        if (parts.length >= 3) {
-            return {
-                userId: parts[0],
-                plan: parts[1],
-                timestamp: parts[2]
-            };
+        function goToBot() {
+            window.location.href = 'https://t.me/' + window.BOT_USERNAME;
         }
-        return null;
-    }
-
-    function loadFailureDetails() {
-        const detailsEl = document.getElementById('details');
-
-        if (orderId) {
-            const parsed = parseOrderId(orderId);
-
-            if (parsed) {
-                console.log('❌ Payment failed:', parsed);
-
-                detailsEl.innerHTML = `
-                        <div class="detail-item">
-                            <span class="detail-label">Статус:</span>
-                            <span class="detail-value">❌ Платіж відхилено</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">Система:</span>
-                            <span class="detail-value">💳 WayForPay</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">План:</span>
-                            <span class="detail-value">${parsed.plan}</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">Замовлення:</span>
-                            <span class="detail-value">${orderId.substring(0, 20)}...</span>
-                        </div>
-                    `;
-            }
-        }
-
-        // Автоматично повертаємось в бот через 5 секунд
-        setTimeout(goToBot, 5000);
-    }
-
-    function goToBot() {
-        window.location.href = 'https://t.me/' + window.BOT_USERNAME;
-    }
-
-    window.addEventListener('DOMContentLoaded', loadFailureDetails);
-</script>
+    </script>
 </body>
 </html>
 

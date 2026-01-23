@@ -4,9 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>✅ Платіж успішний</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -16,6 +20,7 @@
         justify-content: center;
         padding: 20px;
       }
+
       .container {
         background: white;
         border-radius: 12px;
@@ -25,365 +30,155 @@
         padding: 40px;
         text-align: center;
       }
+
       .success-icon {
-        font-size: 64px;
+        font-size: 80px;
         margin-bottom: 20px;
         animation: bounce 0.6s ease-in-out;
       }
+
       @keyframes bounce {
-        0%, 100% { transform: scale(0); }
-        50% { transform: scale(1.1); }
-        100% { transform: scale(1); }
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-20px); }
       }
-      h1 { color: #333; margin-bottom: 10px; font-size: 28px; }
-      .subtitle { color: #666; margin-bottom: 30px; font-size: 16px; line-height: 1.5; }
+
+      h1 {
+        color: #333;
+        font-size: 32px;
+        margin-bottom: 10px;
+      }
+
+      .subtitle {
+        color: #666;
+        font-size: 16px;
+        margin-bottom: 30px;
+        line-height: 1.5;
+      }
+
       .details {
-        background: #f9f9f9;
+        background: #f5f5f5;
         border-radius: 8px;
         padding: 20px;
         margin-bottom: 30px;
         text-align: left;
       }
+
       .detail-item {
         display: flex;
         justify-content: space-between;
         padding: 10px 0;
-        border-bottom: 1px solid #eee;
+        border-bottom: 1px solid #ddd;
       }
-      .detail-item:last-child { border-bottom: none; }
-      .detail-label { color: #666; font-weight: 500; }
-      .detail-value { color: #333; font-weight: 600; }
+
+      .detail-item:last-child {
+        border-bottom: none;
+      }
+
+      .detail-label {
+        color: #666;
+        font-weight: 500;
+      }
+
+      .detail-value {
+        color: #333;
+        font-weight: 600;
+      }
+
       .button {
         display: inline-block;
-        padding: 14px 32px;
+        padding: 14px 40px;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         text-decoration: none;
+        border: none;
         border-radius: 8px;
         font-weight: 600;
-        transition: transform 0.2s, box-shadow 0.2s;
-        border: none;
-        cursor: pointer;
         font-size: 16px;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+        margin-bottom: 20px;
       }
+
       .button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
       }
+
       .info-box {
-        background: #e8f4f8;
-        border-left: 4px solid #0099cc;
+        background: #e3f2fd;
+        border-left: 4px solid #2196f3;
         padding: 15px;
         border-radius: 4px;
-        margin-top: 20px;
         text-align: left;
-        color: #0066aa;
+        color: #1565c0;
         font-size: 14px;
       }
-      .info-box strong { display: block; margin-bottom: 5px; }
-      .loading-screen {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-      }
-      .loader-spinner {
-        border: 8px solid rgba(255, 255, 255, 0.3);
-        border-top: 8px solid white;
-        border-radius: 50%;
-        width: 60px;
-        height: 60px;
-        animation: spin 1s linear infinite;
-        margin: 0 auto;
-      }
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-      .loader-text {
-        color: white;
+
+      .countdown {
+        color: #999;
+        font-size: 12px;
         margin-top: 20px;
-        font-size: 18px;
-        text-align: center;
       }
     </style>
 </head>
 <body>
-<!-- Лоадер на весь екран -->
-<div class="loading-screen" id="loadingScreen">
-    <div>
-        <div class="loader-spinner"></div>
-        <div class="loader-text">
-            ⏳ Обробка платежу...
+    <div class="container">
+        <div class="success-icon">✅</div>
+        <h1>Платіж успішний!</h1>
+        <div class="subtitle">
+            Дякуємо за покупку. Токени вже нараховані на ваш рахунок.
+        </div>
+
+        <div class="details" id="details">
+            <div class="detail-item">
+                <span class="detail-label">Статус:</span>
+                <span class="detail-value">✅ Оплачено</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">Токени:</span>
+                <span class="detail-value">✅ Нараховані</span>
+            </div>
+        </div>
+
+        <button class="button" onclick="goToBot()">
+            🤖 Повернутись в бот
+        </button>
+
+        <div class="info-box">
+            <strong>💡 Підказка:</strong><br>
+            Перевірте баланс токенів в боті.<br>
+            Вас автоматично редіректить через <span id="timer">3</span> сек...
+        </div>
+
+        <div class="countdown">
+            Якщо редірект не спрацював, натисніть кнопку вище ↑
         </div>
     </div>
-</div>
-
-<div class="container" id="mainContent" style="display: none;">
-    <div class="success-icon">✅</div>
-    <h1>Платіж успішний!</h1>
-    <div class="subtitle">
-        Дякуємо за покупку. Токени будуть нараховані автоматично.
-    </div>
-
-    <div class="details" id="details">
-        <div class="detail-item">
-            <span class="detail-label">Статус:</span>
-            <span class="detail-value">⏳ Обробка...</span>
-        </div>
-    </div>
-
-    <button class="button" onclick="goToBot()">
-        🤖 Повернутись в бот
-    </button>
-
-    <div class="info-box">
-        <strong>💡 Підказка:</strong>
-        Токени будуть нараховані автоматично через webhook.
-        Перевірте баланс в боті.
-    </div>
-</div>
 
     <script>
         window.BOT_USERNAME = 'neuro_lab_ai_bot';
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const sessionId = urlParams.get('session_id');
-        const orderId = urlParams.get('order_id');
+        console.log('✅ Payment success page loaded');
+        console.log('💡 Payment already processed on server');
+        console.log('📱 Tokens added to your account');
 
-        console.log('💳 Payment success page loaded:', { sessionId, orderId });
+        let countdown = 3;
 
-        /**
-         * Перевіряємо статус платежу через API
-         * Якщо платіж відхилено, редіректимо на /payment/failed
-         */
-        async function verifyPaymentStatus() {
-            if (!orderId) return;
+        // Відлік до редіректу
+        const timer = setInterval(() => {
+            countdown--;
+            document.getElementById('timer').textContent = countdown;
 
-            try {
-                console.log('🔍 Verifying payment status for order:', orderId);
-
-                // ⏳ Чекаємо 2 сек щоб webhook встигнув обробити платіж
-                console.log('⏳ Waiting 2 seconds for webhook processing...');
-                await new Promise(resolve => setTimeout(resolve, 2000));
-
-                // Спробуємо отримати інформацію про платіж через API
-                const response = await fetch(`/api/payment/verify/${orderId}`);
-                const data = await response.json();
-
-                console.log('✅ Payment verification response:', data);
-
-                if (data.status === 'completed') {
-                    console.log('✅ Payment already processed in database');
-                    return true;
-                }
-
-                // ВАЖНО: Спочатку перевіряємо ACTUAL declined status, а потім пробуємо обробити
-                if (data.status === 'declined') {
-                    console.log('❌ Payment was declined, redirecting to failed page');
-                    window.location.href = `/payment/failed?order_id=${orderId}`;
-                    return false;
-                }
-
-                // Якщо платіж не знайдено після затримки - webhook можливо не прийшов
-                // На локалі webhook не приходить, тому спробуємо обробити вручну
-                if (data.status === 'failed' || data.status === 'error' || !data.success) {
-                    console.log('⚠️ Payment not in database, attempting manual processing via webhook check...');
-                    console.log('📊 Verification response:', data);
-
-                    // На локалі webhook не приходить - спробуємо обробити через API
-                    try {
-                        const endpoint = sessionId
-                            ? `/api/payment/process-stripe/${sessionId}`
-                            : `/api/payment/process-wayforpay/${orderId}`;
-
-                        console.log(`📤 Calling manual processing: ${endpoint}`);
-
-                        const processResponse = await fetch(endpoint, {
-                            method: 'POST'
-                        });
-                        const processData = await processResponse.json();
-
-                        console.log('📥 Manual processing response:', processData);
-
-                        if (processData.success) {
-                            console.log('✅ Payment processed successfully:', processData);
-                            // Даємо час для оновлення
-                            await new Promise(resolve => setTimeout(resolve, 1000));
-                            return true;
-                        } else {
-                            console.log('❌ Payment verification failed:', processData);
-                            // Платіж дійсно не успішний
-                            setTimeout(() => {
-                                window.location.href = `/payment/failed?order_id=${orderId}`;
-                            }, 1000);
-                            return false;
-                        }
-                    } catch (processError) {
-                        console.error('❌ Error processing payment:', processError);
-                        setTimeout(() => {
-                            window.location.href = `/payment/failed?order_id=${orderId}`;
-                        }, 1000);
-                        return false;
-                    }
-                }
-
-                return true;
-            } catch (error) {
-                console.log('⚠️ Could not verify payment status:', error);
-                // Якщо не можемо перевірити, продовжуємо (webhook обробить це)
-                return true;
+            if (countdown <= 0) {
+                clearInterval(timer);
+                goToBot();
             }
+        }, 1000);
+
+        function goToBot() {
+            window.location.href = 'https://t.me/' + window.BOT_USERNAME;
         }
-
-    function parseOrderId(orderId) {
-        if (!orderId) return null;
-        const parts = orderId.split('_');
-        if (parts.length >= 3) {
-            return {
-                userId: parts[0],
-                plan: parts[1],
-                timestamp: parts[2]
-            };
-        }
-        return null;
-    }
-
-    async function loadPaymentStatus() {
-        // Спочатку перевіряємо статус платежу
-        const result = await verifyPaymentStatus();
-
-        // ВАЖНО: Показуємо контент тільки ЯКЩО платіж успішний!
-        // Якщо result === false, це означає редірект вже зроблено
-        if (!result) {
-            // Лоадер залишається видимо поки відбувається редірект
-            return;
-        }
-
-        // Тільки тепер показуємо контент - якщо платіж успішний
-        document.getElementById('loadingScreen').style.display = 'none';
-        document.getElementById('mainContent').style.display = 'block';
-
-
-        const detailsEl = document.getElementById('details');
-
-
-        // Stripe payment
-        if (sessionId) {
-            console.log('💳 Processing Stripe payment...');
-            try {
-                const response = await fetch(`/api/payment/status/${sessionId}`);
-                const data = await response.json();
-
-                if (data.success) {
-                    const metadata = data.metadata || {};
-                    detailsEl.innerHTML = `
-                            <div class="detail-item">
-                                <span class="detail-label">Статус:</span>
-                                <span class="detail-value">✅ ${data.status === 'paid' ? 'Оплачено' : 'Обробляється'}</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Система:</span>
-                                <span class="detail-value">💳 Stripe</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">План:</span>
-                                <span class="detail-value">${metadata.plan || '—'}</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">Токенів:</span>
-                                <span class="detail-value">${metadata.tokens || '—'}⚡</span>
-                            </div>
-                        `;
-
-                    // Process payment
-                    await fetch(`/api/payment/process/${sessionId}`, { method: 'POST' });
-                }
-            } catch (error) {
-                console.error('Stripe error:', error);
-            }
-
-            setTimeout(goToBot, 3000);
-            return;
-        }
-
-        // LiqPay / WayForPay payment (order_id format: userId_plan_timestamp)
-        if (orderId) {
-            const parsed = parseOrderId(orderId);
-
-            if (parsed) {
-                console.log('💳 Payment completed:', parsed);
-
-                detailsEl.innerHTML = `
-                        <div class="detail-item">
-                            <span class="detail-label">Статус:</span>
-                            <span class="detail-value">✅ Платіж отримано</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">Система:</span>
-                            <span class="detail-value">💳 WayForPay</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">План:</span>
-                            <span class="detail-value">${parsed.plan}</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">Замовлення:</span>
-                            <span class="detail-value">${orderId.substring(0, 20)}...</span>
-                        </div>
-                        <div class="detail-item" style="border-top: 2px solid #667eea; margin-top: 10px; padding-top: 15px;">
-                            <span class="detail-label">ℹ️ Інформація:</span>
-                            <span class="detail-value" style="font-size: 12px; text-align: right;">
-                                Токени нараховуються<br>автоматично через webhook
-                            </span>
-                        </div>
-                    `;
-
-                console.log('✅ WayForPay payment details updated on page');
-                setTimeout(goToBot, 3000);
-                return;
-            } else {
-                detailsEl.innerHTML = `
-                        <div class="detail-item">
-                            <span class="detail-label">Статус:</span>
-                            <span class="detail-value">✅ Платіж отримано</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">ℹ️</span>
-                            <span class="detail-value">Перевірте баланс в боті</span>
-                        </div>
-                    `;
-            }
-
-            setTimeout(goToBot, 3000);
-            return;
-        }
-
-        // No payment ID
-        detailsEl.innerHTML = `
-                <div class="detail-item">
-                    <span class="detail-label">Статус:</span>
-                    <span class="detail-value">⚠️ ID платежу не знайдено</span>
-                </div>
-            `;
-        console.log('✅ loadPaymentStatus function completed successfully');
-    }
-
-    function goToBot() {
-        window.location.href = 'https://t.me/' + window.BOT_USERNAME;
-    }
-
-    window.addEventListener('DOMContentLoaded', async () => {
-        console.log('🚀 DOMContentLoaded event fired');
-        await loadPaymentStatus();
-        console.log('✅ loadPaymentStatus completed');
-    });
-</script>
+    </script>
 </body>
 </html>
+

@@ -3446,46 +3446,14 @@ async function startBot() {
       }
     });
 
-    app.all('/payment/success', express.urlencoded({ extended: true }), express.json(), (req, res) => {
-      const sessionId = req.query.session_id;
-      let orderId = req.query.order_id;
-
-      // WayForPay надсилає POST з orderReference в body
-      if (!orderId && req.body && req.body.orderReference) {
-        orderId = req.body.orderReference;
-      }
-
-      console.log(`✅ Payment success page (${req.method}):`, { sessionId, orderId });
-      console.log(`📦 Request method: ${req.method}, Body keys: `, req.body ? Object.keys(req.body) : 'empty');
-
-      // Якщо orderId прийшов з POST body, редіректимо на GET з query параметрами
-      // Це дозволить JavaScript на сторінці прочитати orderId з URL
-      if (req.method === 'POST' && orderId && !req.query.order_id) {
-        console.log(`🔄 Redirecting POST to GET: /payment/success?order_id=${orderId}`);
-        return res.redirect(`/payment/success?order_id=${orderId}`);
-      }
-
+    app.all('/payment/success', (req, res) => {
+      console.log(`✅ Payment success page accessed via ${req.method}`);
       res.sendFile(__dirname + '/public/payment-success.html');
     });
 
     // ✅ Payment failed page (for declined WayForPay payments)
-    app.all('/payment/failed', express.urlencoded({ extended: true }), express.json(), (req, res) => {
-      let orderId = req.query.order_id;
-
-      // WayForPay надсилає POST з orderReference в body
-      if (!orderId && req.body && req.body.orderReference) {
-        orderId = req.body.orderReference;
-      }
-
-      console.log(`❌ Payment failed page (${req.method}):`, { orderId });
-      console.log(`📦 Request method: ${req.method}, Body keys: `, req.body ? Object.keys(req.body) : 'empty');
-
-      // Редірект на GET з параметрами
-      if (req.method === 'POST' && orderId && !req.query.order_id) {
-        console.log(`🔄 Redirecting POST to GET: /payment/failed?order_id=${orderId}`);
-        return res.redirect(`/payment/failed?order_id=${orderId}`);
-      }
-
+    app.all('/payment/failed', (req, res) => {
+      console.log(`❌ Payment failed page accessed via ${req.method}`);
       res.sendFile(__dirname + '/public/payment-failed.html');
     });
 
