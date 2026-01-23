@@ -272,26 +272,46 @@ module.exports = function(bot) {
                     console.error('Error sending pending message:', err.message);
                 }
             } else if (transactionStatus === 'Expired') {
-                // ❌ Платіж закінчився (user не завершив операцію)
-                console.log(`❌ Processing EXPIRED payment: ${orderReference}`);
-                console.log(`   Reason: ${data.reason} (code: ${data.reasonCode})`);
+                // ⏳ Платіж закінчився (user не завершив операцію)
+                console.log(`⏳ [Expired] Order: ${orderReference}`);
 
+                // Перевіряємо чи транзакція взагалі існує (значить токени вже нараховані)
                 try {
-                    await bot.telegram.sendMessage(
-                        userId,
-                        `❌ <b>Платіж закінчився</b>\n\n` +
-                        `💳 Метод: WayForPay\n` +
-                        `💎 Тариф: ${sub.name}\n` +
-                        `💰 Сума: ${amount} UAH\n` +
-                        `🔴 Статус: Сесія закінчена\n\n` +
-                        `Ваша сесія платежу закінчилась без завершення.\n` +
-                        `Спробуйте ще раз.\n\n` +
-                        `Замовлення: ${orderReference}`,
-                        { parse_mode: 'HTML' }
-                    );
-                    console.log(`📨 Expired message sent to user ${userId}`);
+                    const Transaction = require('../database/models/Transaction');
+                    const existingTransaction = await Transaction.findOne({
+                        'metadata.orderId': orderReference,
+                        type: 'wayforpay_purchase'
+                        // ✅ Без status - цього поля немає в схемі
+                    });
+
+                    if (existingTransaction) {
+                        // Транзакція існує = токени вже нараховані = платіж був успішним
+                        console.log(`ℹ️ [Expired] Ignoring - payment already completed: ${orderReference}`);
+                        // Не надсилаємо повідомлення, ігноруємо цей webhook
+                        return;
+                    }
+
+                    // Транзакції немає - платіж НЕ був успішним - надсилаємо повідомлення
+                    console.log(`⚠️ [Expired] Payment was NOT completed, notifying user: ${orderReference}`);
+
+                    try {
+                        await bot.telegram.sendMessage(
+                            userId,
+                            `⏳ <b>Сесія платежу закінчена</b>\n\n` +
+                            `💳 Метод: WayForPay\n` +
+                            `💎 Тариф: ${sub.name}\n` +
+                            `💰 Сума: ${amount} UAH\n\n` +
+                            `Ви не встигли завершити платіж вчасу.\n` +
+                            `Спробуйте знову, коли будете готові.\n\n` +
+                            `Замовлення: ${orderReference}`,
+                            { parse_mode: 'HTML' }
+                        );
+                        console.log(`📨 Expired message sent to user ${userId}`);
+                    } catch (err) {
+                        console.error('Error sending expired message:', err.message);
+                    }
                 } catch (err) {
-                    console.error('Error sending expired message:', err.message);
+                    console.error('Error checking expired payment:', err.message);
                 }
             } else {
                 console.log(`⚠️ WayForPay: Transaction ${transactionStatus} for order ${orderReference}`);
