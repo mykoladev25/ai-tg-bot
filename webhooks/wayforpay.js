@@ -6,11 +6,42 @@ const models = require('../config/models');
 
 module.exports = function(bot) {
 
-    // ⚠️ ВАЖЛИВО: Body parsers повинні бути реєстровані ПЕРЕД цим router'ом в index.js!
-    router.post('/wayforpay', async (req, res) => {
+    // ⚠️ ВАЖЛИВО: WayForPay надсилає raw JSON, не urlencoded!
+    // Потрібен спеціальний парсер
+    router.post('/wayforpay', express.text({ type: '*/*' }), async (req, res) => {
         try {
-            // Дані можуть приходити як JSON або urlencoded
-            const data = req.body;
+            // WayForPay може надсилати дані різними способами
+            let data;
+
+            if (typeof req.body === 'string') {
+                // Raw JSON string
+                console.log('📥 Parsing raw JSON from WayForPay...');
+                try {
+                    data = JSON.parse(req.body);
+                } catch (e) {
+                    console.error('❌ Failed to parse raw JSON:', e.message);
+                    return res.status(400).json({ error: 'Invalid JSON' });
+                }
+            } else if (typeof req.body === 'object') {
+                // Перевіряємо чи це "JSON як ключ" проблема
+                const keys = Object.keys(req.body);
+                if (keys.length === 1 && keys[0].startsWith('{')) {
+                    // JSON прийшов як ключ об'єкта (неправильна обробка urlencoded)
+                    console.log('📥 Extracting JSON from form key...');
+                    try {
+                        data = JSON.parse(keys[0]);
+                    } catch (e) {
+                        console.error('❌ Failed to parse JSON from key:', e.message);
+                        return res.status(400).json({ error: 'Invalid JSON format' });
+                    }
+                } else {
+                    // Нормальний об'єкт
+                    data = req.body;
+                }
+            } else {
+                console.error('❌ Unexpected body type:', typeof req.body);
+                return res.status(400).json({ error: 'Invalid request body' });
+            }
 
             console.log('📥 WayForPay webhook received (full data):', JSON.stringify(data, null, 2));
             console.log('📥 WayForPay webhook summary:', {

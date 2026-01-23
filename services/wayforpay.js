@@ -86,10 +86,8 @@ class WayForPayService {
 
     /**
      * Верифікація статусу платежу через WayForPay API
-     * Підпис для CHECK_STATUS: HMAC_MD5(merchantSecretKey, merchantAccount;orderReference;timestamp)
-     *
-     * ВАЖНО: На локальному тестуванні webhook від WayForPay може не приходити,
-     * тому платіж розглядається як невдалий поки webhook його не обробить!
+     * Підпис для CHECK_STATUS: HMAC_MD5(merchantSecretKey, merchantAccount;orderReference)
+     * ⚠️ БЕЗ timestamp! Згідно офіційної документації WayForPay
      */
     async checkPaymentStatus(orderReference) {
         try {
@@ -99,14 +97,11 @@ class WayForPayService {
 
             console.log(`🔍 Checking payment status for order: ${orderReference}`);
 
-            const timestamp = Math.floor(Date.now() / 1000);
-
             // ✅ ПРАВИЛЬНИЙ ФОРМАТ підпису для CHECK_STATUS:
-            // За документацією WayForPay: merchantAccount;orderReference;timestamp
+            // За документацією WayForPay: merchantAccount;orderReference (БЕЗ timestamp!)
             const signatureString = [
                 this.merchantAccount,
-                orderReference,
-                timestamp
+                orderReference
             ].join(';');
 
             const signature = crypto
@@ -125,11 +120,15 @@ class WayForPayService {
                     transactionType: 'CHECK_STATUS',
                     merchantAccount: this.merchantAccount,
                     orderReference: orderReference,
-                    apiVersion: 1,
-                    timestamp: timestamp,
-                    merchantSignature: signature
+                    merchantSignature: signature,
+                    apiVersion: 1
                 },
-                { timeout: 10000 }
+                {
+                    timeout: 10000,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }
             );
 
             console.log(`📊 Payment status response:`, response.data);
@@ -137,8 +136,6 @@ class WayForPayService {
             return response.data;
         } catch (error) {
             console.error('❌ Error checking payment status:', error.message);
-            // На локальному тестуванні WayForPay API може повертати помилку
-            // Це нормально - webhook обробить платіж
             return {
                 transactionStatus: 'ERROR',
                 error: error.message

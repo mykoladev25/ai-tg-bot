@@ -2699,7 +2699,31 @@ async function startBot() {
     const app = express();
     const PORT = process.env.PORT || 5500;
 
-    // ⚠️ ВАЖЛИВО: Body parsers мають бути ПЕРЕД webhook routes!
+    // ⚠️ ВАЖЛИВО: WayForPay webhook middleware потрібна ПЕРШОЮ!
+    // WayForPay надсилає raw JSON без правильного Content-Type
+    app.use('/webhook/wayforpay', (req, res, next) => {
+        let rawBody = '';
+        req.setEncoding('utf8');
+
+        req.on('data', chunk => {
+            rawBody += chunk;
+        });
+
+        req.on('end', () => {
+            try {
+                if (rawBody) {
+                    req.body = JSON.parse(rawBody);
+                    console.log('✅ WayForPay raw JSON parsed successfully');
+                }
+            } catch (e) {
+                console.error('⚠️ Failed to parse WayForPay JSON:', e.message);
+                req.body = {};
+            }
+            next();
+        });
+    });
+
+    // ✅ Стандартні body parsers для інших маршрутів
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
