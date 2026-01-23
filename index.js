@@ -2699,6 +2699,10 @@ async function startBot() {
     const app = express();
     const PORT = process.env.PORT || 5500;
 
+    // ⚠️ ВАЖЛИВО: Body parsers мають бути ПЕРЕД webhook routes!
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
+
     // Webhook для Stripe (необхідно до express.json())
     app.post('/webhook/stripe', express.raw({ type: 'application/json' }), (req, res) => {
       stripeWebhook.handleStripeWebhook(req, res, bot).catch(error => {
@@ -2717,9 +2721,6 @@ async function startBot() {
     const wayforpayWebhook = createWayForPayRouter(bot);
     app.use('/webhook', wayforpayWebhook);
 
-    // Інші middleware
-    app.use(express.json());
-    app.use(express.urlencoded({ extended: true }));
 
     // ==================== PAGES ====================
 

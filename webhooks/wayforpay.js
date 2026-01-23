@@ -6,8 +6,10 @@ const models = require('../config/models');
 
 module.exports = function(bot) {
 
-    router.post('/wayforpay', express.json(), async (req, res) => {
+    // ⚠️ ВАЖЛИВО: WayForPay надсилає дані як form-urlencoded, не JSON!
+    router.post('/wayforpay', [express.json(), express.urlencoded({ extended: true })], async (req, res) => {
         try {
+            // Дані можуть приходити як JSON або urlencoded
             const data = req.body;
 
             console.log('📥 WayForPay webhook received (full data):', JSON.stringify(data, null, 2));
