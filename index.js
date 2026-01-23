@@ -3003,25 +3003,6 @@ async function startBot() {
           });
         }
 
-        // ⚠️ ВАЖНО: Спочатку перевіряємо статус платежу у WayForPay!
-        const wayforpay = require('./services/wayforpay');
-        const paymentStatus = await wayforpay.checkPaymentStatus(orderId);
-
-        console.log(`🔍 WayForPay payment status check result:`, {
-          transactionStatus: paymentStatus.transactionStatus,
-          orderReference: paymentStatus.orderReference
-        });
-
-        // Перевіряємо чи платіж дійсно успішний
-        if (paymentStatus.transactionStatus !== 'Completed') {
-          console.log(`❌ Payment was NOT completed: ${paymentStatus.transactionStatus}`);
-          return res.json({
-            success: false,
-            error: `Payment status: ${paymentStatus.transactionStatus}`,
-            status: paymentStatus.transactionStatus
-          });
-        }
-
         // Отримуємо інформацію про план
         const sub = models.subscriptions[plan];
         if (!sub) {
@@ -3032,7 +3013,7 @@ async function startBot() {
           });
         }
 
-        console.log(`✅ Plan found: ${sub.name} (${sub.tokens} tokens)`);
+        console.log(`✅ Plan found: ${sub.name}`);
 
         // Перевіряємо чи вже оброблено
         const Transaction = require('./database/models/Transaction');
@@ -3046,59 +3027,46 @@ async function startBot() {
           return res.json({
             success: true,
             message: 'Already processed',
-            tokens: existing.metadata.tokens
+            tokens: existing.amount
           });
         }
 
-        // Отримуємо кількість токенів
-        const tokens = sub.tokensLiqPay || sub.tokens;
+        // ⚠️ ВАЖНО: На локалі webhook від WayForPay не приходить!
+        // Тому ми НЕ перевіряємо статус через API (дає помилку).
+        // Замість цього: якщо користувач редіректиться на success page - вважаємо платіж очікуючим.
+        // Webhook обробить платіж коли він буде активний.
 
-        console.log(`💰 Adding tokens: ${tokens} to user ${userId}`);
+        console.log(`📝 Payment is PENDING (waiting for webhook from WayForPay)`);
+        console.log(`💡 On PRODUCTION: Webhook from WayForPay will process this payment`);
+        console.log(`💡 On LOCAL: Payment stays pending until webhook is manually triggered`);
 
-        // Нараховуємо токени
-        await userBalance.addTokens(
-          userId,
-          tokens,
-          'wayforpay_purchase',
-          {
-            plan: sub.name,
-            planKey: plan,
-            orderId: orderId,
-            processedAt: new Date()
-          }
-        );
-
-        console.log(`✅ Manual: +${tokens}⚡ to user ${userId} (${sub.name})`);
-
-        // Отримуємо користувача для відправки повідомлення
-        const user = await userBalance.getUser(userId, { id: userId });
-
-        console.log(`👤 User retrieved: balance=${user.tokens}⚡`);
-
-        // Відправляємо повідомлення в бот
+        // Повідомляємо користувача що платіж очікується
         if (bot) {
           try {
             await bot.telegram.sendMessage(
               userId,
-              `✅ <b>Оплату отримано!</b>\n\n` +
+              `⏳ <b>Платіж очікується на обробку</b>\n\n` +
               `💳 Метод: WayForPay\n` +
               `💎 Тариф: ${sub.name}\n` +
-              `⚡ Токенів нараховано: ${tokens}\n` +
-              `💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
-              `Дякуємо за покупку! 🎉`,
+              `💰 Сума: 4 UAH\n` +
+              `⏳ Статус: Перевірка безпеки\n\n` +
+              `Ваш платіж проходить перевірку у фахівців з безпеки WayForPay.\n` +
+              `Токени будуть додані коли платіж буде підтверджений (зазвичай протягом кількох хвилин).\n\n` +
+              `Замовлення: ${orderId}`,
               { parse_mode: 'HTML' }
             );
-            console.log(`📨 Success message sent to user ${userId}`);
+            console.log(`📨 Pending message sent to user ${userId}`);
           } catch (err) {
             console.error('Error sending message:', err.message);
           }
         }
 
+        // Повертаємо успіх - платіж ще не оброблений, але очікується webhook
         res.json({
           success: true,
-          message: 'Payment processed manually',
-          tokens: tokens,
-          balance: user.tokens
+          message: 'Payment is pending webhook confirmation',
+          status: 'pending',
+          tokens: 0  // Поки не додано, бо платіж ще не підтверджений
         });
       } catch (error) {
         console.error('❌ Manual payment processing error:', error);

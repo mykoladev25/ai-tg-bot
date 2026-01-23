@@ -6,8 +6,8 @@ const models = require('../config/models');
 
 module.exports = function(bot) {
 
-    // ⚠️ ВАЖЛИВО: WayForPay надсилає дані як form-urlencoded, не JSON!
-    router.post('/wayforpay', [express.json(), express.urlencoded({ extended: true })], async (req, res) => {
+    // ⚠️ ВАЖЛИВО: Body parsers повинні бути реєстровані ПЕРЕД цим router'ом в index.js!
+    router.post('/wayforpay', async (req, res) => {
         try {
             // Дані можуть приходити як JSON або urlencoded
             const data = req.body;
