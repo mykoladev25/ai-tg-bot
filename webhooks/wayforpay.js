@@ -80,9 +80,10 @@ module.exports = function(bot) {
 
             const tokens = sub.tokensLiqPay || sub.tokens;
 
-            // WayForPay відправляє 'Completed' як статус успішного платежу
-            if (transactionStatus === 'Completed') {
-                console.log(`✅ Processing COMPLETED payment: ${orderReference}`);
+            // ✅ WayForPay може надсилати 'Approved' або 'Completed' як статус успішного платежу
+            // (Підтримуємо обидва для максимальної надійності)
+            if (transactionStatus === 'Approved' || transactionStatus === 'Completed') {
+                console.log(`✅ Processing SUCCESSFUL payment: ${orderReference} (status: ${transactionStatus})`);
                 // Перевіряємо чи вже оброблено (ідемпотентність)
                 const Transaction = require('../database/models/Transaction');
                 const existing = await Transaction.findOne({
@@ -245,6 +246,52 @@ module.exports = function(bot) {
                     }
                 } catch (err) {
                     console.error('Error processing refund:', err.message);
+                }
+            } else if (transactionStatus === 'Pending') {
+                // ⏳ Платіж очікує на 3DS верифікацію або банківське підтвердження
+                console.log(`⏳ Processing PENDING payment: ${orderReference}`);
+                console.log(`   Reason: ${data.reason} (code: ${data.reasonCode})`);
+                console.log(`   (Waiting for bank verification or next webhook update)`);
+
+                // Повідомляємо користувача що платіж очікує на підтвердження
+                try {
+                    await bot.telegram.sendMessage(
+                        userId,
+                        `⏳ <b>Очікування підтвердження</b>\n\n` +
+                        `💳 Метод: WayForPay\n` +
+                        `💎 Тариф: ${sub.name}\n` +
+                        `💰 Сума: ${amount} UAH\n\n` +
+                        `Ваш платіж очікує на підтвердження від банку.\n` +
+                        `Це може зайняти кілька хвилин (до 3DS верифікації).\n\n` +
+                        `⚡ Токени будуть нараховані автоматично після успішної верифікації.\n\n` +
+                        `Замовлення: ${orderReference}`,
+                        { parse_mode: 'HTML' }
+                    );
+                    console.log(`📨 Pending verification message sent to user ${userId}`);
+                } catch (err) {
+                    console.error('Error sending pending message:', err.message);
+                }
+            } else if (transactionStatus === 'Expired') {
+                // ❌ Платіж закінчився (user не завершив операцію)
+                console.log(`❌ Processing EXPIRED payment: ${orderReference}`);
+                console.log(`   Reason: ${data.reason} (code: ${data.reasonCode})`);
+
+                try {
+                    await bot.telegram.sendMessage(
+                        userId,
+                        `❌ <b>Платіж закінчився</b>\n\n` +
+                        `💳 Метод: WayForPay\n` +
+                        `💎 Тариф: ${sub.name}\n` +
+                        `💰 Сума: ${amount} UAH\n` +
+                        `🔴 Статус: Сесія закінчена\n\n` +
+                        `Ваша сесія платежу закінчилась без завершення.\n` +
+                        `Спробуйте ще раз.\n\n` +
+                        `Замовлення: ${orderReference}`,
+                        { parse_mode: 'HTML' }
+                    );
+                    console.log(`📨 Expired message sent to user ${userId}`);
+                } catch (err) {
+                    console.error('Error sending expired message:', err.message);
                 }
             } else {
                 console.log(`⚠️ WayForPay: Transaction ${transactionStatus} for order ${orderReference}`);

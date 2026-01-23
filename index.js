@@ -3055,9 +3055,73 @@ async function startBot() {
           });
         }
 
-        // ⚠️ ВАЖНО: На локалі webhook від WayForPay не приходить!
-        // Тому ми НЕ перевіряємо статус через API (дає помилку).
-        // Замість цього: якщо користувач редіректиться на success page - вважаємо платіж очікуючим.
+        // ⚠️ СПРОБУЄМО перевірити статус через CHECK_STATUS API
+        console.log(`🔍 Attempting to check payment status via WayForPay API...`);
+
+        let paymentStatus = null;
+        try {
+          const wayforpay = require('./services/wayforpay');
+          paymentStatus = await wayforpay.checkPaymentStatus(orderId);
+
+          console.log(`📊 CHECK_STATUS response:`, paymentStatus);
+
+          // ✅ WayForPay може повертати 'Approved' або 'Completed' для успішних платежів
+          if (paymentStatus && (paymentStatus.transactionStatus === 'Approved' || paymentStatus.transactionStatus === 'Completed')) {
+            console.log(`✅ Payment is COMPLETED! Processing immediately...`);
+
+            const tokens = sub.tokensLiqPay || sub.tokens;
+
+            // Нараховуємо токени
+            await userBalance.addTokens(
+              userId,
+              tokens,
+              'wayforpay_purchase',
+              {
+                plan: sub.name,
+                planKey: plan,
+                orderId: orderId,
+                processedAt: new Date()
+              }
+            );
+
+            console.log(`✅ +${tokens}⚡ added to user ${userId}`);
+
+            // Отримуємо користувача для відправки повідомлення
+            const user = await userBalance.getUser(userId, { id: userId });
+
+            // Відправляємо повідомлення про успіх
+            if (bot) {
+              try {
+                await bot.telegram.sendMessage(
+                  userId,
+                  `✅ <b>Оплату отримано!</b>\n\n` +
+                  `💳 Метод: WayForPay\n` +
+                  `💎 Тариф: ${sub.name}\n` +
+                  `⚡ Токенів нараховано: ${tokens}\n` +
+                  `💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
+                  `Дякуємо за покупку! 🎉`,
+                  { parse_mode: 'HTML' }
+                );
+                console.log(`📨 Success message sent to user ${userId}`);
+              } catch (err) {
+                console.error('Error sending success message:', err.message);
+              }
+            }
+
+            return res.json({
+              success: true,
+              message: 'Payment processed successfully',
+              status: 'completed',
+              tokens: tokens,
+              balance: user.tokens
+            });
+          }
+        } catch (checkError) {
+          console.log(`⚠️ Could not check payment status via API: ${checkError.message}`);
+          console.log(`💡 Will wait for webhook to process payment`);
+        }
+
+        // ⚠️ Якщо CHECK_STATUS не спрацював або статус невідомий - вважаємо платіж очікуючим
         // Webhook обробить платіж коли він буде активний.
 
         console.log(`📝 Payment is PENDING (waiting for webhook from WayForPay)`);
@@ -3092,6 +3156,7 @@ async function startBot() {
           status: 'pending',
           tokens: 0  // Поки не додано, бо платіж ще не підтверджений
         });
+
       } catch (error) {
         console.error('❌ Manual payment processing error:', error);
         res.status(500).json({
