@@ -149,7 +149,7 @@ async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
     } else if (reason.includes('referral')) {
       category = 'referral';
     }
-    
+
     // Створюємо транзакцію
     const transactionData = {
       userId,
@@ -172,6 +172,46 @@ async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
     return balanceAfter;
   } catch (error) {
     console.error('Error in addTokens:', error);
+    return null;
+  }
+}
+
+/**
+ * Забрати токени (для повернень платежів)
+ */
+async function removeTokens(userId, amount, reason = 'refund', metadata = {}) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return null;
+
+    const balanceBefore = user.tokens;
+    const tokensToRemove = Math.min(amount, user.tokens);
+    user.tokens -= tokensToRemove;
+
+    // Якщо це повернення, віднімаємо від придбаних токенів
+    if (reason.includes('refund')) {
+      user.totalTokensPurchased = Math.max(0, user.totalTokensPurchased - tokensToRemove);
+    }
+
+    const balanceAfter = user.tokens;
+
+    await user.save();
+
+    // Створюємо транзакцію
+    await Transaction.create({
+      userId,
+      type: 'removal',
+      category: 'refund',
+      amount: tokensToRemove,
+      balanceBefore,
+      balanceAfter,
+      description: reason,
+      metadata
+    });
+
+    return balanceAfter;
+  } catch (error) {
+    console.error('Error in removeTokens:', error);
     return null;
   }
 }
@@ -331,6 +371,7 @@ module.exports = {
   hasTokens,
   deductTokens,
   addTokens,
+  removeTokens,
   setSubscription,
   saveConversationMessage,
   getConversationHistory,

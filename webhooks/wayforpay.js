@@ -16,7 +16,8 @@ module.exports = function(bot) {
                 transactionStatus: data.transactionStatus,
                 amount: data.amount,
                 reasonCode: data.reasonCode,
-                authCode: data.authCode
+                authCode: data.authCode,
+                reason: data.reason
             });
 
             // Верифікуємо підпис
@@ -135,8 +136,88 @@ module.exports = function(bot) {
                 } catch (err) {
                     console.error('Error sending decline message:', err.message);
                 }
+            } else if (transactionStatus === 'Refunded') {
+                // ⚠️ Платіж був повернений (chargeback, fraud, тощо)
+                console.log(`⚠️ Processing REFUNDED payment: ${orderReference}`);
+                console.log(`⚠️ Refund reason: ${data.reason} (code: ${data.reasonCode})`);
+
+                try {
+                    const Transaction = require('../database/models/Transaction');
+
+                    // Перевіряємо чи існує такий платіж
+                    const transaction = await Transaction.findOne({
+                        'metadata.orderId': orderReference,
+                        type: 'wayforpay_purchase'
+                    });
+
+                    if (transaction && transaction.status === 'completed') {
+                        // Якщо платіж був оброблений як успішний, то потрібно забрати токени
+                        console.log(`💔 Refunding ${tokens}⚡ to user ${userId}`);
+                        console.log(`📝 Refund details:`, {
+                            orderId: orderReference,
+                            reasonCode: data.reasonCode,
+                            reason: data.reason,
+                            authCode: data.authCode
+                        });
+
+                        // Забираємо токени
+                        const user = await userBalance.getUser(userId, { id: userId });
+                        const tokensToRemove = Math.min(tokens, user.tokens || 0);
+
+                        if (tokensToRemove > 0) {
+                            await userBalance.removeTokens(
+                                userId,
+                                tokensToRemove,
+                                'wayforpay_refund',
+                                {
+                                    plan: sub.name,
+                                    planKey: planKey,
+                                    orderId: orderReference,
+                                    amount: amount,
+                                    reason: data.reason,
+                                    reasonCode: data.reasonCode
+                                }
+                            );
+
+                            // Повідомляємо користувача про повернення
+                            const updatedUser = await userBalance.getUser(userId, { id: userId });
+                            await bot.telegram.sendMessage(
+                                userId,
+                                `⚠️ <b>Платіж був повернений</b>\n\n` +
+                                `💳 Метод: WayForPay\n` +
+                                `💎 Тариф: ${sub.name}\n` +
+                                `⚡ Повернено: ${tokensToRemove}\n` +
+                                `💰 Поточний баланс: ${updatedUser.tokens.toFixed(2)}⚡\n\n` +
+                                `Причина: ${data.reason}\n` +
+                                `Код: ${data.reasonCode}\n\n` +
+                                `Замовлення: ${orderReference}`,
+                                { parse_mode: 'HTML' }
+                            );
+                        }
+
+                        // Оновлюємо статус транзакції в БД
+                        await Transaction.updateOne(
+                            { 'metadata.orderId': orderReference },
+                            {
+                                status: 'refunded',
+                                'metadata.refundedAt': new Date(),
+                                'metadata.refundReason': data.reason,
+                                'metadata.refundReasonCode': data.reasonCode
+                            }
+                        );
+
+                        console.log(`💔 Refund processed: ${orderReference}`);
+                    } else {
+                        console.log(`ℹ️ Refund for non-existent or already refunded transaction: ${orderReference}`);
+                    }
+                } catch (err) {
+                    console.error('Error processing refund:', err.message);
+                }
             } else {
                 console.log(`⚠️ WayForPay: Transaction ${transactionStatus} for order ${orderReference}`);
+                if (data.reason) {
+                    console.log(`   Reason: ${data.reason} (code: ${data.reasonCode})`);
+                }
             }
 
             // Відповідаємо WayForPay (обов'язково!)

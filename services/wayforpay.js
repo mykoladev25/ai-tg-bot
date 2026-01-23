@@ -86,7 +86,7 @@ class WayForPayService {
 
     /**
      * Верифікація статусу платежу через WayForPay API
-     * Підпис для CHECK_STATUS: HMAC_MD5(merchantSecretKey, merchantAccount;orderReference;apiVersion;language;timestamp)
+     * Підпис для CHECK_STATUS: HMAC_MD5(merchantSecretKey, merchantAccount;orderReference;timestamp)
      *
      * ВАЖНО: На локальному тестуванні webhook від WayForPay може не приходити,
      * тому платіж розглядається як невдалий поки webhook його не обробить!
@@ -100,16 +100,12 @@ class WayForPayService {
             console.log(`🔍 Checking payment status for order: ${orderReference}`);
 
             const timestamp = Math.floor(Date.now() / 1000);
-            const apiVersion = 1;
-            const language = 'uk';
 
             // ✅ ПРАВИЛЬНИЙ ФОРМАТ підпису для CHECK_STATUS:
-            // HMAC_MD5(key=merchantSecretKey, message=merchantAccount;orderReference;apiVersion;language;timestamp)
+            // За документацією WayForPay: merchantAccount;orderReference;timestamp
             const signatureString = [
                 this.merchantAccount,
                 orderReference,
-                apiVersion,
-                language,
                 timestamp
             ].join(';');
 
@@ -129,8 +125,7 @@ class WayForPayService {
                     transactionType: 'CHECK_STATUS',
                     merchantAccount: this.merchantAccount,
                     orderReference: orderReference,
-                    apiVersion: apiVersion,
-                    language: language,
+                    apiVersion: 1,
                     timestamp: timestamp,
                     merchantSignature: signature
                 },

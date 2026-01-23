@@ -76,7 +76,7 @@ module.exports = {
       tokens: 240,
       tokensLiqPay: 290,
       price: 299,
-      priceUSD: 1,
+      priceUSD: 0.1,
       features: [
         '🚀 240⚡ токенів',
         '💎 Доступ до всіх моделей',
