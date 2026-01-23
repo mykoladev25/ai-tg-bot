@@ -2699,28 +2699,35 @@ async function startBot() {
     const app = express();
     const PORT = process.env.PORT || 5500;
 
-    // ⚠️ ВАЖЛИВО: WayForPay webhook middleware потрібна ПЕРШОЮ!
-    // WayForPay надсилає raw JSON без правильного Content-Type
-    app.use('/webhook/wayforpay', (req, res, next) => {
-        let rawBody = '';
-        req.setEncoding('utf8');
+    // ⚠️ ВАЖЛИВО: WayForPay webhook - потрібен спеціальний parser для raw JSON!
+    // WayForPay надсилає raw JSON без правильного Content-Type header
+    app.post('/webhook/wayforpay', express.raw({ type: '*/*' }), (req, res, next) => {
+        try {
+            let data;
 
-        req.on('data', chunk => {
-            rawBody += chunk;
-        });
-
-        req.on('end', () => {
-            try {
-                if (rawBody) {
-                    req.body = JSON.parse(rawBody);
-                    console.log('✅ WayForPay raw JSON parsed successfully');
-                }
-            } catch (e) {
-                console.error('⚠️ Failed to parse WayForPay JSON:', e.message);
-                req.body = {};
+            if (typeof req.body === 'string') {
+                // Raw JSON string
+                console.log('📥 Parsing raw JSON from WayForPay...');
+                data = JSON.parse(req.body);
+            } else if (Buffer.isBuffer(req.body)) {
+                // Buffer - конвертуємо в string
+                console.log('📥 Parsing Buffer from WayForPay...');
+                data = JSON.parse(req.body.toString('utf8'));
+            } else if (typeof req.body === 'object') {
+                // Об'єкт - використовуємо як є
+                data = req.body;
+            } else {
+                console.error('❌ Unexpected body type:', typeof req.body);
+                return res.status(400).json({ error: 'Invalid request body' });
             }
+
+            console.log('✅ WayForPay webhook body parsed successfully');
+            req.body = data;
             next();
-        });
+        } catch (error) {
+            console.error('❌ Failed to parse WayForPay webhook:', error.message);
+            res.status(400).json({ error: 'Invalid JSON' });
+        }
     });
 
     // ✅ Стандартні body parsers для інших маршрутів
@@ -3439,7 +3446,7 @@ async function startBot() {
       }
     });
 
-    app.all('/payment/success', (req, res) => {
+    app.all('/payment/success', express.urlencoded({ extended: true }), express.json(), (req, res) => {
       const sessionId = req.query.session_id;
       let orderId = req.query.order_id;
 
@@ -3449,7 +3456,7 @@ async function startBot() {
       }
 
       console.log(`✅ Payment success page (${req.method}):`, { sessionId, orderId });
-      console.log(`📦 Request method: ${req.method}, Body: `, req.body ? Object.keys(req.body) : 'empty');
+      console.log(`📦 Request method: ${req.method}, Body keys: `, req.body ? Object.keys(req.body) : 'empty');
 
       // Якщо orderId прийшов з POST body, редіректимо на GET з query параметрами
       // Це дозволить JavaScript на сторінці прочитати orderId з URL
@@ -3462,7 +3469,7 @@ async function startBot() {
     });
 
     // ✅ Payment failed page (for declined WayForPay payments)
-    app.all('/payment/failed', (req, res) => {
+    app.all('/payment/failed', express.urlencoded({ extended: true }), express.json(), (req, res) => {
       let orderId = req.query.order_id;
 
       // WayForPay надсилає POST з orderReference в body
@@ -3471,7 +3478,7 @@ async function startBot() {
       }
 
       console.log(`❌ Payment failed page (${req.method}):`, { orderId });
-      console.log(`📦 Request method: ${req.method}`);
+      console.log(`📦 Request method: ${req.method}, Body keys: `, req.body ? Object.keys(req.body) : 'empty');
 
       // Редірект на GET з параметрами
       if (req.method === 'POST' && orderId && !req.query.order_id) {
@@ -3587,13 +3594,13 @@ async function startBot() {
 
     // ==================== START BOT ====================
     await bot.launch();
-    
+
     process.once('SIGINT', async () => {
       console.log('\n🛑 Stopping bot...');
       await db.disconnect();
       bot.stop('SIGINT');
     });
-    
+
     process.once('SIGTERM', async () => {
       console.log('\n🛑 Stopping bot...');
       await db.disconnect();
