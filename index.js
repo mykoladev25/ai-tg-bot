@@ -5370,15 +5370,46 @@ async function startBot() {
         const totalTime = Date.now() - startTime;
         console.log(`📊 /api/plans response time: ${totalTime}ms (rate fetch: ${fetchTime}ms)`);
 
+        // Trial (FREE) план
+        const trialPlan = {
+          name: 'TRIAL (FREE)',
+          tokens: models.subscriptions.trial?.tokens || 75,
+          tokensLiqPay: 0,
+          price: 0,
+          priceUSD: 0,
+          features: [
+            `🎁 ${models.subscriptions.trial?.tokens || 75}⚡ безкоштовних токенів`,
+            '🔒 Обмежений доступ до моделей',
+            '⏱️ Ліміти на кількість генерацій'
+          ]
+        };
+
+        // Trial restrictions для фронтенду
+        const trialRestrictions = {
+          blockedModels: models.TRIAL_RESTRICTIONS.blockedModels,
+          limitedModels: models.TRIAL_RESTRICTIONS.limitedModels,
+          blockedModes: models.TRIAL_RESTRICTIONS.blockedModes,
+          // Скільки генерацій доступно на trial
+          freeGenerations: {
+            total: models.subscriptions.trial?.tokens || 75,
+            perModel: models.TRIAL_RESTRICTIONS.limitedModels
+          }
+        };
+
         res.json({
           success: true,
-          plans,
+          plans: {
+            trial: trialPlan,
+            ...plans
+          },
           // Додаємо ціни моделей для comparison
           models: {
             tokenPriceUSD: +tokenPriceUSD.toFixed(4),
             design: designModels,
             video: videoModels
           },
+          // Trial/FREE обмеження
+          trialRestrictions,
           rates: {
             'USD/UAH': rate,
             'USD/TGStar': tgStarRate.toFixed(4)
@@ -5515,6 +5546,15 @@ async function startBot() {
 
               return result;
             }),
+
+          // Trial/FREE обмеження
+          trialRestrictions: {
+            freeTokens: models.subscriptions.trial?.tokens || 75,
+            blockedModels: models.TRIAL_RESTRICTIONS.blockedModels,
+            limitedModels: models.TRIAL_RESTRICTIONS.limitedModels,
+            blockedModes: models.TRIAL_RESTRICTIONS.blockedModes,
+            description: 'Безкоштовні користувачі мають обмежений доступ до дорогих моделей'
+          },
 
           timestamp: new Date().toISOString()
         });
