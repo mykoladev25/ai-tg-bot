@@ -52,12 +52,30 @@ function createLiqPayRouter(bot) {
 
         const userIdNum = parseInt(userId);
 
+        // ⚠️ SECURITY: Валідація userId
+        if (isNaN(userIdNum) || userIdNum <= 0) {
+          console.error('❌ LiqPay: Invalid userId:', userId);
+          return res.status(400).json({ error: 'Invalid userId' });
+        }
+
         // Перевіримо чи є такий план
         const sub = models.subscriptions[planKey];
 
         if (!sub) {
           console.error('❌ LiqPay: Plan not found:', planKey);
           return res.status(400).json({ error: 'Invalid plan' });
+        }
+
+        // ⚠️ SECURITY: Перевірка на ідемпотентність - чи платіж вже оброблений
+        const Transaction = require('../database/models/Transaction');
+        const existingTransaction = await Transaction.findOne({
+          'metadata.orderId': paymentData.order_id,
+          type: 'addition'
+        });
+
+        if (existingTransaction) {
+          console.log(`⚠️ LiqPay: Order ${paymentData.order_id} already processed, skipping`);
+          return res.json({ status: 'ok', message: 'Already processed' });
         }
 
         // Обробляємо платіж

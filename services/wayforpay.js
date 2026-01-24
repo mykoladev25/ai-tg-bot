@@ -26,7 +26,8 @@ class WayForPayService {
 
         const signatureString = signatureParts.join(';');
 
-        console.log('📝 Signature string:', signatureString);
+        // ⚠️ SECURITY: Не логуємо signature string - може містити чутливі дані
+        // console.log('📝 Signature string:', signatureString);
 
         return crypto
             .createHmac('md5', this.merchantSecretKey)
@@ -109,8 +110,10 @@ class WayForPayService {
                 .update(signatureString, 'utf8')
                 .digest('hex');
 
-            console.log(`📝 Status check signature string: ${signatureString}`);
-            console.log(`📝 Generated signature: ${signature}`);
+            // ⚠️ SECURITY: Не логуємо signature string
+            // console.log(`📝 Status check signature string: ${signatureString}`);
+            // ⚠️ SECURITY: Не логуємо signatures
+            // console.log(`📝 Generated signature: ${signature}`);
 
             // Робимо запит до WayForPay API
             const axios = require('axios');

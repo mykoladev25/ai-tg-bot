@@ -656,11 +656,11 @@
                 headers: {
                     'Content-Type': 'application/json'
                 },
+                // ✅ SECURITY: Надсилаємо тільки userId та plan
+                // Токени визначаються на сервері з models.js
                 body: JSON.stringify({
                     userId: userId,
-                    plan: plan,
-                    tokens: selectedPlan.tokens,
-                    paymentMethod: selectedMethod
+                    plan: plan
                 })
             });
 

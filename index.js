@@ -4541,8 +4541,67 @@ async function startBot() {
     });
 
     // ✅ Стандартні body parsers для інших маршрутів
-    app.use(express.json());
-    app.use(express.urlencoded({ extended: true }));
+    app.use(express.json({ limit: '1mb' })); // Обмеження розміру body
+    app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+    // ✅ Security headers
+    app.use((req, res, next) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('X-Frame-Options', 'DENY');
+      res.setHeader('X-XSS-Protection', '1; mode=block');
+      next();
+    });
+
+    // ✅ Simple rate limiting for payment APIs (in-memory)
+    const rateLimitMap = new Map();
+    const RATE_LIMIT_WINDOW = 60000; // 1 хвилина
+    const RATE_LIMIT_MAX = 10; // Максимум 10 запитів на хвилину
+
+    function checkRateLimit(ip, endpoint) {
+      const key = `${ip}:${endpoint}`;
+      const now = Date.now();
+      const record = rateLimitMap.get(key);
+
+      if (!record || now - record.timestamp > RATE_LIMIT_WINDOW) {
+        rateLimitMap.set(key, { timestamp: now, count: 1 });
+        return true;
+      }
+
+      if (record.count >= RATE_LIMIT_MAX) {
+        return false;
+      }
+
+      record.count++;
+      return true;
+    }
+
+    // ✅ Rate limiting middleware для платіжних endpoints
+    app.use('/api/stripe', (req, res, next) => {
+      const ip = req.ip || req.connection.remoteAddress;
+      if (!checkRateLimit(ip, 'stripe')) {
+        console.warn(`⚠️ Rate limit exceeded for IP ${ip} on /api/stripe`);
+        return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+      }
+      next();
+    });
+
+    app.use('/api/wayforpay', (req, res, next) => {
+      const ip = req.ip || req.connection.remoteAddress;
+      if (!checkRateLimit(ip, 'wayforpay')) {
+        console.warn(`⚠️ Rate limit exceeded for IP ${ip} on /api/wayforpay`);
+        return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+      }
+      next();
+    });
+
+    app.use('/api/liqpay', (req, res, next) => {
+      const ip = req.ip || req.connection.remoteAddress;
+      if (!checkRateLimit(ip, 'liqpay')) {
+        console.warn(`⚠️ Rate limit exceeded for IP ${ip} on /api/liqpay`);
+        return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+      }
+      next();
+    });
 
     // ✅ CORS для публічних API endpoints (дозволяємо всім - це публічна інформація)
     app.use('/api', (req, res, next) => {
@@ -4592,18 +4651,45 @@ async function startBot() {
     });
 
     // ✅ Stripe checkout route
+    // ⚠️ SECURITY: НЕ довіряємо клієнту tokens/amount - беремо з models.js
     app.post('/api/stripe/checkout', async (req, res) => {
-      const { userId, plan, tokens, amount } = req.body;
+      const { userId, plan } = req.body;
 
-      console.log(`📋 Checkout request:`, { userId, plan, tokens, amount });
+      console.log(`📋 Stripe checkout request:`, { userId, plan });
 
-      if (!userId || !plan || !tokens || amount === undefined) {
-        console.error('❌ Missing required fields:', { userId, plan, tokens, amount });
+      if (!userId || !plan) {
+        console.error('❌ Missing required fields:', { userId, plan });
         return res.status(400).json({
           success: false,
-          error: 'Missing required fields: userId, plan, tokens, amount'
+          error: 'Missing required fields: userId, plan'
         });
       }
+
+      // ⚠️ SECURITY: Валідація userId - має бути числом
+      const userIdNum = parseInt(userId, 10);
+      if (isNaN(userIdNum) || userIdNum <= 0) {
+        console.error('❌ Invalid userId:', userId);
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid userId'
+        });
+      }
+
+      // ⚠️ SECURITY: Валідація плану - беремо дані ТІЛЬКИ з сервера
+      const sub = models.subscriptions[plan];
+      if (!sub) {
+        console.error('❌ Invalid plan:', plan);
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid plan'
+        });
+      }
+
+      // ✅ Токени та ціна з серверної конфігурації
+      const tokens = sub.tokens; // Для Stripe - без бонусу LiqPay
+      const amount = sub.priceUSD * 100; // В центах для Stripe
+
+      console.log(`📋 Validated checkout:`, { userId, plan, tokens, amount: amount / 100 });
 
       const result = await payment.createStripeCheckout(userId, plan, tokens, amount);
 
@@ -4649,6 +4735,16 @@ async function startBot() {
         return res.status(400).json({
           success: false,
           error: 'Missing required fields: userId, plan'
+        });
+      }
+
+      // ⚠️ SECURITY: Валідація userId - має бути числом
+      const userIdNum = parseInt(userId, 10);
+      if (isNaN(userIdNum) || userIdNum <= 0) {
+        console.error('❌ Invalid userId:', userId);
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid userId'
         });
       }
 
@@ -4736,6 +4832,16 @@ async function startBot() {
         return res.status(400).json({
           success: false,
           error: 'Missing required fields: userId, plan'
+        });
+      }
+
+      // ⚠️ SECURITY: Валідація userId - має бути числом
+      const userIdNum = parseInt(userId, 10);
+      if (isNaN(userIdNum) || userIdNum <= 0) {
+        console.error('❌ Invalid userId:', userId);
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid userId'
         });
       }
 

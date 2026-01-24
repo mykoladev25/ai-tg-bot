@@ -493,11 +493,11 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
+                    // ✅ SECURITY: Надсилаємо тільки userId та plan
+                    // Токени та сума визначаються на сервері з models.js
                     body: JSON.stringify({
                         userId: actualUserId,
-                        plan: plan,
-                        tokens: plans[plan].tokens,
-                        amount: Math.round(plans[plan].price * 100) // Convert to cents
+                        plan: plan
                     })
                 });
 

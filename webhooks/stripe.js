@@ -3,6 +3,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const express = require('express');
 const payment = require('../services/payment');
 const userBalance = require('../utils/userBalance');
+const models = require('../config/models');
 
 /**
  * Stripe webhook обробник
@@ -35,25 +36,58 @@ async function handleStripeWebhook(req, res, bot) {
       // ✅ Платіж успішно завершено
       case 'checkout.session.completed': {
         const session = event.data.object;
-        const { userId, plan, tokens } = session.metadata;
+        const { userId, plan } = session.metadata;
 
         console.log(`✅ Checkout session completed for user ${userId}`);
 
+        // ⚠️ SECURITY: Не довіряємо metadata.tokens - беремо з models.js!
+        const sub = models.subscriptions[plan];
+        if (!sub) {
+          console.error(`❌ Invalid plan in webhook: ${plan}`);
+          return res.status(400).send('Invalid plan');
+        }
+
+        // ✅ Токени з серверної конфігурації
+        const tokens = sub.tokens;
+
+        // ⚠️ SECURITY: Перевіряємо що сума відповідає плану
+        const expectedAmount = sub.priceUSD * 100; // В центах
+        const actualAmount = session.amount_total;
+
+        // Допускаємо похибку в 5% через курсові різниці
+        if (Math.abs(actualAmount - expectedAmount) > expectedAmount * 0.05) {
+          console.error(`❌ Amount mismatch! Expected: ${expectedAmount}, Got: ${actualAmount}`);
+          // Логуємо але не блокуємо - можливо курсові різниці
+          console.warn(`⚠️ Processing anyway, but check manually: order for user ${userId}`);
+        }
+
         try {
+          // Перевіряємо чи вже оброблено (ідемпотентність)
+          const Transaction = require('../database/models/Transaction');
+          const existing = await Transaction.findOne({
+            'metadata.sessionId': session.id,
+            type: 'addition'
+          });
+
+          if (existing) {
+            console.log(`⚠️ Stripe: Session ${session.id} already processed`);
+            return res.json({ received: true });
+          }
+
           // Додати токени користувачу
           await userBalance.addTokens(
             parseInt(userId),
-            parseInt(tokens),
+            tokens,
             'stripe_payment',
-            { plan, sessionId: session.id, amount: session.amount_total }
+            { plan: sub.name, planKey: plan, sessionId: session.id, amount: session.amount_total }
           );
 
           // Відправити повідомлення в бот
           await bot.telegram.sendMessage(
             userId,
-            `✅ Оплату отримано!\n\n` +
+            `✅ <b>Оплату отримано!</b>\n\n` +
             `💳 Метод: Stripe\n` +
-            `💎 Тариф: ${plan}\n` +
+            `💎 Тариф: ${sub.name}\n` +
             `⚡ Токенів нараховано: ${tokens}\n` +
             `💰 Сума: $${(session.amount_total / 100).toFixed(2)}\n\n` +
             `Дякуємо за покупку! 🎉`,
