@@ -5350,17 +5350,31 @@ async function startBot() {
               name: m.name.replace(/[🎭🔥🌟🎬🌊💜💎]/g, '').trim(),
               key: m.key
             };
+            // Kling v2.5 - ціна за секунду
             if (m.costPerSecond) {
               result.costPerSecond = m.costPerSecond;
               result.pricePerSecondUSD = +(m.costPerSecond * tokenPriceUSD).toFixed(3);
-            } else if (m.costs) {
+              result.durations = m.durations || [5, 10];
+              result.minSeconds = m.durations?.[0] || 5;
+              result.maxSeconds = m.durations?.[m.durations.length - 1] || 10;
+            }
+            // Kling Motion - різні режими
+            else if (m.costs) {
               result.costs = m.costs;
-            } else if (m.costPerSecondAudio) {
+            }
+            // Veo - ціна за секунду з/без аудіо
+            else if (m.costPerSecondAudio) {
               result.costPerSecondAudio = m.costPerSecondAudio;
               result.costPerSecondNoAudio = m.costPerSecondNoAudio;
               result.pricePerSecondAudioUSD = +(m.costPerSecondAudio * tokenPriceUSD).toFixed(3);
               result.pricePerSecondNoAudioUSD = +(m.costPerSecondNoAudio * tokenPriceUSD).toFixed(3);
-            } else {
+              result.durations = m.durations || [4, 6, 8];
+              result.minSeconds = m.durations?.[0] || 4;
+              result.maxSeconds = m.durations?.[m.durations.length - 1] || 8;
+              result.supportsAudio = true;
+            }
+            // Звичайна модель (фіксована ціна)
+            else {
               result.cost = m.cost;
               result.priceUSD = +(m.cost * tokenPriceUSD).toFixed(2);
             }
@@ -5370,16 +5384,23 @@ async function startBot() {
         const totalTime = Date.now() - startTime;
         console.log(`📊 /api/plans response time: ${totalTime}ms (rate fetch: ${fetchTime}ms)`);
 
-        // Trial (FREE) план
+        // Trial (FREE) план - без tokensLiqPay, показуємо діапазон можливостей
+        const trialTokens = models.subscriptions.trial?.tokens || 75;
         const trialPlan = {
           name: 'TRIAL (FREE)',
-          tokens: models.subscriptions.trial?.tokens || 75,
-          tokensLiqPay: 0,
+          tokens: trialTokens,
           price: 0,
           priceUSD: 0,
+          // Що можна згенерувати за ці токени (min/max)
+          usage: {
+            stableDiffusion: { min: trialTokens, max: trialTokens, costPerGen: 1 },      // 75 генерацій
+            seedream2k: { min: Math.floor(trialTokens / 3), max: Math.floor(trialTokens / 3), costPerGen: 3 },  // 25 генерацій
+            nanoBanana2k: { min: Math.floor(trialTokens / 14), max: Math.floor(trialTokens / 14), costPerGen: 14 }, // 5 генерацій
+            kling5s: { min: Math.floor(trialTokens / 30), max: Math.floor(trialTokens / 30), costPerGen: 30 },  // 2 генерації
+          },
           features: [
-            `🎁 ${models.subscriptions.trial?.tokens || 75}⚡ безкоштовних токенів`,
-            '🔒 Обмежений доступ до моделей',
+            `🎁 ${trialTokens}⚡ безкоштовних токенів`,
+            '🔒 Обмежений доступ до дорогих моделей',
             '⏱️ Ліміти на кількість генерацій'
           ]
         };
@@ -5391,7 +5412,7 @@ async function startBot() {
           blockedModes: models.TRIAL_RESTRICTIONS.blockedModes,
           // Скільки генерацій доступно на trial
           freeGenerations: {
-            total: models.subscriptions.trial?.tokens || 75,
+            total: trialTokens,
             perModel: models.TRIAL_RESTRICTIONS.limitedModels
           }
         };
@@ -5412,7 +5433,7 @@ async function startBot() {
           trialRestrictions,
           rates: {
             'USD/UAH': rate,
-            'USD/TGStar': tgStarRate.toFixed(4)
+            'USD/TGStar': +tgStarRate.toFixed(4) // ✅ number, не string
           },
           responseTime: totalTime,
           timestamp: new Date().toISOString()
@@ -5503,19 +5524,21 @@ async function startBot() {
               // Kling v2.5 - ціна за секунду
               if (m.costPerSecond) {
                 result.costPerSecond = m.costPerSecond;
-                result.pricePerSecondUSD = (m.costPerSecond * tokenPriceUSD).toFixed(3);
-                result.durations = m.durations;
-                result.examples = m.durations.map(d => ({
+                result.pricePerSecondUSD = +(m.costPerSecond * tokenPriceUSD).toFixed(3);
+                result.durations = m.durations || [5, 10];
+                result.minSeconds = m.durations?.[0] || 5;
+                result.maxSeconds = m.durations?.[m.durations.length - 1] || 10;
+                result.examples = (m.durations || [5, 10]).map(d => ({
                   duration: d,
                   cost: d * m.costPerSecond,
-                  priceUSD: (d * m.costPerSecond * tokenPriceUSD).toFixed(2)
+                  priceUSD: +(d * m.costPerSecond * tokenPriceUSD).toFixed(2)
                 }));
               }
               // Kling Motion - різні режими
               else if (m.costs) {
                 result.costs = m.costs;
                 result.pricesUSD = Object.entries(m.costs).reduce((acc, [mode, cost]) => {
-                  acc[mode] = (cost * tokenPriceUSD).toFixed(2);
+                  acc[mode] = +(cost * tokenPriceUSD).toFixed(2);
                   return acc;
                 }, {});
               }
@@ -5523,25 +5546,28 @@ async function startBot() {
               else if (m.costPerSecondAudio) {
                 result.costPerSecondAudio = m.costPerSecondAudio;
                 result.costPerSecondNoAudio = m.costPerSecondNoAudio;
-                result.pricePerSecondAudioUSD = (m.costPerSecondAudio * tokenPriceUSD).toFixed(3);
-                result.pricePerSecondNoAudioUSD = (m.costPerSecondNoAudio * tokenPriceUSD).toFixed(3);
-                result.durations = m.durations;
-                result.examples = m.durations.map(d => ({
+                result.pricePerSecondAudioUSD = +(m.costPerSecondAudio * tokenPriceUSD).toFixed(3);
+                result.pricePerSecondNoAudioUSD = +(m.costPerSecondNoAudio * tokenPriceUSD).toFixed(3);
+                result.durations = m.durations || [4, 6, 8];
+                result.minSeconds = m.durations?.[0] || 4;
+                result.maxSeconds = m.durations?.[m.durations.length - 1] || 8;
+                result.supportsAudio = true;
+                result.examples = (m.durations || [4, 6, 8]).map(d => ({
                   duration: d,
                   withAudio: {
                     cost: d * m.costPerSecondAudio,
-                    priceUSD: (d * m.costPerSecondAudio * tokenPriceUSD).toFixed(2)
+                    priceUSD: +(d * m.costPerSecondAudio * tokenPriceUSD).toFixed(2)
                   },
                   withoutAudio: {
                     cost: d * m.costPerSecondNoAudio,
-                    priceUSD: (d * m.costPerSecondNoAudio * tokenPriceUSD).toFixed(2)
+                    priceUSD: +(d * m.costPerSecondNoAudio * tokenPriceUSD).toFixed(2)
                   }
                 }));
               }
               // Звичайна модель
               else {
                 result.cost = m.cost;
-                result.priceUSD = (m.cost * tokenPriceUSD).toFixed(2);
+                result.priceUSD = +(m.cost * tokenPriceUSD).toFixed(2);
               }
 
               return result;
