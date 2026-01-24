@@ -4544,6 +4544,17 @@ async function startBot() {
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
+    // ✅ CORS для публічних API endpoints (дозволяємо всім - це публічна інформація)
+    app.use('/api', (req, res, next) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+      }
+      next();
+    });
+
     // Webhook для Stripe (необхідно до express.json())
     app.post('/webhook/stripe', express.raw({ type: 'application/json' }), (req, res) => {
       stripeWebhook.handleStripeWebhook(req, res, bot).catch(error => {
