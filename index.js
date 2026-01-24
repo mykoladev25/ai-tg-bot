@@ -5189,6 +5189,9 @@ async function startBot() {
 
         const fetchTime = Date.now() - startTime;
 
+        // Ціна 1 токена в USD (STARTER план - найгірший випадок)
+        const tokenPriceUSD = 7 / 260; // ≈ $0.0269
+
         ['starter', 'basic', 'pro', 'premium'].forEach(planKey => {
           const sub = subscriptions[planKey];
           if (sub) {
@@ -5213,12 +5216,52 @@ async function startBot() {
           }
         });
 
+        // Моделі для comparison таблиць
+        const designModels = models.design.models
+          .filter(m => m.available)
+          .map(m => ({
+            name: m.name.replace(/[🌀🍌🌊🔮🎯🖼️]/g, '').trim(),
+            key: m.key,
+            cost: m.cost,
+            priceUSD: +(m.cost * tokenPriceUSD).toFixed(3)
+          }));
+
+        const videoModels = models.video.models
+          .filter(m => m.available)
+          .map(m => {
+            const result = {
+              name: m.name.replace(/[🎭🔥🌟🎬🌊💜💎]/g, '').trim(),
+              key: m.key
+            };
+            if (m.costPerSecond) {
+              result.costPerSecond = m.costPerSecond;
+              result.pricePerSecondUSD = +(m.costPerSecond * tokenPriceUSD).toFixed(3);
+            } else if (m.costs) {
+              result.costs = m.costs;
+            } else if (m.costPerSecondAudio) {
+              result.costPerSecondAudio = m.costPerSecondAudio;
+              result.costPerSecondNoAudio = m.costPerSecondNoAudio;
+              result.pricePerSecondAudioUSD = +(m.costPerSecondAudio * tokenPriceUSD).toFixed(3);
+              result.pricePerSecondNoAudioUSD = +(m.costPerSecondNoAudio * tokenPriceUSD).toFixed(3);
+            } else {
+              result.cost = m.cost;
+              result.priceUSD = +(m.cost * tokenPriceUSD).toFixed(2);
+            }
+            return result;
+          });
+
         const totalTime = Date.now() - startTime;
         console.log(`📊 /api/plans response time: ${totalTime}ms (rate fetch: ${fetchTime}ms)`);
 
         res.json({
           success: true,
           plans,
+          // Додаємо ціни моделей для comparison
+          models: {
+            tokenPriceUSD: +tokenPriceUSD.toFixed(4),
+            design: designModels,
+            video: videoModels
+          },
           rates: {
             'USD/UAH': rate,
             'USD/TGStar': tgStarRate.toFixed(4)
