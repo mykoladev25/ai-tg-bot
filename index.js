@@ -5256,6 +5256,114 @@ async function startBot() {
       }
     });
 
+    // ✅ Get all models with prices (for comparison tables, webpack site, etc.)
+    app.get('/api/models', async (req, res) => {
+      try {
+        // Ціна 1 токена в USD (найгірший випадок - STARTER план)
+        // STARTER: $7 за 260 токенів LiqPay
+        const tokenPriceUSD = 7 / 260; // ≈ $0.0269 за токен
+
+        res.json({
+          success: true,
+
+          // Формула для розрахунку ціни в USD: cost * tokenPriceUSD
+          pricing: {
+            tokenPriceUSD: tokenPriceUSD,
+            formula: 'priceUSD = cost * tokenPriceUSD',
+            note: 'Ціна розрахована за STARTER планом ($7/260⚡). Більші плани дешевші за токен.'
+          },
+
+          // Пакети токенів
+          subscriptions: Object.entries(models.subscriptions)
+            .filter(([key]) => key !== 'trial')
+            .reduce((acc, [key, sub]) => {
+              acc[key] = {
+                name: sub.name,
+                tokens: sub.tokens,
+                tokensLiqPay: sub.tokensLiqPay,
+                price: sub.price,
+                priceUSD: sub.priceUSD,
+                pricePerToken: (sub.priceUSD / sub.tokensLiqPay).toFixed(4)
+              };
+              return acc;
+            }, {}),
+
+          // Моделі генерації зображень
+          design: models.design.models
+            .filter(m => m.available)
+            .map(m => ({
+              name: m.name.replace(/[🌀🍌🌊🔮🎯🖼️]/g, '').trim(),
+              key: m.key,
+              cost: m.cost,
+              priceUSD: (m.cost * tokenPriceUSD).toFixed(3),
+              resolution: m.resolution || m.size || null,
+              maxImages: m.maxImages || 1
+            })),
+
+          // Моделі генерації відео
+          video: models.video.models
+            .filter(m => m.available)
+            .map(m => {
+              const result = {
+                name: m.name.replace(/[🎭🔥🌟🎬🌊💜]/g, '').trim(),
+                key: m.key
+              };
+
+              // Kling v2.5 - ціна за секунду
+              if (m.costPerSecond) {
+                result.costPerSecond = m.costPerSecond;
+                result.pricePerSecondUSD = (m.costPerSecond * tokenPriceUSD).toFixed(3);
+                result.durations = m.durations;
+                result.examples = m.durations.map(d => ({
+                  duration: d,
+                  cost: d * m.costPerSecond,
+                  priceUSD: (d * m.costPerSecond * tokenPriceUSD).toFixed(2)
+                }));
+              }
+              // Kling Motion - різні режими
+              else if (m.costs) {
+                result.costs = m.costs;
+                result.pricesUSD = Object.entries(m.costs).reduce((acc, [mode, cost]) => {
+                  acc[mode] = (cost * tokenPriceUSD).toFixed(2);
+                  return acc;
+                }, {});
+              }
+              // Veo - ціна за секунду з/без аудіо
+              else if (m.costPerSecondAudio) {
+                result.costPerSecondAudio = m.costPerSecondAudio;
+                result.costPerSecondNoAudio = m.costPerSecondNoAudio;
+                result.pricePerSecondAudioUSD = (m.costPerSecondAudio * tokenPriceUSD).toFixed(3);
+                result.pricePerSecondNoAudioUSD = (m.costPerSecondNoAudio * tokenPriceUSD).toFixed(3);
+                result.durations = m.durations;
+                result.examples = m.durations.map(d => ({
+                  duration: d,
+                  withAudio: {
+                    cost: d * m.costPerSecondAudio,
+                    priceUSD: (d * m.costPerSecondAudio * tokenPriceUSD).toFixed(2)
+                  },
+                  withoutAudio: {
+                    cost: d * m.costPerSecondNoAudio,
+                    priceUSD: (d * m.costPerSecondNoAudio * tokenPriceUSD).toFixed(2)
+                  }
+                }));
+              }
+              // Звичайна модель
+              else {
+                result.cost = m.cost;
+                result.priceUSD = (m.cost * tokenPriceUSD).toFixed(2);
+              }
+
+              return result;
+            }),
+
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error('Error getting models:', error);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
     app.all('/payment/success', (req, res) => {
       console.log(`✅ Payment success page accessed via ${req.method}`);
       res.sendFile(__dirname + '/public/payment-success.html');
