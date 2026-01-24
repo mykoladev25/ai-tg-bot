@@ -22,7 +22,32 @@ function createInlineMenu(buttons, columns = 1) {
 
   for (let i = 0; i < availableButtons.length; i += columns) {
     const row = availableButtons.slice(i, i + columns).map(btn => {
-      const text = btn.cost > 0 ? `${btn.name} (${btn.cost}⚡)` : btn.name;
+      let text;
+
+      // Для Veo показуємо діапазон цін
+      if (btn.key === 'veo' && btn.costPerSecondAudio && btn.costPerSecondNoAudio) {
+        const minCost = 4 * btn.costPerSecondNoAudio;  // 4 сек без аудіо
+        const maxCost = 8 * btn.costPerSecondAudio;    // 8 сек з аудіо
+        text = `${btn.name} (${minCost}—${maxCost}⚡)`;
+      }
+      // Для Kling показуємо діапазон цін
+      else if (btn.key === 'kling' && btn.costPerSecond && btn.durations) {
+        const minCost = Math.min(...btn.durations) * btn.costPerSecond;
+        const maxCost = Math.max(...btn.durations) * btn.costPerSecond;
+        text = `${btn.name} (${minCost}—${maxCost}⚡)`;
+      }
+      // Для Kling Motion показуємо діапазон цін
+      else if (btn.key === 'kling_motion' && btn.costs) {
+        const minCost = btn.cost || Math.min(...Object.values(btn.costs));
+        const maxCost = btn.maxCost || Math.max(...Object.values(btn.costs));
+        text = `${btn.name} (${minCost}—${maxCost}⚡)`;
+      }
+      else if (btn.cost > 0) {
+        text = `${btn.name} (${btn.cost}⚡)`;
+      } else {
+        text = btn.name;
+      }
+
       return Markup.button.callback(text, btn.key);
     });
     keyboard.push(row);
@@ -153,30 +178,22 @@ function createSubscriptionsMenu() {
   const models = require('../config/models');
   const subscriptions = models.subscriptions;
   
-  const buttons = [];
-  
   const paidPlans = ['starter', 'basic', 'pro', 'premium'];
-  
-  paidPlans.forEach(planKey => {
-    const sub = subscriptions[planKey];
-    if (sub) {
-      let emoji = '';
-      if (planKey === 'starter') emoji = '🚀';
-      else if (planKey === 'basic') emoji = '💎';
-      else if (planKey === 'pro') emoji = '🔥';
-      else if (planKey === 'premium') emoji = '👑';
-      
-      buttons.push([
-        Markup.button.callback(
-          `${emoji} ${sub.name}\n ${sub.tokens}⚡ | ⭐ ${sub.price}`,
-          `sub_${planKey}`
-        )
-      ]);
-    }
-  });
-  
-  buttons.push([Markup.button.callback('🔙 Назад', 'main_menu')]);
-  
+  const emojis = { starter: '🚀', basic: '💎', pro: '🔥', premium: '👑' };
+
+  // По 2 кнопки в ряд
+  const buttons = [
+    [
+      Markup.button.callback(`${emojis.starter} ${subscriptions.starter.tokens}⚡`, 'sub_starter'),
+      Markup.button.callback(`${emojis.basic} ${subscriptions.basic.tokens}⚡`, 'sub_basic')
+    ],
+    [
+      Markup.button.callback(`${emojis.pro} ${subscriptions.pro.tokens}⚡`, 'sub_pro'),
+      Markup.button.callback(`${emojis.premium} ${subscriptions.premium.tokens}⚡`, 'sub_premium')
+    ],
+    [Markup.button.callback('← Назад', 'main_menu')]
+  ];
+
   return Markup.inlineKeyboard(buttons);
 }
 

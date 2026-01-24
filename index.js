@@ -34,6 +34,122 @@ const isShowBroadCast = process.env.SEND_STARTUP_BROADCAST === 'true' && false;
 // Для збирання feedback від користувачів
 const feedbackData = new Map(); // userId -> { type, message, timestamp }
 
+// Для накопичення довгих промптів (коли > 4096 символів)
+const pendingPrompts = new Map(); // userId -> { prompt: string, model: string }
+
+// ==================== TRIAL RESTRICTIONS ====================
+const { TRIAL_RESTRICTIONS } = models;
+
+/**
+ * Перевіряє чи користувач на Trial (не робив покупок)
+ */
+async function isTrialUser(userId) {
+  try {
+    const user = await userBalance.getUser(userId);
+    // Trial = користувач НЕ має жодної покупки (totalTokensPurchased = 0)
+    // Тобто має тільки початковий бонус 75⚡
+    return user.totalTokensPurchased === 0;
+  } catch (e) {
+    return true; // За замовчуванням вважаємо Trial
+  }
+}
+
+/**
+ * Отримує Trial usage з бази даних
+ */
+async function getTrialUsage(userId, modelKey) {
+  try {
+    const user = await userBalance.getUser(userId);
+    return user.trialUsage?.[modelKey] || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+/**
+ * Записує Trial usage в базу даних
+ */
+async function recordTrialUsage(userId, modelKey) {
+  try {
+    const User = require('./database/models/User');
+    await User.findByIdAndUpdate(userId, {
+      $inc: { [`trialUsage.${modelKey}`]: 1 }
+    });
+    console.log(`📊 Trial usage recorded: user ${userId}, model ${modelKey}`);
+  } catch (e) {
+    console.error('Error recording trial usage:', e.message);
+  }
+}
+
+/**
+ * Перевіряє Trial обмеження для моделі
+ * @returns {object} { allowed: boolean, message?: string }
+ */
+async function checkTrialRestrictions(userId, modelKey, options = {}) {
+  // Перевіряємо чи користувач на Trial
+  const isTrial = await isTrialUser(userId);
+  if (!isTrial) {
+    return { allowed: true }; // Платний користувач - без обмежень
+  }
+
+  // 1. Перевірка повністю заблокованих моделей
+  if (TRIAL_RESTRICTIONS.blockedModels.includes(modelKey)) {
+    return {
+      allowed: false,
+      message: TRIAL_RESTRICTIONS.messages.blocked
+    };
+  }
+
+  // 2. Перевірка заблокованих режимів (наприклад, тривалість)
+  const blockedModes = TRIAL_RESTRICTIONS.blockedModes[modelKey];
+  if (blockedModes) {
+    // Перевірка тривалості для Kling
+    if (blockedModes.durations && options.duration) {
+      if (blockedModes.durations.includes(options.duration)) {
+        return {
+          allowed: false,
+          message: TRIAL_RESTRICTIONS.messages.durationBlocked
+        };
+      }
+    }
+  }
+
+  // 3. Перевірка лімітованих моделей (читаємо з бази)
+  const limit = TRIAL_RESTRICTIONS.limitedModels[modelKey];
+  if (limit) {
+    const currentUsage = await getTrialUsage(userId, modelKey);
+
+    if (currentUsage >= limit) {
+      return {
+        allowed: false,
+        message: TRIAL_RESTRICTIONS.messages.blocked
+      };
+    }
+
+    // Повертаємо warning якщо це остання безкоштовна генерація
+    const remaining = limit - currentUsage;
+    if (remaining <= 1) {
+      return {
+        allowed: true,
+        warning: TRIAL_RESTRICTIONS.messages.limited(remaining)
+      };
+    }
+  }
+
+  return { allowed: true };
+}
+
+
+// ✅ МОДЕЛІ КОТРІ ПІДТРИМУЮТЬ ДОВГІ ПРОМПТИ (накопичення через "...")
+const MODELS_WITH_LONG_PROMPTS = [
+  'nano_banana_2k',
+  'nano_banana_4k',
+  'seedream_2k',
+  'seedream_4k',
+  'ideogram',
+  'veo'
+];
+
 // ✅ МОДЕЛІ КОТРІ ПІДТРИМУЮТЬ ВИБІР ASPECT RATIO
 const MODELS_WITH_ASPECT_RATIO = [
   'nano_banana_2k',
@@ -46,8 +162,9 @@ const MODELS_WITH_ASPECT_RATIO = [
 
 // ✅ МАСИВ МОДЕЛЕЙ З БАГАТОКРОКОВИМ ПРОЦЕСОМ
 const MODELS_WITH_STATE = [
-  'kling_motion',           // фото + відео (20s+)
-  'kling_motion_minimal',   // фото + відео (<10s)
+  'kling',                  // duration + aspect + start_image + end_image
+  'kling_motion',           // mode + orientation + sound + фото + відео
+  'veo',                    // aspect ratio + prompt + references + last_frame
   'nano_banana_pro',        // вибір розміру (майбутнє)
   ...MODELS_WITH_ASPECT_RATIO // добавляємо моделі з вибором aspect ratio
 ];
@@ -64,6 +181,21 @@ bot.on('callback_query', async (ctx, next) => {
     return next();
   }
 
+  // ✅ ДОЗВОЛЯЄМО VEO CALLBACKS
+  if (callbackData.startsWith('veo_')) {
+    return next();
+  }
+
+  // ✅ ДОЗВОЛЯЄМО KLING CALLBACKS
+  if (callbackData.startsWith('kling_')) {
+    return next();
+  }
+
+  // ✅ ДОЗВОЛЯЄМО KLING MOTION CALLBACKS
+  if (callbackData.startsWith('motion_')) {
+    return next();
+  }
+
   if (MODELS_WITH_STATE.includes(callbackData)) {
     return next();
   }
@@ -75,6 +207,21 @@ bot.on('callback_query', async (ctx, next) => {
     }
   }
   
+  // ✅ Дозволяємо veo state
+  if (state?.action === 'veo_generation') {
+    return next();
+  }
+
+  // ✅ Дозволяємо kling state
+  if (state?.action === 'kling_generation') {
+    return next();
+  }
+
+  // ✅ Дозволяємо kling_motion state
+  if (state?.action === 'kling_motion_generation') {
+    return next();
+  }
+
   userCurrentModel.delete(userId);
   userState.delete(userId);
   
@@ -309,6 +456,18 @@ const INSTRUCTION_HTML = `
 - <b>Генерація може не відповідати очікуванням</b> — це особливість AI
 - <b>Повернення токенів за виконані дії не передбачено</b>
 
+🔥 <b>⚠️ ЗАВЖДИ ЗАВАНТАЖУЙТЕ ОДРАЗУ! ⚠️</b>
+<b>Усі згенеровані файли (фото, відео, аудіо) активні ТІЛЬКИ 1 ГОДИНУ!</b>
+Після закінчення часу посилання припиняє працювати та файли видаляються!
+
+📥 <b>Як зберегти результат:</b>
+1️⃣ Натисніть на згенерований файл
+2️⃣ Натисніть меню ⋮ або утримуйте палець
+3️⃣ Оберіть "Зберегти" / "Завантажити"
+4️⃣ Файл буде на вашому пристрої назавжди ✅
+
+❌ <b>НЕ ЧЕКАЙТЕ!</b> Посилання існуватиме тільки 60 хвилин!
+
 📋 <b>Юридична інформація:</b>
 Перед оплатою ознайомтесь з нашими документами:
 - Угода користувача
@@ -391,6 +550,35 @@ bot.command('balance', async (ctx) => {
     `💰 Ваш баланс: ${user.tokens.toFixed(2)}⚡`,
     keyboard.createBackButton()
   );
+});
+
+bot.command('clear', async (ctx) => {
+  const userId = ctx.from.id;
+
+  // Очищаємо накопичений промпт
+  const hadPrompt = pendingPrompts.has(userId);
+  pendingPrompts.delete(userId);
+
+  // Очищаємо стан генерації (але НЕ обрану модель!)
+  const hadState = userState.has(userId);
+  userState.delete(userId);
+  // НЕ видаляємо userCurrentModel - користувач може продовжити з тією ж моделлю
+
+  if (hadPrompt || hadState) {
+    const currentModel = userCurrentModel.get(userId);
+    await ctx.reply(
+      '🧹 <b>Очищено!</b>\n\n' +
+      (hadPrompt ? '✅ Накопичений промпт видалено\n' : '') +
+      (hadState ? '✅ Стан генерації скинуто\n' : '') +
+      (currentModel ? `\n📌 Обрана модель: <b>${currentModel}</b>\nМожете продовжити генерацію.` : '\nМожете почати заново.'),
+      { parse_mode: 'HTML' }
+    );
+  } else {
+    await ctx.reply(
+      '✅ Нічого очищати - все чисто!',
+      keyboard.createMainMenu()
+    );
+  }
 });
 
 bot.command('history', async (ctx) => {
@@ -1117,14 +1305,6 @@ bot.action('creative_love_is', async (ctx) => {
   await ctx.reply(
       `💌 <b>Готовий креатив: День Закоханих "Love is..."</b>\n\n` +
       `📸 <b>Крок 1/1:</b> Надішліть фото пари\n\n` +
-      `✨ <b>Що буде згенеровано:</b>\n` +
-      `• Чарівна комік-ілюстрація двох ківi персонажів\n` +
-      `• Сценарій: ${randomScenario}\n` +
-      `• Деталі: ${randomDetail}\n` +
-      `• Текст: "Love is…" англійською на вершині\n` +
-      `• Українська цитата: "...${randomQuote}"\n` +
-      `• Стиль: vintage 1990s, chibi, cute\n` +
-      `• Якість: поздравка в стилі стікера ✨\n\n` +
       `💰 <b>Вартість:</b> ${CREATIVE_COST_2K}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
       `👉 Надішліть фото пари тепер`,
@@ -1406,10 +1586,13 @@ OUTPUT: Single sticker-style panel with "Love is…" at top-left and Ukrainian c
           `📊 <b>Розмір:</b> ${fileSizeMB} MB\n` +
           `⚠️ Файл завеликий для Telegram\n\n` +
           `🔗 <a href="${result.imageUrl}">📥 Натисніть для завантаження PNG</a>\n\n` +
-          `💡 <b>Як завантажити:</b>\n` +
-          `• Натисніть на посилання ☝️\n` +
-          `• Файл автоматично завантажиться\n\n` +
-          `⏰ Посилання активне 1 годину\n` +
+          `⚠️ <b>ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
+          `Посилання активне тільки <b>1 ГОДИНУ</b>!\n` +
+          `Після цього файл буде видалений.\n\n` +
+          `💾 <b>Як завантажити:</b>\n` +
+          `1️⃣ Натисніть на посилання вище\n` +
+          `2️⃣ Файл завантажиться\n` +
+          `3️⃣ Збережіть на телефон/комп'ютер\n\n` +
           `💰 Витрачено: ${model.cost}⚡`,
           {
             parse_mode: 'HTML',
@@ -1422,7 +1605,7 @@ OUTPUT: Single sticker-style panel with "Love is…" at top-left and Ukrainian c
       await ctx.replyWithPhoto(
           { url: result.imageUrl },
           {
-            caption: `✅ ${creativeNames[creativeType]}\n\n💰 Витрачено: ${model.cost}⚡`,
+            caption: `✅ ${creativeNames[creativeType]}\n\n⚠️ Посилання активне 1 ГОДИНУ - завантажте одразу! 📥\n\n💰 Витрачено: ${model.cost}⚡`,
             ...keyboard.createBackButton('main_menu')
           }
       );
@@ -1537,7 +1720,7 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|4:5|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_in
 bot.action(/^(midjourney|flux|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_2k|seedream_4k|clarity|ideogram)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
-  
+
   if (!model) {
     await ctx.answerCbQuery('Модель не знайдена');
     return;
@@ -1547,67 +1730,1327 @@ bot.action(/^(midjourney|flux|nano_banana_2k|nano_banana_4k|stable_diffusion|see
     await ctx.answerCbQuery('❌ Модель тимчасово недоступна', { show_alert: true });
     return;
   }
-  
+
+  // ✅ TRIAL CHECK: Перевірка обмежень для nano_banana_4k
+  const trialCheck = await checkTrialRestrictions(ctx.from.id, modelKey);
+  if (!trialCheck.allowed) {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      trialCheck.message,
+      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu() }
+    );
+    return;
+  }
+  // Показуємо warning якщо це остання безкоштовна генерація
+  if (trialCheck.warning) {
+    await ctx.reply(trialCheck.warning, { parse_mode: 'HTML' });
+  }
+
   await ctx.answerCbQuery();
-  
+
   if (model.cost > 0 && !(await userBalance.hasTokens(ctx.from.id, model.cost))) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
-  
+
   userCurrentModel.set(ctx.from.id, modelKey);
+
+  // Інструкція про довгі промпти для моделей що підтримують
+  const longPromptHint = MODELS_WITH_LONG_PROMPTS.includes(modelKey)
+    ? `\n\n💡 <b>Довгий промпт?</b>\n` +
+      `• Надсилайте текст частинами з <code>...</code> в кінці\n` +
+      `• Остання частина - без крапок\n` +
+      `• Потім надішліть фото (до 14 шт) - використається накопичений промпт`
+    : '';
 
   const messages = {
     clarity: `${model.name}\n\n🔮 Покращення якості зображень\n\nНадішліть фото, яке хочете покращити.\nМожете додати підпис (опис) для кращого результату.\n\n💰 Вартість: ${model.cost}⚡\n📈 Збільшення: 2x (scale factor)\n⏱️ Час обробки: ~30-60 секунд`,
-    stable_diffusion: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~30-40 секунд`,
-    ideogram: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~30-40 секунд`,  
-    nano_banana: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💡 Підтримка до 14 зображень одночасно!\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~20-30 секунд`
+    stable_diffusion: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~30-40 секунд${longPromptHint}`,
+    ideogram: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~30-40 секунд${longPromptHint}`,
+    nano_banana: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💡 Підтримка до 14 зображень одночасно!\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~20-30 секунд${longPromptHint}`,
+    seedream: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~20-40 секунд${longPromptHint}`
   };
 
+  // Для nano_banana та seedream моделей використовуємо спільний шаблон
+  let messageKey = modelKey;
+  if (modelKey.startsWith('nano_banana')) messageKey = 'nano_banana';
+  if (modelKey.startsWith('seedream')) messageKey = 'seedream';
+  const defaultMessage = `${model.name}\n\nНадішліть текстовий опис зображення, яке хочете згенерувати.\n\nВартість: ${model.cost > 0 ? model.cost + '⚡' : 'Безкоштовно'}${longPromptHint}`;
+
   await ctx.reply(
-    messages[modelKey] || `${model.name}\n\nНадішліть текстовий опис зображення, яке хочете згенерувати.\n\nВартість: ${model.cost > 0 ? model.cost + '⚡' : 'Безкоштовно'}`,
-    keyboard.createBackButton('design_menu')
+    messages[messageKey] || defaultMessage,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
   );
 });
 
 // Video Models
-bot.action(/^(kling|kling_motion|kling_motion_minimal|runway_gen4|runway_turbo|luma)$/, async (ctx) => {
+bot.action(/^(kling|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.video.models.find(m => m.key === modelKey);
-  
+
   if (!model) {
     await ctx.answerCbQuery('Модель не знайдена');
     return;
   }
-  
+
   await ctx.answerCbQuery();
-  
+
+  // ✅ TRIAL CHECK: Перевірка обмежень для безкоштовних користувачів
+  const trialCheck = await checkTrialRestrictions(ctx.from.id, modelKey);
+  if (!trialCheck.allowed) {
+    await ctx.reply(
+      trialCheck.message,
+      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu() }
+    );
+    return;
+  }
+  // Показуємо warning якщо це остання безкоштовна генерація
+  if (trialCheck.warning) {
+    await ctx.reply(trialCheck.warning, { parse_mode: 'HTML' });
+  }
+
   if (!(await userBalance.hasTokens(ctx.from.id, model.cost))) {
     await showInsufficientTokens(ctx, model.cost);
     return;
   }
-  
+
   userCurrentModel.set(ctx.from.id, modelKey);
-  
+
+  // Для Kling Motion показуємо спеціальне меню з вибором mode та orientation
+  if (modelKey === 'kling_motion') {
+    const minCost = model.cost || 52;
+    const maxCost = model.maxCost || 208;
+
+    await ctx.reply(
+      `🔥 <b>Kling Motion Control</b>\n\n` +
+      `🎬 <b>Крок 1: Оберіть режим якості</b>\n\n` +
+      `<b>⚡ STD</b> — Стандартний (швидше, дешевше)\n` +
+      `<b>💎 PRO</b> — Професійний (вища якість)\n\n` +
+      `💰 Вартість: ${minCost}—${maxCost}⚡`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('⚡ STD', 'motion_mode_std'),
+            Markup.button.callback('💎 PRO', 'motion_mode_pro')
+          ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // Для Kling показуємо спеціальне меню з вибором тривалості
+  if (modelKey === 'kling') {
+    const minCost = 5 * model.costPerSecond;   // 5 сек
+    const maxCost = 10 * model.costPerSecond;  // 10 сек
+
+    await ctx.reply(
+      `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+      `📐 <b>Крок 1: Оберіть тривалість відео</b>\n\n` +
+      `⏱️ <b>5 секунд</b> — ${minCost}⚡\n` +
+      `⏱️ <b>10 секунд</b> — ${maxCost}⚡\n\n` +
+      `📊 Якість: 1080p\n` +
+      `💰 Вартість: ${minCost}—${maxCost}⚡`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback(`5 сек (${minCost}⚡)`, 'kling_duration_5'),
+            Markup.button.callback(`10 сек (${maxCost}⚡)`, 'kling_duration_10')
+          ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // Для Veo показуємо спеціальне меню з вибором aspect ratio
+  if (modelKey === 'veo') {
+    const aspectMenu = Markup.inlineKeyboard([
+      [Markup.button.callback('🎬 16:9 (Горизонтальне)', 'veo_aspect_16:9')],
+      [Markup.button.callback('📱 9:16 (Вертикальне)', 'veo_aspect_9:16')],
+      [Markup.button.callback('← Назад', 'video_menu')]
+    ]);
+
+    // Розрахунок діапазону цін
+    const minCost = 4 * model.costPerSecondNoAudio;  // 4 сек без аудіо
+    const maxCost = 8 * model.costPerSecondAudio;    // 8 сек з аудіо
+
+    await ctx.reply(
+      `🌟 <b>Google Veo 3.1 💎</b>\n\n` +
+      `📐 <b>Крок 1: Оберіть пропорції відео</b>\n\n` +
+      `<b>🎬 16:9</b> — YouTube, кіно, горизонтальне\n` +
+      `<b>📱 9:16</b> — TikTok, Reels, Stories\n\n` +
+      `💡 <i>Референс-зображення працюють тільки з 16:9</i>\n\n` +
+      `⏱️ Тривалість: 4, 6 або 8 секунд\n` +
+      `🔊 Аудіо: опціонально\n` +
+      `📊 Якість: 1080p\n` +
+      `💰 Вартість: ${minCost}—${maxCost}⚡`,
+      { parse_mode: 'HTML', ...aspectMenu }
+    );
+    return;
+  }
+
   const messages = {
-    kling: `${model.name}\n\n🎭 Text-to-Video і Image-to-Video\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для створення відео з зображення\n\n⏱️ Генерація: 2-5 хвилин\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 1080p, 5 секунд`,
-    
-    kling_motion: `${model.name}\n\n🔥 Motion Transfer: Image + Video → Video 🎬\n\n⚠️ ПОТРІБНО 2 ФАЙЛИ:\n1️⃣ Надішліть ФОТО (персонаж/об'єкт)\n2️⃣ Потім ВІДЕО (референсні рухи)\n\n🎯 Як це працює:\n• Фото: Ваш персонаж/об'єкт\n• Відео: Рухи які хочете перенести\n• Результат: Персонаж з фото виконує рухи з відео!\n\n💡 Приклад:\n📷 Фото: Ваше селфі\n🎥 Відео: Танець\n✨ Результат: Ви танцюєте!\n\n⏱️ Генерація: 2-4 хвилини\n💰 Вартість: ${model.cost}⚡\n📊 Якість: PRO, 5 секунд\n\n👉 Спочатку надішліть ФОТО`,
-    
-    kling_motion_minimal: `${model.name}\n\n🔥 Motion Transfer: Image + Video → Video 🎬\n\n⚠️ ПОТРІБНО 2 ФАЙЛИ:\n1️⃣ Надішліть ФОТО (персонаж/об'єкт)\n2️⃣ Потім ВІДЕО (референсні рухи)\n\n🎯 Як це працює:\n• Фото: Ваш персонаж/об'єкт\n• Відео: Рухи які хочете перенести\n• Результат: Персонаж з фото виконує рухи з відео!\n\n💡 Приклад:\n📷 Фото: Ваше селфі\n🎥 Відео: Танець\n✨ Результат: Ви танцюєте!\n\n⏱️ Генерація: 1-2 хвилини\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 720p, до 10 секунд\n⚡ Швидша версія для коротких відео!\n\n👉 Спочатку надішліть ФОТО`,
 
     runway_turbo: `${model.name}\n\n🎬 Image-to-Video ONLY ⚠️\n\n⚠️ ОБОВ'ЯЗКОВО: Надішліть зображення + текстовий опис\n\n📝 Опис має містити деталі руху/анімації\n🖼️ Зображення стане першим кадром відео\n\n💡 Приклад:\n"Camera slowly zooms in, person turns head to the left"\n\n⏱️ Генерація: 1-3 хвилини\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 720p, 5 секунд\n⚡ Найшвидша модель!`,
-    
+
     runway_gen4: `${model.name}\n\n🎬 Image-to-Video ONLY ⚠️\n\n⚠️ ОБОВ'ЯЗКОВО: Надішліть зображення + текстовий опис\n\n📝 Опис має містити деталі руху/анімації\n🖼️ Зображення стане першим кадром відео\n\n💡 Приклад:\n"Slow motion, waves crashing, cinematic"\n\n⏱️ Генерація: 3-5 хвилин\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 1080p, 10 секунд\n💎 Найвища якість!`,
-    
+
     luma: `${model.name}\n\n🌊 Text-to-Video і Image-to-Video\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для створення відео\n\n⏱️ Генерація: 2-4 хвилини\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 1080p, 5 секунд`
   };
-  
+
   await ctx.reply(
     messages[modelKey] || `${model.name}\n\nНадішліть текстовий опис відео або зображення з підписом.\n\n⏱️ Генерація: 2-5 хвилин\n💰 Вартість: ${model.cost}⚡`,
     keyboard.createBackButton('video_menu')
   );
 });
+
+// ==================== VEO 3.1 CALLBACKS ====================
+
+// Крок 1: Вибір aspect ratio
+bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const aspectRatio = ctx.match[1]; // "16:9" або "9:16"
+
+  // Зберігаємо стан
+  userState.set(userId, {
+    action: 'veo_generation',
+    step: 'select_duration',
+    aspectRatio: aspectRatio,
+    duration: 8,
+    generateAudio: true,
+    references: [],
+    lastFrame: null
+  });
+
+  // Функція розрахунку ціни Veo
+  const veoModel = models.video.models.find(m => m.key === 'veo');
+  const calcVeoCost = (dur, audio) => {
+    const costPerSec = audio ? veoModel.costPerSecondAudio : veoModel.costPerSecondNoAudio;
+    return dur * costPerSec;
+  };
+
+  // Меню вибору тривалості з цінами
+  await ctx.reply(
+    `🌟 <b>Google Veo 3.1 💎</b>\n\n` +
+    `📐 Пропорції: <b>${aspectRatio === '16:9' ? '🎬 Горизонтальне' : '📱 Вертикальне'}</b>\n\n` +
+    `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
+    `💰 Ціни (з аудіо / без аудіо):\n` +
+    `• 4 сек: ${calcVeoCost(4, true)}⚡ / ${calcVeoCost(4, false)}⚡\n` +
+    `• 6 сек: ${calcVeoCost(6, true)}⚡ / ${calcVeoCost(6, false)}⚡\n` +
+    `• 8 сек: ${calcVeoCost(8, true)}⚡ / ${calcVeoCost(8, false)}⚡`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`4сек`, 'veo_duration_4'),
+          Markup.button.callback(`6сек`, 'veo_duration_6'),
+          Markup.button.callback(`8сек`, 'veo_duration_8')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 2: Вибір тривалості
+bot.action(/^veo_duration_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+  const duration = parseInt(ctx.match[1]);
+
+  if (!state || state.action !== 'veo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново, оберіть Veo 3.1');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    duration: duration,
+    step: 'select_audio'
+  });
+
+  // Розрахунок цін
+  const veoModel = models.video.models.find(m => m.key === 'veo');
+  const costWithAudio = duration * veoModel.costPerSecondAudio;
+  const costNoAudio = duration * veoModel.costPerSecondNoAudio;
+
+  // Меню вибору аудіо з цінами
+  await ctx.reply(
+    `🌟 <b>Google Veo 3.1 💎</b>\n\n` +
+    `📐 Пропорції: <b>${state.aspectRatio === '16:9' ? '🎬 Горизонтальне' : '📱 Вертикальне'}</b>\n` +
+    `⏱️ Тривалість: <b>${duration} секунд</b>\n\n` +
+    `🔊 <b>Крок 3: Аудіо</b>\n\n` +
+    `Veo 3.1 може генерувати звук для відео.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback(`🔊 З аудіо (${costWithAudio}⚡)`, 'veo_audio_on')],
+        [Markup.button.callback(`🔇 Без аудіо (${costNoAudio}⚡)`, 'veo_audio_off')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 3: Вибір аудіо
+bot.action(/^veo_audio_(on|off)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+  const generateAudio = ctx.match[1] === 'on';
+
+  if (!state || state.action !== 'veo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново, оберіть Veo 3.1');
+    return;
+  }
+
+  // Розрахунок фінальної ціни
+  const veoModel = models.video.models.find(m => m.key === 'veo');
+  const costPerSec = generateAudio ? veoModel.costPerSecondAudio : veoModel.costPerSecondNoAudio;
+  const finalCost = state.duration * costPerSec;
+
+  userState.set(userId, {
+    ...state,
+    generateAudio: generateAudio,
+    veoCost: finalCost,
+    step: 'waiting_prompt'
+  });
+
+  await ctx.reply(
+    `🌟 <b>Google Veo 3.1 💎</b>\n\n` +
+    `📐 Пропорції: <b>${state.aspectRatio === '16:9' ? '🎬 Горизонтальне' : '📱 Вертикальне'}</b>\n` +
+    `⏱️ Тривалість: <b>${state.duration} секунд</b>\n` +
+    `🔊 Аудіо: <b>${generateAudio ? 'Так' : 'Ні'}</b>\n` +
+    `💰 Вартість: <b>${finalCost}⚡</b>\n\n` +
+    `📝 <b>Крок 4: Напишіть промпт</b>\n\n` +
+    `Опишіть детально що хочете бачити у відео.\n\n` +
+    `💡 <b>Приклади:</b>\n` +
+    `• A woman walking through a sunlit forest\n` +
+    `• Drone shot of a city at sunset, cinematic\n` +
+    `• A cat playing with a ball, slow motion\n\n` +
+    `✍️ <b>Надішліть текстовий промпт:</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// ==================== VEO START IMAGE CALLBACKS ====================
+
+// Користувач хоче додати стартове зображення
+bot.action('veo_add_start_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'veo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново, оберіть Veo 3.1');
+    return;
+  }
+
+  const idealSize = state.aspectRatio === '16:9' ? '1280×720' : '720×1280';
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_start_image'
+  });
+
+  await ctx.reply(
+    `🖼️ <b>Завантажте стартове зображення</b>\n\n` +
+    `Це зображення стане <b>першим кадром</b> вашого відео.\n` +
+    `AI анімує його згідно з промптом.\n\n` +
+    `💡 Ідеальний розмір: ${idealSize}\n` +
+    `📁 Формат: JPG або PNG\n\n` +
+    `📤 <b>Надішліть одне фото:</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Користувач пропускає стартове зображення - переходимо до референсів/last_frame
+bot.action('veo_skip_start_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'veo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  // Для 16:9 - питаємо про референси
+  if (state.aspectRatio === '16:9') {
+    userState.set(userId, {
+      ...state,
+      step: 'ask_references',
+      startImage: null
+    });
+
+    await ctx.reply(
+      `📸 <b>Референс-зображення (опціонально)</b>\n\n` +
+      `Референси допомагають AI зберегти консистентність персонажів/об'єктів у відео.\n\n` +
+      `<b>🎯 Для чого:</b>\n` +
+      `• Персонаж у відео буде схожий на фото\n` +
+      `• Стиль/кольори збережуться\n` +
+      `• Об'єкти виглядатимуть як на референсі\n\n` +
+      `📌 Можна завантажити до 3 зображень`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📸 Додати референси (до 3)', 'veo_add_references')],
+          [Markup.button.callback('⏭️ Без референсів', 'veo_skip_references')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+  } else {
+    // Для 9:16 - референси не працюють, питаємо про last_frame
+    userState.set(userId, {
+      ...state,
+      step: 'ask_last_frame',
+      startImage: null
+    });
+
+    await ctx.reply(
+      `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
+      `<b>Що це:</b> Зображення для кінця відео.\n` +
+      `AI створить плавний перехід від початку до цього кадру.\n\n` +
+      `<b>🎯 Приклад:</b>\n` +
+      `• Початок: людина стоїть\n` +
+      `• Кінець: людина сидить\n` +
+      `• AI згенерує рух присідання`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📷 Завантажу last frame', 'veo_add_last_frame')],
+          [Markup.button.callback('⏭️ Генерувати без', 'veo_skip_last_frame')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+  }
+});
+
+// ==================== VEO REFERENCES CALLBACKS ====================
+
+// Крок: Після стартового зображення - питаємо про референси
+bot.action('veo_add_references', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'veo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново, оберіть Veo 3.1');
+    return;
+  }
+
+  // Референси працюють тільки з 16:9
+  if (state.aspectRatio !== '16:9') {
+    await ctx.reply(
+      `⚠️ <b>Референс-зображення працюють тільки з 16:9!</b>\n\n` +
+      `Ви обрали ${state.aspectRatio}. Референси будуть проігноровані.\n` +
+      `Хочете змінити пропорції на 16:9?`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('✅ Змінити на 16:9', 'veo_change_to_16:9')],
+          [Markup.button.callback('➡️ Продовжити без референсів', 'veo_skip_references')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_references'
+  });
+
+  await ctx.reply(
+    `📸 <b>Завантажте референс-зображення</b>\n\n` +
+    `📌 <b>Правила:</b>\n` +
+    `• Від 1 до 3 зображень\n` +
+    `• Ідеальний розмір: 1280×720 (16:9)\n` +
+    `• Формат: JPG або PNG\n\n` +
+    `<b>🎯 Для чого референси:</b>\n` +
+    `• Персонаж/обличчя буде схоже на фото\n` +
+    `• Стиль/кольори з референсу\n` +
+    `• Об'єкти/локації з фото\n\n` +
+    `📤 Надішліть від 1 до 3 фото, потім натисніть "✅ Готово"`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('✅ Готово (завантажив)', 'veo_references_done')],
+        [Markup.button.callback('⏭️ Пропустити референси', 'veo_skip_references')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Змінити на 16:9 для референсів
+bot.action('veo_change_to_16:9', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state) {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    aspectRatio: '16:9',
+    step: 'waiting_references'
+  });
+
+  await ctx.reply(
+    `✅ Пропорції змінено на <b>16:9</b>\n\n` +
+    `📸 <b>Завантажте референс-зображення</b>\n\n` +
+    `📤 Надішліть від 1 до 3 фото, потім натисніть "✅ Готово"`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('✅ Готово (завантажив)', 'veo_references_done')],
+        [Markup.button.callback('⏭️ Пропустити референси', 'veo_skip_references')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Референси завантажені - переходимо до last_frame
+bot.action('veo_references_done', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'veo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const refCount = state.references?.length || 0;
+
+  // Якщо є референси - last_frame ігнорується, генеруємо одразу
+  if (refCount > 0) {
+    await ctx.reply(
+      `✅ <b>Референсів завантажено: ${refCount}</b>\n\n` +
+      `⚠️ <i>Last frame ігнорується при використанні референсів</i>\n\n` +
+      `🚀 Починаємо генерацію...`,
+      { parse_mode: 'HTML' }
+    );
+    await generateVeoVideo(ctx, state);
+    return;
+  }
+
+  // Якщо референсів немає - питаємо про last_frame
+  userState.set(userId, {
+    ...state,
+    step: 'ask_last_frame'
+  });
+
+  await ctx.reply(
+    `🎬 <b>Чи є у вас останній кадр (last frame)?</b>\n\n` +
+    `<b>Що це:</b> Зображення для кінця відео.\n` +
+    `AI створить плавний перехід від початку до цього кадру.\n\n` +
+    `<b>🎯 Приклад:</b>\n` +
+    `• Початок: людина стоїть\n` +
+    `• Кінець: людина сидить\n` +
+    `• AI згенерує рух присідання`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📷 Так, завантажу', 'veo_add_last_frame')],
+        [Markup.button.callback('⏭️ Ні, генерувати без', 'veo_skip_last_frame')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Пропустити референси
+bot.action('veo_skip_references', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'veo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'ask_last_frame',
+    references: []
+  });
+
+  await ctx.reply(
+    `🎬 <b>Чи є у вас останній кадр (last frame)?</b>\n\n` +
+    `<b>Що це:</b> Зображення для кінця відео.\n` +
+    `AI створить плавний перехід від початку до цього кадру.\n\n` +
+    `<b>🎯 Приклад:</b>\n` +
+    `• Початок: людина стоїть\n` +
+    `• Кінець: людина сидить\n` +
+    `• AI згенерує рух присідання`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📷 Так, завантажу', 'veo_add_last_frame')],
+        [Markup.button.callback('⏭️ Ні, генерувати без', 'veo_skip_last_frame')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Додати last frame
+bot.action('veo_add_last_frame', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'veo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_last_frame'
+  });
+
+  await ctx.reply(
+    `📷 <b>Завантажте останній кадр</b>\n\n` +
+    `Надішліть <b>одне зображення</b>, яке буде кінцем відео.\n\n` +
+    `💡 <b>Порада:</b> Використовуйте зображення того ж розміру що й aspect ratio (${state.aspectRatio === '16:9' ? '1280×720' : '720×1280'})`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Пропустити last frame - генеруємо
+bot.action('veo_skip_last_frame', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'veo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  await ctx.reply('🚀 Починаємо генерацію...');
+  await generateVeoVideo(ctx, state);
+});
+
+// Генерувати одразу (без додаткових опцій)
+bot.action('veo_generate_now', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'veo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  await ctx.reply('🚀 Починаємо генерацію...');
+  await generateVeoVideo(ctx, state);
+});
+
+// ==================== KLING v2.5 CALLBACKS ====================
+
+// Крок 1: Вибір тривалості
+bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const duration = parseInt(ctx.match[1]);
+  const model = models.video.models.find(m => m.key === 'kling');
+  const klingCost = duration * model.costPerSecond;
+
+  // ✅ TRIAL CHECK: 10 секунд заблоковано для Trial
+  const trialCheck = await checkTrialRestrictions(userId, 'kling', { duration });
+  if (!trialCheck.allowed) {
+    await ctx.reply(
+      trialCheck.message,
+      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu() }
+    );
+    return;
+  }
+
+  userState.set(userId, {
+    action: 'kling_generation',
+    step: 'select_aspect',
+    duration: duration,
+    klingCost: klingCost
+  });
+
+  await ctx.reply(
+    `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+    `⏱️ Тривалість: <b>${duration} секунд</b>\n` +
+    `💰 Вартість: <b>${klingCost}⚡</b>\n\n` +
+    `📐 <b>Крок 2: Оберіть пропорції</b>\n\n` +
+    `<i>Ігнорується якщо завантажите стартове зображення</i>`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🎬 16:9', 'kling_aspect_16:9'),
+          Markup.button.callback('📱 9:16', 'kling_aspect_9:16')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 2: Вибір aspect ratio
+bot.action(/^kling_aspect_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const aspectRatio = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    aspectRatio: aspectRatio,
+    step: 'ask_start_image'
+  });
+
+  await ctx.reply(
+    `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+    `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
+    `📐 Пропорції: <b>${aspectRatio}</b>\n` +
+    `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
+    `🖼️ <b>Крок 3: Стартове зображення (опціонально)</b>\n\n` +
+    `Зображення стане першим кадром відео.\n` +
+    `AI анімує його згідно з промптом.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🖼️ Завантажу зображення', 'kling_add_start_image')],
+        [Markup.button.callback('⏭️ Без зображення (text-to-video)', 'kling_skip_start_image')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 3a: Додати стартове зображення
+bot.action('kling_add_start_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_start_image'
+  });
+
+  await ctx.reply(
+    `🖼️ <b>Завантажте стартове зображення</b>\n\n` +
+    `Це зображення стане <b>першим кадром</b> відео.\n\n` +
+    `📤 <b>Надішліть одне фото:</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Крок 3b: Пропустити стартове зображення
+bot.action('kling_skip_start_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    startImage: null,
+    step: 'waiting_prompt'
+  });
+
+  await ctx.reply(
+    `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+    `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
+    `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
+    `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
+    `📝 <b>Крок 4: Напишіть промпт</b>\n\n` +
+    `Опишіть детально що хочете бачити у відео.\n\n` +
+    `💡 <b>Приклади:</b>\n` +
+    `• A dog running on the beach, slow motion\n` +
+    `• Cinematic drone shot of mountains at sunrise\n` +
+    `• A dancer performing ballet, elegant movements\n\n` +
+    `✍️ <b>Надішліть текстовий промпт:</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Крок 4 (після start_image): Питаємо про end_image
+bot.action('kling_ask_end_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  await ctx.reply(
+    `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+    `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
+    `<b>Що це:</b> Зображення для кінця відео.\n` +
+    `AI створить плавний перехід від першого до останнього кадру.\n\n` +
+    `<b>🎯 Приклад:</b>\n` +
+    `• Початок: людина стоїть\n` +
+    `• Кінець: людина сидить\n` +
+    `• Результат: анімація присідання`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📷 Завантажу end_image', 'kling_add_end_image')],
+        [Markup.button.callback('⏭️ Перейти до промпту', 'kling_skip_end_image')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Додати end_image
+bot.action('kling_add_end_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_end_image'
+  });
+
+  await ctx.reply(
+    `📷 <b>Завантажте останній кадр</b>\n\n` +
+    `Це зображення стане кінцевим кадром відео.\n\n` +
+    `📤 <b>Надішліть одне фото:</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Пропустити end_image - перейти до промпту
+bot.action('kling_skip_end_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    endImage: null,
+    step: 'waiting_prompt'
+  });
+
+  await ctx.reply(
+    `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+    `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
+    `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
+    `🖼️ Start image: <b>${state.startImage ? 'Так' : 'Ні'}</b>\n` +
+    `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
+    `📝 <b>Напишіть промпт</b>\n\n` +
+    `Опишіть детально що хочете бачити у відео.\n\n` +
+    `✍️ <b>Надішліть текстовий промпт:</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// ==================== KLING MOTION CONTROL CALLBACKS ====================
+
+// Крок 1: Вибір mode (STD/PRO)
+bot.action(/^motion_mode_(std|pro)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const mode = ctx.match[1];
+  const model = models.video.models.find(m => m.key === 'kling_motion');
+
+  userState.set(userId, {
+    action: 'kling_motion_generation',
+    step: 'select_orientation',
+    mode: mode
+  });
+
+  // Показуємо ціни для обраного mode
+  const imageCost = model.costs[`${mode}_image`];
+  const videoCost = model.costs[`${mode}_video`];
+
+  await ctx.reply(
+    `🔥 <b>Kling Motion Control</b>\n\n` +
+    `⚙️ Режим: <b>${mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n\n` +
+    `🎭 <b>Крок 2: Оберіть орієнтацію персонажа</b>\n\n` +
+    `<b>📷 Image</b> — орієнтація з фото (до 10 сек) — ${imageCost}⚡\n` +
+    `<b>🎥 Video</b> — орієнтація з відео (до 30 сек) — ${videoCost}⚡`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`📷 Image (${imageCost}⚡)`, 'motion_orient_image'),
+          Markup.button.callback(`🎥 Video (${videoCost}⚡)`, 'motion_orient_video')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 2: Вибір orientation (image/video)
+bot.action(/^motion_orient_(image|video)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const orientation = ctx.match[1];
+  const state = userState.get(userId);
+  const model = models.video.models.find(m => m.key === 'kling_motion');
+
+  if (!state || state.action !== 'kling_motion_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const costKey = `${state.mode}_${orientation}`;
+  const motionCost = model.costs[costKey];
+  const maxDuration = orientation === 'image' ? 10 : 30;
+
+  userState.set(userId, {
+    ...state,
+    orientation: orientation,
+    motionCost: motionCost,
+    step: 'ask_sound'
+  });
+
+  await ctx.reply(
+    `🔥 <b>Kling Motion Control</b>\n\n` +
+    `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+    `🎭 Орієнтація: <b>${orientation === 'image' ? '📷 Image' : '🎥 Video'}</b>\n` +
+    `⏱️ Макс тривалість: <b>${maxDuration} сек</b>\n` +
+    `💰 Вартість: <b>${motionCost}⚡</b>\n\n` +
+    `🔊 <b>Крок 3: Звук з відео</b>\n\n` +
+    `Зберегти оригінальний звук з референсного відео?`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔊 Зберегти звук', 'motion_sound_on'),
+          Markup.button.callback('🔇 Без звуку', 'motion_sound_off')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 3: Вибір keep_original_sound
+bot.action(/^motion_sound_(on|off)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const keepSound = ctx.match[1] === 'on';
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_motion_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    keepOriginalSound: keepSound,
+    step: 'waiting_image'
+  });
+
+  const maxDuration = state.orientation === 'image' ? 10 : 30;
+
+  await ctx.reply(
+    `🔥 <b>Kling Motion Control</b>\n\n` +
+    `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+    `🎭 Орієнтація: <b>${state.orientation === 'image' ? '📷 Image' : '🎥 Video'}</b>\n` +
+    `⏱️ Макс: <b>${maxDuration} сек</b>\n` +
+    `🔊 Звук: <b>${keepSound ? 'Зберегти' : 'Без звуку'}</b>\n` +
+    `💰 Вартість: <b>${state.motionCost}⚡</b>\n\n` +
+    `📷 <b>Крок 4: Надішліть ФОТО персонажа</b>\n\n` +
+    `Це зображення персонажа який буде анімований.\n\n` +
+    `📤 <b>Надішліть одне фото:</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Генерувати Kling Motion
+bot.action('motion_generate_now', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_motion_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  await ctx.reply('🚀 Починаємо генерацію Kling Motion...');
+  await generateKlingMotionVideo(ctx, state);
+});
+
+// ==================== KLING MOTION GENERATION FUNCTION ====================
+
+async function generateKlingMotionVideo(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const model = models.video.models.find(m => m.key === 'kling_motion');
+
+  if (!model) {
+    await ctx.reply('❌ Модель Kling Motion не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  const motionCost = state.motionCost;
+  const costKey = `${state.mode}_${state.orientation}`;
+  const apiCost = model.apiCosts[costKey];
+
+  if (!(await userBalance.hasTokens(userId, motionCost))) {
+    await showInsufficientTokens(ctx, motionCost);
+    userState.delete(userId);
+    return;
+  }
+
+  const maxDuration = state.orientation === 'image' ? 10 : 30;
+
+  const statusMsg = await ctx.reply(
+    `🔥 <b>Kling Motion Control - Генерація</b>\n\n` +
+    `⚙️ Режим: ${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}\n` +
+    `🎭 Орієнтація: ${state.orientation === 'image' ? '📷 Image' : '🎥 Video'}\n` +
+    `⏱️ Макс: ${maxDuration} сек\n` +
+    `🔊 Звук: ${state.keepOriginalSound ? 'Зберегти' : 'Без'}\n\n` +
+    `📝 Промпт: "${state.prompt?.substring(0, 100) || '(без промпту)'}"\n\n` +
+    `⏱️ Це може зайняти 2-5 хвилин...`,
+    { parse_mode: 'HTML' }
+  );
+
+  try {
+    const result = await replicate.generateVideoWithKlingMotion(
+      state.imageUrl,
+      state.videoUrl,
+      state.mode,
+      state.orientation,
+      state.prompt || '',
+      state.keepOriginalSound
+    );
+
+    if (!result.success) {
+      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+        userId, username, action: 'kling_motion_generation', model: model.name
+      });
+      await ctx.telegram.editMessageText(
+        ctx.chat.id, statusMsg.message_id, null,
+        `❌ Помилка генерації Kling Motion.\n\n${result.error}\n\nСпробуйте ще раз.`
+      );
+      userState.delete(userId);
+      return;
+    }
+
+    await userBalance.deductTokens(userId, motionCost, `${model.name} generation`, {
+      modelKey: 'kling_motion', modelName: model.name, apiCost: apiCost,
+      mode: state.mode, orientation: state.orientation,
+      keepOriginalSound: state.keepOriginalSound
+    });
+
+    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+
+    await ctx.reply(
+      `✅ <b>Kling Motion готово!</b>\n\n` +
+      `⚠️ <b>ЗАВАНТАЖТЕ ОДРАЗУ!</b> Посилання активне 1 ГОДИНУ!\n\n` +
+      `⚙️ ${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'} | ` +
+      `${state.orientation === 'image' ? '📷' : '🎥'} | ` +
+      `${state.keepOriginalSound ? '🔊' : '🔇'}\n\n` +
+      `💰 Витрачено: ${motionCost}⚡`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+
+    await ctx.replyWithVideo(
+      { url: result.videoUrl },
+      {
+        caption: `🔥 Kling Motion\n\n⚙️ ${state.mode.toUpperCase()} | ${state.orientation} | ${state.keepOriginalSound ? '🔊' : '🔇'}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${motionCost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      }
+    );
+
+    userState.delete(userId);
+
+  } catch (error) {
+    console.error('Kling Motion generation failed:', error);
+    await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'kling_motion_generation' });
+    await ctx.telegram.editMessageText(
+      ctx.chat.id, statusMsg.message_id, null,
+      '❌ Помилка генерації Kling Motion. Спробуйте ще раз.'
+    );
+    userState.delete(userId);
+  }
+}
+
+// Генерувати Kling відразу
+bot.action('kling_generate_now', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  await ctx.reply('🚀 Починаємо генерацію Kling...');
+  await generateKlingVideo(ctx, state);
+});
+
+// ==================== KLING GENERATION FUNCTION ====================
+
+async function generateKlingVideo(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const model = models.video.models.find(m => m.key === 'kling');
+
+  if (!model) {
+    await ctx.reply('❌ Модель Kling не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  const duration = state.duration || 5;
+  const klingCost = state.klingCost || (duration * model.costPerSecond);
+  const apiCost = duration * model.apiCostPerSecond;
+
+  if (!(await userBalance.hasTokens(userId, klingCost))) {
+    await showInsufficientTokens(ctx, klingCost);
+    userState.delete(userId);
+    return;
+  }
+
+  const hasStartImage = !!state.startImage;
+  const hasEndImage = !!state.endImage;
+
+  const statusMsg = await ctx.reply(
+    `🎭 <b>Kling v2.5 - Генерація</b>\n\n` +
+    `⏱️ Тривалість: ${duration} сек\n` +
+    `📐 Пропорції: ${state.aspectRatio || '16:9'}\n` +
+    `🖼️ Start image: ${hasStartImage ? 'Так' : 'Ні'}\n` +
+    `🎬 End image: ${hasEndImage ? 'Так' : 'Ні'}\n\n` +
+    `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
+    `⏱️ Це може зайняти 2-5 хвилин...`,
+    { parse_mode: 'HTML' }
+  );
+
+  try {
+    const result = await replicate.generateVideoWithKling(
+      state.prompt,
+      state.startImage || null,
+      state.endImage || null,
+      duration,
+      state.aspectRatio || '16:9'
+    );
+
+    if (!result.success) {
+      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+        userId, username, action: 'kling_generation', model: model.name,
+        prompt: state.prompt, duration: duration
+      });
+      await ctx.telegram.editMessageText(
+        ctx.chat.id, statusMsg.message_id, null,
+        `❌ Помилка генерації Kling.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+      );
+      userState.delete(userId);
+      return;
+    }
+
+    await userBalance.deductTokens(userId, klingCost, `${model.name} generation`, {
+      modelKey: 'kling', modelName: model.name, apiCost: apiCost,
+      prompt: state.prompt, duration: duration,
+      hasStartImage: hasStartImage,
+      hasEndImage: hasEndImage
+    });
+
+    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+
+    await ctx.reply(
+      `✅ <b>Kling v2.5 готово!</b>\n\n` +
+      `⏱️ Тривалість: ${duration} сек\n` +
+      `📐 Пропорції: ${state.aspectRatio || '16:9'}\n` +
+      `📝 Промпт: ${state.prompt?.substring(0, 100)}...\n\n` +
+      `💰 Витрачено: ${klingCost}⚡`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+
+    await ctx.replyWithVideo(
+      { url: result.videoUrl },
+      {
+        caption: `🎭 Kling v2.5\n\n⏱️ ${duration}сек | 📐 ${state.aspectRatio || '16:9'}\n📝 ${state.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${klingCost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      }
+    );
+
+    // ✅ Записуємо Trial usage
+    recordTrialUsage(userId, 'kling');
+
+    userState.delete(userId);
+
+  } catch (error) {
+    console.error('Kling generation failed:', error);
+    await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'kling_generation', model: model.name });
+    await ctx.telegram.editMessageText(
+      ctx.chat.id, statusMsg.message_id, null,
+      '❌ Помилка генерації Kling. Спробуйте ще раз.'
+    );
+    userState.delete(userId);
+  }
+}
+
+// ==================== VEO GENERATION FUNCTION ====================
+
+async function generateVeoVideo(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const model = models.video.models.find(m => m.key === 'veo');
+
+  if (!model) {
+    await ctx.reply('❌ Модель Veo не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  // Динамічний розрахунок ціни
+  const duration = state.duration || 8;
+  const generateAudio = state.generateAudio !== false;
+  const costPerSec = generateAudio ? model.costPerSecondAudio : model.costPerSecondNoAudio;
+  const veoCost = state.veoCost || (duration * costPerSec);
+  const apiCostPerSec = generateAudio ? model.apiCostPerSecondAudio : model.apiCostPerSecondNoAudio;
+  const apiCost = duration * apiCostPerSec;
+
+  if (!(await userBalance.hasTokens(userId, veoCost))) {
+    await showInsufficientTokens(ctx, veoCost);
+    userState.delete(userId);
+    return;
+  }
+
+  const hasStartImage = !!state.startImage;
+  const hasReferences = state.references?.length > 0;
+  const hasLastFrame = !!state.lastFrame;
+
+  const statusMsg = await ctx.reply(
+    `🌟 <b>Google Veo 3.1 - Генерація</b>\n\n` +
+    `📐 Пропорції: ${state.aspectRatio}\n` +
+    `⏱️ Тривалість: ${duration} сек\n` +
+    `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
+    `🖼️ Стартове зображення: ${hasStartImage ? 'Так' : 'Ні'}\n` +
+    `📸 Референсів: ${state.references?.length || 0}\n` +
+    `🎬 Last frame: ${hasLastFrame ? 'Так' : 'Ні'}\n\n` +
+    `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
+    `⏱️ Це може зайняти 2-5 хвилин...`,
+    { parse_mode: 'HTML' }
+  );
+
+  try {
+    const result = await replicate.generateVideoWithVeo(
+      state.prompt,
+      state.references || [],
+      state.lastFrame || null,
+      state.aspectRatio,
+      duration,
+      '', // negative prompt
+      state.startImage || null,
+      generateAudio
+    );
+
+    if (!result.success) {
+      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+        userId, username, action: 'veo_generation', model: model.name,
+        prompt: state.prompt, aspectRatio: state.aspectRatio
+      });
+      await ctx.telegram.editMessageText(
+        ctx.chat.id, statusMsg.message_id, null,
+        `❌ Помилка генерації Veo 3.1.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+      );
+      userState.delete(userId);
+      return;
+    }
+
+    await userBalance.deductTokens(userId, veoCost, `${model.name} generation`, {
+      modelKey: 'veo', modelName: model.name, apiCost: apiCost,
+      prompt: state.prompt, aspectRatio: state.aspectRatio,
+      duration: duration, generateAudio: generateAudio,
+      hasStartImage: hasStartImage,
+      references: state.references?.length || 0,
+      hasLastFrame: hasLastFrame
+    });
+
+    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+
+    // Попередження перед відео
+    await ctx.reply(
+      `✅ <b>Google Veo 3.1 готово!</b>\n\n` +
+      `⚠️ <b>ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
+      `Посилання активне тільки <b>1 ГОДИНУ</b>!\n\n` +
+      `📐 Пропорції: ${state.aspectRatio}\n` +
+      `⏱️ Тривалість: ${duration} сек\n` +
+      `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
+      `📝 Промпт: ${state.prompt?.substring(0, 100)}...\n\n` +
+      `💾 <b>Як зберегти:</b>\n` +
+      `1️⃣ Натисніть на відео нижче\n` +
+      `2️⃣ Натисніть ⋮ → "Зберегти"\n\n` +
+      `💰 Витрачено: ${veoCost}⚡`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+
+    await ctx.replyWithVideo(
+      { url: result.videoUrl },
+      {
+        caption: `🌟 Google Veo 3.1\n\n📐 ${state.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${state.prompt?.substring(0, 80)}...\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${veoCost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      }
+    );
+
+    userState.delete(userId);
+
+  } catch (error) {
+    console.error('Veo 3.1 generation failed:', error);
+    await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'veo_generation', model: model.name });
+    await ctx.telegram.editMessageText(
+      ctx.chat.id, statusMsg.message_id, null,
+      '❌ Помилка генерації Veo 3.1. Спробуйте ще раз.'
+    );
+    userState.delete(userId);
+  }
+}
 
 // Audio Models
 bot.action(/^(suno|udio|elevenlabs)$/, async (ctx) => {
@@ -1642,25 +3085,21 @@ bot.action(/^(suno|udio|elevenlabs)$/, async (ctx) => {
 // Navigation
 bot.action('audio_menu', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.deleteMessage();
   await ctx.reply('🎙️ Аудіо з AI\n\nВиберіть розділ для роботи з аудіо 👇', keyboard.createInlineMenu(models.audio.models, 2));
 });
 
 bot.action('main_menu', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.deleteMessage();
   await ctx.reply('🏠 Головне меню', keyboard.createMainMenu());
 });
 
 bot.action('design_menu', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.deleteMessage();
   await ctx.reply('🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇', keyboard.createInlineMenu(models.design.models, 1));
 });
 
 bot.action('video_menu', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.deleteMessage();
   await ctx.reply('🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇', keyboard.createInlineMenu(models.video.models, 1));
 });
 
@@ -1704,7 +3143,7 @@ bot.action('legal_info', async (ctx) => {
 
 bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
   await ctx.answerCbQuery();
-  
+
   const planKey = ctx.match[1];
   const sub = models.subscriptions[planKey];
   const userId = ctx.from.id;
@@ -1715,40 +3154,30 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
     return;
   }
 
-  // Отримуємо актуальний курс USD/UAH для розрахунку LiqPay ціни
-  const rate = await exchangeRate.getRate();
-  const priceUAH = Math.round(sub.priceUSD * rate);
+  // Короткий опис пакету в доларах
+  let message = `⚡ <b>Пакет ${sub.name}</b> — $${sub.priceUSD}\n\n`;
+  message += `💎 Доступ до всіх моделей\n`;
+  message += `⏰ Токени НЕ згорають\n`;
+  message += `✨ Комбінуйте як завгодно!\n\n`;
+  message += `💰 <b>Вартість:</b> $${sub.priceUSD} — ${sub.tokensLiqPay || sub.tokens}⚡ токенів\n\n`;
+  message += `<i>Також можна розрахуватись Telegram Stars:</i>\n`;
+  message += `⭐ ${sub.price}⭐ — ${sub.tokens}⚡ токенів\n\n`;
+  message += `📱 Оберіть спосіб оплати 👇`;
 
-  let message = `⚡ Пакет токенів ${sub.name}\n\n`;
-  message += sub.features.join('\n') + '\n\n';
-  message += `💰 Вартість:\n`;
-  message += `  ⭐ ${sub.price}⭐ Telegram Stars\n`;
-  message += `  💳 ${priceUAH}₴ банківський платіж`;
-  if (sub.tokensLiqPay) {
-    message += ` (+${sub.tokensLiqPay - sub.tokens}⚡ бонус)`;
-  }
-  message += `\n\n`;
-  message += `🎁 Токенів:\n`;
-  message += `  ⭐ ${sub.tokens}⚡ за Telegram Stars\n`;
-  if (sub.tokensLiqPay) {
-    message += `  💳 ${sub.tokensLiqPay}⚡ за банківський платіж (економія на комісіях) 🎁\n`;
-  }
-  message += `\n📱 Оберіть спосіб оплати 👇`;
-
-  await ctx.reply(message, keyboard.createPaymentMenu(sub.price, planKey, userId, telegramId));
+  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createPaymentMenu(sub.price, planKey, userId, telegramId) });
 });
 
 bot.action(/^pay_stars_(starter|basic|pro|premium)$/, async (ctx) => {
   await ctx.answerCbQuery();
-  
+
   const planKey = ctx.match[1];
   const sub = models.subscriptions[planKey];
-  
+
   if (!sub) {
     await ctx.reply('❌ План не знайдено');
     return;
   }
-  
+
   const invoice = {
     title: `${sub.name} - ${sub.tokens}⚡ токенів`,
     description: `Купити ${sub.tokens} токенів`,
@@ -1757,7 +3186,7 @@ bot.action(/^pay_stars_(starter|basic|pro|premium)$/, async (ctx) => {
     currency: 'XTR',
     prices: [{ label: `${sub.name} пакет`, amount: sub.price }]
   };
-  
+
   try {
     await ctx.replyWithInvoice(invoice);
   } catch (error) {
@@ -1771,10 +3200,93 @@ bot.action(/^pay_stars_(starter|basic|pro|premium)$/, async (ctx) => {
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const currentModel = userCurrentModel.get(userId);
-  const text = ctx.message.text;
-  
+  const state = userState.get(userId);
+  let text = ctx.message.text;  // let - бо може змінитись при накопиченні довгого промпту
+
   if (text.startsWith('/')) return;
-  
+
+  // ✅ VEO: Обробка промпту
+  if (state?.action === 'veo_generation' && state?.step === 'waiting_prompt') {
+    if (!text || text.length < 5) {
+      await ctx.reply(
+        '⚠️ Промпт занадто короткий!\n\n' +
+        'Напишіть детальніше що хочете бачити у відео (мінімум 5 символів).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    // Зберігаємо промпт і питаємо про стартове зображення
+    userState.set(userId, {
+      ...state,
+      prompt: text,
+      step: 'ask_start_image'
+    });
+
+    const model = models.video.models.find(m => m.key === 'veo');
+    const idealSize = state.aspectRatio === '16:9' ? '1280×720' : '720×1280';
+
+    // Питаємо про стартове зображення (працює для обох пропорцій)
+    await ctx.reply(
+      `✅ <b>Промпт збережено!</b>\n\n` +
+      `📝 "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n\n` +
+      `🖼️ <b>Крок 3: Стартове зображення (опціонально)</b>\n\n` +
+      `<b>Що це:</b> Зображення яке стане першим кадром відео.\n` +
+      `AI анімує його згідно з промптом.\n\n` +
+      `<b>🎯 Приклади:</b>\n` +
+      `• Фото людини → відео де вона рухається\n` +
+      `• Пейзаж → камера летить над ним\n` +
+      `• Продукт → обертання 360°\n\n` +
+      `💡 Ідеальний розмір: ${idealSize}`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🖼️ Завантажу зображення', 'veo_add_start_image')],
+          [Markup.button.callback('⏭️ Без зображення (text-to-video)', 'veo_skip_start_image')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // ✅ KLING: Обробка промпту
+  if (state?.action === 'kling_generation' && state?.step === 'waiting_prompt') {
+    if (!text || text.length < 5) {
+      await ctx.reply(
+        '⚠️ Промпт занадто короткий!\n\n' +
+        'Напишіть детальніше що хочете бачити у відео (мінімум 5 символів).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    // Зберігаємо промпт і генеруємо
+    userState.set(userId, {
+      ...state,
+      prompt: text,
+      step: 'ready_to_generate'
+    });
+
+    await ctx.reply('🚀 Промпт збережено! Починаємо генерацію Kling...');
+    await generateKlingVideo(ctx, { ...state, prompt: text });
+    return;
+  }
+
+  // ✅ KLING MOTION: Обробка промпту (опціонально)
+  if (state?.action === 'kling_motion_generation' && state?.step === 'ask_prompt') {
+    // Зберігаємо промпт і генеруємо
+    userState.set(userId, {
+      ...state,
+      prompt: text,
+      step: 'ready_to_generate'
+    });
+
+    await ctx.reply('🚀 Промпт збережено! Починаємо генерацію Kling Motion...');
+    await generateKlingMotionVideo(ctx, { ...state, prompt: text });
+    return;
+  }
+
   if (!currentModel) {
     await ctx.reply('Будь ласка, спочатку виберіть модель з меню 👇', keyboard.createMainMenu());
     return;
@@ -1785,26 +3297,88 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  if (currentModel === 'kling_motion' || currentModel === 'kling_motion_minimal') {
-    const state = userState.get(userId);
-    
-    if (state?.step === 'waiting_video' && state?.imageUrl) {
-      const modelName = currentModel === 'kling_motion_minimal' ? 'ВІДЕО (тривалістю <= 10 сек⏱️)' : 'ВІДЕО';
-      await ctx.reply(
-        `⚠️ Очікується ${modelName}, а не текст!\n\n` +
-        `🎥 Надішліть відео файл з рухами.`,
-        keyboard.createBackButton('video_menu')
-      );
+  // ✅ KLING MOTION: якщо модель обрана але флоу не розпочато
+  if (currentModel === 'kling_motion') {
+    const motionState = userState.get(userId);
+
+    // Якщо є активний флоу - перевіряємо на якому кроці
+    if (motionState?.action === 'kling_motion_generation') {
+      if (motionState.step === 'waiting_image') {
+        await ctx.reply(
+          '📷 <b>Очікується ФОТО персонажа, а не текст!</b>\n\n' +
+          '👉 Надішліть фото персонажа.',
+          { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+        );
+        return;
+      }
+      if (motionState.step === 'waiting_video') {
+        await ctx.reply(
+          '🎥 <b>Очікується ВІДЕО з рухами, а не текст!</b>\n\n' +
+          '👉 Надішліть відео файл з рухами.',
+          { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+        );
+        return;
+      }
+      // Якщо step = ask_prompt - текст обробиться в KLING MOTION обробнику вище
     } else {
+      // Флоу не розпочато - направляємо в меню
       await ctx.reply(
-        '🔥 Kling Motion Control чекає на ФОТО!\n\n' +
-        '👉 Надішліть фото персонажа (не текст)',
-        keyboard.createBackButton('video_menu')
+        '🔥 <b>Kling Motion Control</b>\n\n' +
+        '⚠️ Спочатку налаштуйте параметри!\n\n' +
+        'Натисніть кнопку Kling Motion в меню відео.',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
+      return;
     }
+  }
+
+  // ✅ VEO: якщо модель veo але немає стану - показуємо що треба обрати aspect ratio
+  if (currentModel === 'veo' && !state?.action) {
+    await ctx.reply(
+      '🌟 <b>Google Veo 3.1</b>\n\n' +
+      '⚠️ Спочатку оберіть пропорції відео!\n\n' +
+      'Натисніть на кнопку Veo в меню відео.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
     return;
   }
-  
+
+  // ✅ ДОВГІ ПРОМПТИ: накопичення через "..." в кінці
+  // ВАЖЛИВО: перевіряємо що currentModel існує і підтримує довгі промпти
+  if (currentModel && MODELS_WITH_LONG_PROMPTS.includes(currentModel)) {
+    const pending = pendingPrompts.get(userId);
+    const continuePrompt = text.trim().endsWith('...');
+
+    if (continuePrompt) {
+      // Користувач хоче продовжити - накопичуємо
+      const cleanText = text.trim().slice(0, -3); // Прибираємо "..."
+      const accumulated = pending ? pending.prompt + '\n' + cleanText : cleanText;
+
+      pendingPrompts.set(userId, {
+        prompt: accumulated,
+        model: currentModel
+      });
+
+      const charCount = accumulated.length;
+      await ctx.reply(
+        `📝 <b>Промпт накопичено</b>\n\n` +
+        `📊 Символів: <b>${charCount}</b>\n` +
+        `🔄 Продовжуйте надсилати текст з <code>...</code> в кінці\n\n` +
+        `✅ Коли готово - надішліть останню частину <b>БЕЗ</b> трьох крапок\n\n` +
+        `💡 Або надішліть <code>/clear</code> щоб очистити`,
+        { parse_mode: 'HTML' }
+      );
+      return;
+    }
+
+    // Готово - об'єднуємо якщо є накопичене
+    if (pending) {
+      text = pending.prompt + '\n' + text.trim();
+      pendingPrompts.delete(userId);
+      console.log(`📝 Long prompt assembled: ${text.length} chars for ${currentModel}`);
+    }
+  }
+
   const handlers = {
     claude_vision: () => handleClaudeText(ctx, text),
     claude_text: () => handleClaudeText(ctx, text),
@@ -1864,6 +3438,199 @@ bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
   const currentModel = userCurrentModel.get(userId);
   const state = userState.get(userId);
+
+  // Debug log
+  console.log(`📸 Photo received from user ${userId}:`, {
+    currentModel,
+    stateAction: state?.action,
+    stateStep: state?.step,
+    hasState: !!state
+  });
+
+  // ✅ VEO: Обробка стартового зображення (image-to-video)
+  if (state?.action === 'veo_generation' && state?.step === 'waiting_start_image') {
+    console.log(`✅ Processing VEO start image for user ${userId}`);
+    const imageUrl = await getImageUrl(ctx);
+
+    userState.set(userId, {
+      ...state,
+      startImage: imageUrl,
+      step: 'ask_references_after_start'
+    });
+
+    // Для 16:9 - питаємо про референси
+    if (state.aspectRatio === '16:9') {
+      await ctx.reply(
+        `✅ <b>Стартове зображення завантажено!</b>\n\n` +
+        `📸 <b>Референс-зображення (опціонально)</b>\n\n` +
+        `Референси допомагають AI зберегти консистентність персонажів.\n\n` +
+        `📌 Можна завантажити до 3 зображень`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📸 Додати референси (до 3)', 'veo_add_references')],
+            [Markup.button.callback('⏭️ Без референсів → генерувати', 'veo_generate_now')],
+            [Markup.button.callback('← Назад', 'video_menu')]
+          ])
+        }
+      );
+    } else {
+      // Для 9:16 - референси не працюють, питаємо про last_frame
+      await ctx.reply(
+        `✅ <b>Стартове зображення завантажено!</b>\n\n` +
+        `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
+        `Зображення для кінця відео - AI створить плавний перехід.`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📷 Завантажу last frame', 'veo_add_last_frame')],
+            [Markup.button.callback('⏭️ Генерувати без', 'veo_generate_now')],
+            [Markup.button.callback('← Назад', 'video_menu')]
+          ])
+        }
+      );
+    }
+    return;
+  }
+
+  // ✅ VEO: Обробка референс-зображень
+  if (state?.action === 'veo_generation' && state?.step === 'waiting_references') {
+    const imageUrl = await getImageUrl(ctx);
+    const currentRefs = state.references || [];
+
+    if (currentRefs.length >= 3) {
+      await ctx.reply(
+        '⚠️ Максимум 3 референс-зображення!\n\n' +
+        'Натисніть "✅ Готово" щоб продовжити.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('✅ Готово', 'veo_references_done')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      );
+      return;
+    }
+
+    currentRefs.push(imageUrl);
+    userState.set(userId, {
+      ...state,
+      references: currentRefs
+    });
+
+    await ctx.reply(
+      `✅ Референс ${currentRefs.length}/3 завантажено!\n\n` +
+      (currentRefs.length < 3
+        ? `📤 Надішліть ще ${3 - currentRefs.length} фото або натисніть "✅ Готово"`
+        : `📸 Досягнуто максимум. Натисніть "✅ Готово"`),
+      Markup.inlineKeyboard([
+        [Markup.button.callback('✅ Готово', 'veo_references_done')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    );
+    return;
+  }
+
+  // ✅ VEO: Обробка last_frame
+  if (state?.action === 'veo_generation' && state?.step === 'waiting_last_frame') {
+    const imageUrl = await getImageUrl(ctx);
+
+    userState.set(userId, {
+      ...state,
+      lastFrame: imageUrl,
+      step: 'ready_to_generate'
+    });
+
+    await ctx.reply('🚀 Last frame отримано! Починаємо генерацію...');
+    await generateVeoVideo(ctx, { ...state, lastFrame: imageUrl });
+    return;
+  }
+
+  // ✅ KLING: Обробка стартового зображення
+  if (state?.action === 'kling_generation' && state?.step === 'waiting_start_image') {
+    console.log(`✅ Processing Kling start image for user ${userId}`);
+    const imageUrl = await getImageUrl(ctx);
+
+    userState.set(userId, {
+      ...state,
+      startImage: imageUrl,
+      step: 'ask_end_image'
+    });
+
+    await ctx.reply(
+      `✅ <b>Стартове зображення завантажено!</b>\n\n` +
+      `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
+      `Зображення для кінця відео - AI створить плавний перехід.\n\n` +
+      `<b>🎯 Приклад:</b>\n` +
+      `• Початок: людина стоїть\n` +
+      `• Кінець: людина сидить\n` +
+      `• Результат: анімація присідання`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📷 Завантажу end_image', 'kling_add_end_image')],
+          [Markup.button.callback('⏭️ Перейти до промпту', 'kling_skip_end_image')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // ✅ KLING: Обробка end_image
+  if (state?.action === 'kling_generation' && state?.step === 'waiting_end_image') {
+    console.log(`✅ Processing Kling end image for user ${userId}`);
+    const imageUrl = await getImageUrl(ctx);
+
+    userState.set(userId, {
+      ...state,
+      endImage: imageUrl,
+      step: 'waiting_prompt'
+    });
+
+    await ctx.reply(
+      `✅ <b>End image завантажено!</b>\n\n` +
+      `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+      `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
+      `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
+      `🖼️ Start image: <b>Так</b>\n` +
+      `🎬 End image: <b>Так</b>\n` +
+      `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
+      `📝 <b>Напишіть промпт</b>\n\n` +
+      `Опишіть рух/перехід між початковим та кінцевим кадром.\n\n` +
+      `✍️ <b>Надішліть текстовий промпт:</b>`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  // ✅ KLING MOTION: Обробка фото персонажа
+  if (state?.action === 'kling_motion_generation' && state?.step === 'waiting_image') {
+    console.log(`✅ Processing Kling Motion image for user ${userId}`);
+    const imageUrl = await getImageUrl(ctx);
+
+    const maxDuration = state.orientation === 'image' ? 10 : 30;
+
+    userState.set(userId, {
+      ...state,
+      imageUrl: imageUrl,
+      step: 'waiting_video'
+    });
+
+    await ctx.reply(
+      `✅ <b>Фото персонажа завантажено!</b>\n\n` +
+      `🔥 <b>Kling Motion Control</b>\n\n` +
+      `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+      `🎭 Орієнтація: <b>${state.orientation === 'image' ? '📷 Image' : '🎥 Video'}</b>\n` +
+      `⏱️ Макс: <b>${maxDuration} сек</b>\n` +
+      `💰 Вартість: <b>${state.motionCost}⚡</b>\n\n` +
+      `🎥 <b>Крок 5: Надішліть ВІДЕО з рухами</b>\n\n` +
+      `Це відео з референсними рухами які AI перенесе на персонажа.\n\n` +
+      `⏱️ Тривалість відео: до ${maxDuration} секунд\n` +
+      `📁 Формат: MP4, MOV\n\n` +
+      `📤 <b>Надішліть відео файл:</b>`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
 
   // ✅ Перевірити чи користувач вибрав модель
   if (!currentModel) {
@@ -1925,7 +3692,22 @@ bot.on('photo', async (ctx) => {
   // Обробка одного фото
   const videoModels = ['kling', 'runway_gen4', 'runway_turbo'];
   const imageModels = ['nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_2k', 'seedream_4k', 'ideogram'];
-  const prompt = ctx.message.caption || 'transform this image, masterpiece quality, highly detailed';
+
+  // ✅ Перевіряємо чи є накопичений промпт для довгих промптів
+  const pendingPrompt = pendingPrompts.get(userId);
+  let prompt = ctx.message.caption || '';
+
+  if (pendingPrompt && MODELS_WITH_LONG_PROMPTS.includes(currentModel)) {
+    // Використовуємо накопичений промпт + caption якщо є
+    prompt = prompt ? pendingPrompt.prompt + '\n' + prompt : pendingPrompt.prompt;
+    pendingPrompts.delete(userId);
+    console.log(`📝 Using accumulated prompt for photo: ${prompt.length} chars`);
+  }
+
+  // Якщо промпт пустий - використовуємо дефолтний
+  if (!prompt) {
+    prompt = 'transform this image, masterpiece quality, highly detailed';
+  }
 
   if (currentModel === 'claude_vision') {
     await handleClaudeVision(ctx);
@@ -2017,97 +3799,59 @@ bot.on('video', async (ctx) => {
   const userId = ctx.from.id;
   const state = userState.get(userId);
 
-  // Перевіряємо чи це Kling Motion (або Minimal) в стані очікування відео
-  if ((state?.model === 'kling_motion' || state?.model === 'kling_motion_minimal') && state?.step === 'waiting_video' && state?.imageUrl) {
-    const modelKey = state.model;
-    const model = models.video.models.find(m => m.key === modelKey);
+  // ✅ KLING MOTION: Обробка референсного відео
+  if (state?.action === 'kling_motion_generation' && state?.step === 'waiting_video' && state?.imageUrl) {
+    const model = models.video.models.find(m => m.key === 'kling_motion');
+    const motionCost = state.motionCost;
 
-    if (!(await userBalance.hasTokens(userId, model.cost))) {
-      await showInsufficientTokens(ctx, model.cost);
+    if (!(await userBalance.hasTokens(userId, motionCost))) {
+      await showInsufficientTokens(ctx, motionCost);
       userState.delete(userId);
       return;
     }
 
     const videoFile = ctx.message.video;
     const videoUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${(await ctx.telegram.getFile(videoFile.file_id)).file_path}`;
-    
-    const generationTime = modelKey === 'kling_motion_minimal' ? '1-2 хвилини' : '2-4 хвилини';
-    const statusMsg = await ctx.reply(
-      `🔥 Генерую відео через Kling Motion Control...\n\n` +
-      `📷 Фото: отримано\n` +
-      `🎥 Референсне відео: отримано\n\n` +
-      `⏱️ Це може зайняти ${generationTime}\n` +
-      `💡 Переношу рухи з відео на персонажа...`
-    );
 
-    try {
-      const result = await replicate.generateVideoWithKlingMotion(
-        state.imageUrl,
-        videoUrl,
-        modelKey,  // передаємо тип моделі
-        ctx.message.caption || '',
-        true // keep_original_sound
-      );
+    userState.set(userId, {
+      ...state,
+      videoUrl: videoUrl,
+      step: 'ask_prompt'
+    });
 
-      if (!result.success) {
-        await adminNotifier.notifyAdmin(
-          bot, 
-          new Error(result.error), 
-          { 
-            userId, 
-            username: ctx.from.username, 
-            action: `${modelKey}_generation`,
-            model: model.name
-          }
-        );
-        await ctx.telegram.editMessageText(
-          ctx.chat.id, 
-          statusMsg.message_id, 
-          null, 
-          `❌ Помилка генерації.\n\nСпробуйте ще раз або оберіть іншу модель.`
-        );
-        userState.delete(userId);
-        return;
-      }
+    const maxDuration = state.orientation === 'image' ? 10 : 30;
 
-      await userBalance.deductTokens(
-        userId, 
-        model.cost, 
-        `${model.name} generation`, 
-        { 
-          modelKey: modelKey,
-          modelName: model.name,
-          apiCost: model.apiCost 
-        }
-      );
-      
-      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      await ctx.replyWithVideo(
-        { url: result.videoUrl }, 
-        {
-          caption: `${model.name}\n\n🔥 Motion Transfer завершено!\n\n💰 Витрачено: ${model.cost}⚡`,
-          ...keyboard.createBackButton('video_menu')
-        }
-      );
-      
-      userState.delete(userId);
-
-    } catch (error) {
-      console.error(`${modelKey} generation failed:`, error);
-      await adminNotifier.notifyAdmin(bot, error, { userId, username: ctx.from.username, action: `${modelKey}_generation`, model: model.name });
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Помилка генерації відео. Спробуйте ще раз.');
-      userState.delete(userId);
-    }
-  } else {
     await ctx.reply(
-      '⚠️ Для використання відео:\n\n' +
-      '1. Виберіть модель 🔥 Kling Motion Control\n' +
-      '2. Надішліть фото персонажа\n' +
-      '3. Надішліть відео з рухами\n\n' +
-      'Або оберіть іншу модель для генерації відео 👇',
-      keyboard.createBackButton('video_menu')
+      `✅ <b>Відео з рухами завантажено!</b>\n\n` +
+      `🔥 <b>Kling Motion Control</b>\n\n` +
+      `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+      `🎭 Орієнтація: <b>${state.orientation === 'image' ? '📷 Image' : '🎥 Video'}</b>\n` +
+      `📷 Фото: ✅\n` +
+      `🎥 Відео: ✅\n` +
+      `💰 Вартість: <b>${motionCost}⚡</b>\n\n` +
+      `📝 <b>Крок 6: Промпт (опціонально)</b>\n\n` +
+      `Опишіть додаткові деталі або натисніть "Генерувати".`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🚀 Генерувати без промпту', 'motion_generate_now')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
     );
+    return;
   }
+
+  // Якщо відео не для Kling Motion - показуємо інструкцію
+  await ctx.reply(
+    '⚠️ Для використання відео:\n\n' +
+    '1. Виберіть модель 🔥 Kling Motion Control\n' +
+    '2. Оберіть режим та налаштування\n' +
+    '3. Надішліть фото персонажа\n' +
+    '4. Надішліть відео з рухами\n\n' +
+    'Або оберіть іншу модель для генерації відео 👇',
+    keyboard.createBackButton('video_menu')
+  );
 });
 
 // ==================== UNIFIED HANDLERS ====================
@@ -2123,6 +3867,20 @@ async function handleMediaGroup(ctx, group) {
     return;
   }
 
+  // ✅ Перевіряємо чи є накопичений промпт
+  const pendingPrompt = pendingPrompts.get(userId);
+  let finalPrompt = caption || '';
+
+  if (pendingPrompt && MODELS_WITH_LONG_PROMPTS.includes(currentModel)) {
+    finalPrompt = finalPrompt ? pendingPrompt.prompt + '\n' + finalPrompt : pendingPrompt.prompt;
+    pendingPrompts.delete(userId);
+    console.log(`📝 Using accumulated prompt for album: ${finalPrompt.length} chars`);
+  }
+
+  if (!finalPrompt) {
+    finalPrompt = 'transform these images, masterpiece quality, highly detailed';
+  }
+
   // ✅ Перевірити чи модель підтримує багато зображень
   if (model.maxImages && model.maxImages > 1) {
     // ✅ ЯК ЩО ЦЕ МОДЕЛЬ З ASPECT RATIO - ПОКАЗИТИ МЕНЮ ВИБОРУ
@@ -2132,7 +3890,7 @@ async function handleMediaGroup(ctx, group) {
         model: currentModel,
         step: 'waiting_aspect_ratio',
         imageUrl: photos, // передаємо масив фото
-        prompt: caption || 'transform these images, masterpiece quality, highly detailed'
+        prompt: finalPrompt
       });
 
       // Дозволені aspect ratio для різних моделей
@@ -2177,7 +3935,7 @@ async function handleMediaGroup(ctx, group) {
         { parse_mode: 'HTML', ...aspectRatioMenu }
       );
     } else {
-      await handleImageGeneration(ctx, caption, currentModel, photos);
+      await handleImageGeneration(ctx, finalPrompt, currentModel, photos);
     }
   } else {
     await ctx.reply(
@@ -2185,8 +3943,7 @@ async function handleMediaGroup(ctx, group) {
       `⚠️ ${model?.name || 'Ця модель'} підтримує тільки 1 зображення.\n` +
       `Обробляю перше фото...`
     );
-    const prompt = caption || 'transform this image, best quality, highly detailed';
-    await handleImageGeneration(ctx, prompt, currentModel, photos[0]);
+    await handleImageGeneration(ctx, finalPrompt, currentModel, photos[0]);
   }
 }
 
@@ -2263,6 +4020,11 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
 
     await userBalance.deductTokens(userId, model.cost, `${model.name} generation`, { modelKey, modelName: model.name, apiCost: model.apiCost, prompt, hasImage: !!imageInput });
 
+    // ✅ Записуємо Trial usage для лімітованих моделей
+    if (TRIAL_RESTRICTIONS.limitedModels[modelKey]) {
+      recordTrialUsage(userId, modelKey);
+    }
+
     // ✅ Перевірити розмір файлу ПЕРЕД видаленням statusMsg
     const fileSize = await getFileSize(result.imageUrl);
     const maxPhotoSize = 10 * 1024 * 1024; // 10MB
@@ -2285,11 +4047,14 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         `📊 <b>Розмір:</b> ${fileSizeMB} MB\n` +
         `⚠️ Файл завеликий для відправки в Telegram\n\n` +
         `🔗 <a href="${result.imageUrl}">📥 Натисніть тут щоб завантажити PNG файл</a>\n\n` +
-        `💡 <b>Як завантажити:</b>\n` +
-        `• Натисніть на посилання вище ☝️\n` +
-        `• Файл автоматично завантажиться\n` +
-        `• Відкрийте його на телефоні/комп'ютері\n\n` +
-        `⏰ Посилання активне 1 годину\n` +
+        `💡 <b>⚠️ ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
+        `Посилання активне тільки <b>1 ГОДИНУ</b>!\n` +
+        `Після цього файл буде видалений.\n\n` +
+        `📥 <b>Як завантажити:</b>\n` +
+        `1️⃣ Натисніть на посилання вище\n` +
+        `2️⃣ Файл завантажиться\n` +
+        `3️⃣ Збережіть на телефон/комп'ютер\n\n` +
+        `💾 <b>Порада:</b> Завжди зберігайте генерації одразу, щоб не втратити!\n\n` +
         `💰 Витрачено: ${model.cost}⚡`,
         {
           parse_mode: 'HTML',
@@ -2299,7 +4064,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       );
       
     } else {
-      // 📷 Надіслати як фото (<10MB)
+      // 📷 Надіслати як фото (<10MB) - Telegram збереже на своїх серверах
       try {
         await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       } catch (e) {
@@ -2307,7 +4072,8 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       }
 
       await ctx.replyWithPhoto({ url: result.imageUrl }, {
-        caption: `${model.name} (${mode})\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
+        caption: `${model.name} (${mode})\n\n📝 Промпт: ${prompt.substring(0, 800)}${prompt.length > 800 ? '...' : ''}\n\n💰 Витрачено: ${model.cost}⚡`,
+        parse_mode: 'HTML',
         ...keyboard.createBackButton('design_menu')
       });
     }
@@ -2376,8 +4142,23 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
 
     await userBalance.deductTokens(userId, model.cost, `${model.name} generation`, { modelKey, modelName: model.name, apiCost: model.apiCost, prompt, hasImage: !!imageUrl });
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+
+    // ✅ Надіслати попередження ПЕРЕД видео
+    await ctx.reply(
+      `✅ <b>${model.name} готово!</b>\n\n` +
+      `⚠️ <b>ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
+      `Посилання на відео активне тільки <b>1 ГОДИНУ</b>!\n\n` +
+      `📝 Промпт: ${prompt}\n\n` +
+      `💾 <b>ЗБЕРЕЖІТЬ на пристрій перед закриттям:</b>\n` +
+      `1️⃣ Натисніть на відео (☝️ див. нижче)\n` +
+      `2️⃣ Натисніть меню ⋮\n` +
+      `3️⃣ Оберіть "Зберегти" або "Завантажити"\n\n` +
+      `💰 Витрачено: ${model.cost}⚡`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+
     await ctx.replyWithVideo({ url: result.videoUrl }, {
-      caption: `${model.name}\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
+      caption: `${model.name}\n\n📝 Промпт: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
       ...keyboard.createBackButton('video_menu')
     });
 
@@ -2470,7 +4251,7 @@ async function handleMidjourneyGeneration(ctx, prompt) {
       const user = await userBalance.getUser(userId, ctx.from);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       await ctx.replyWithPhoto({ url: result.imageUrl }, {
-        caption: `✅ Готово!\n\nPrompt: ${prompt}\n\n💰 Використано: ${model.cost}⚡\n💰 Залишок: ${user.tokens.toFixed(2)}⚡`,
+        caption: `✅ Готово!\n\nPrompt: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Використано: ${model.cost}⚡\n💰 Залишок: ${user.tokens.toFixed(2)}⚡`,
         ...keyboard.createGenerationActionsMenu(result.taskId)
       });
     } else {
@@ -2507,7 +4288,7 @@ async function handleClarityUpscaler(ctx) {
     await userBalance.deductTokens(userId, model.cost, 'Clarity Upscaler', { modelKey: 'clarity', modelName: model.name, apiCost: model.apiCost, prompt });
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
     await ctx.replyWithPhoto({ url: result.imageUrl }, {
-      caption: `🔮 Clarity Upscaler\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
+      caption: `🔮 Clarity Upscaler\n\n📝 Промпт: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
       ...keyboard.createBackButton('design_menu')
     });
 
@@ -2544,8 +4325,23 @@ async function handleSunoGeneration(ctx, text) {
 
     await userBalance.deductTokens(userId, model.cost, 'Suno audio generation', { modelKey: 'suno', modelName: model.name, apiCost: model.apiCost, text });
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+
+    // ✅ Попередження про видалення ПЕРЕД аудіо
+    await ctx.reply(
+      `✅ <b>Аудіо готово!</b>\n\n` +
+      `⚠️ <b>ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
+      `Посилання активне тільки <b>1 ГОДИНУ</b>!\n\n` +
+      `📝 Текст: "${text}"\n\n` +
+      `💾 <b>Як зберегти аудіо:</b>\n` +
+      `1️⃣ Натисніть на аудіо (☝️ див. нижче)\n` +
+      `2️⃣ Натисніть меню ⋮\n` +
+      `3️⃣ Оберіть "Зберегти" або "Завантажити"\n\n` +
+      `💰 Витрачено: ${model.cost}⚡`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('audio_menu') }
+    );
+
     await ctx.replyWithAudio({ url: result.audioUrl }, {
-      caption: `🎵 Suno AI Bark\n\n📝 Текст: ${text}\n\n💰 Витрачено: ${model.cost}⚡`,
+      caption: `🎵 Suno AI Bark\n\n📝 Текст: ${text}\n⏰ Видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
       ...keyboard.createBackButton('audio_menu')
     });
 

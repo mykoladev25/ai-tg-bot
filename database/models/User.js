@@ -14,6 +14,15 @@ const userSchema = new mongoose.Schema({
   totalTokensSpent: { type: Number, default: 0 },
   totalTokensEarned: { type: Number, default: 75 },  // Включає початковий бонус
   
+  // Trial usage tracking (для обмеження дорогих генерацій)
+  trialUsage: {
+    nano_banana_4k: { type: Number, default: 0 },
+    kling: { type: Number, default: 0 },
+    runway_turbo: { type: Number, default: 0 },
+    veo: { type: Number, default: 0 },
+    kling_motion: { type: Number, default: 0 }
+  },
+
   subscription: {
     type: { type: String, enum: ['TRIAL', 'STARTER', 'BASIC', 'PRO', 'PREMIUM', null] },
     startedAt: Date,

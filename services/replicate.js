@@ -356,52 +356,57 @@ async function generateWithClarityUpscaler(imageUrl, prompt = '') {
 // ==================== VIDEO GENERATION ====================
 
 /**
- * Генерація відео через Kling
+ * Генерація відео через Kling v2.5 Turbo Pro
+ * Підтримує:
+ * - start_image: перший кадр відео
+ * - end_image: останній кадр відео (для інтерполяції)
+ * - duration: 5 або 10 секунд
+ * - aspect_ratio: 16:9 або 9:16 (ігнорується якщо є start_image)
  */
-async function generateVideoWithKling(prompt, imageUrl = null) {
+async function generateVideoWithKling(prompt, startImage = null, endImage = null, duration = 5, aspectRatio = '16:9') {
   try {
-    console.log('Starting Kling video generation:', prompt);
+    console.log('Starting Kling v2.5 Turbo Pro video generation:', {
+      prompt: prompt.substring(0, 100),
+      duration,
+      aspectRatio,
+      hasStartImage: !!startImage,
+      hasEndImage: !!endImage
+    });
 
     const input = {
       prompt: prompt,
-      duration: 5,
-      aspect_ratio: '16:9'
+      duration: duration  // 5 або 10 секунд
     };
 
-    if (imageUrl) {
-      input.image = imageUrl;
-      input.mode = 'image-to-video';
+    // Додаємо start_image якщо є
+    if (startImage) {
+      input.start_image = startImage;
+      console.log('✅ Adding start_image (first frame)');
+    } else {
+      // aspect_ratio ігнорується якщо є start_image
+      input.aspect_ratio = aspectRatio;
     }
 
-    const response = await axios.post(
-      `${REPLICATE_API}/predictions`,
-      {
-        version: 'kwaivgi/kling-v2.5-turbo-pro',
-        input: input
-      },
-      {
-        headers: {
-          'Authorization': `Token ${process.env.REPLICATE_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    // Додаємо end_image якщо є (для інтерполяції)
+    if (endImage) {
+      input.end_image = endImage;
+      console.log('✅ Adding end_image (last frame) for interpolation');
+    }
 
-    const predictionId = response.data.id;
-    console.log('Kling prediction created:', predictionId);
+    console.log('🎬 Kling input:', input);
 
-    const result = await pollPrediction(predictionId, 180, 5000, 'Kling');
+    const output = await replicate.run("kwaivgi/kling-v2.5-turbo-pro", { input });
 
     return {
       success: true,
-      videoUrl: Array.isArray(result.output) ? result.output[0] : result.output
+      videoUrl: Array.isArray(output) ? output[0] : output
     };
 
   } catch (error) {
-    console.error('Kling API Error:', error.response?.data || error.message);
+    console.error('Kling API Error:', error);
     return {
       success: false,
-      error: error.response?.data?.detail || error.message
+      error: error.message
     };
   }
 }
@@ -521,27 +526,36 @@ async function generateWithSuno(text, voice = 'announcer') {
  * @param {string} videoUrl - URL референсного відео
  * @param {string} modelKey - тип моделі: 'kling_motion' або 'kling_motion_minimal'
  * @param {string} prompt - додатковий промпт
+/**
+ * Генерація відео через Kling Motion Control v2.6
+ * @param {string} imageUrl - URL референсного зображення
+ * @param {string} videoUrl - URL референсного відео з рухами
+ * @param {string} mode - "std" (Standard) або "pro" (Professional)
+ * @param {string} characterOrientation - "image" (до 10с) або "video" (до 30с)
+ * @param {string} prompt - текстовий опис (опціонально)
  * @param {boolean} keepOriginalSound - зберігати звук оригінального відео
  */
-async function generateVideoWithKlingMotion(imageUrl, videoUrl, modelKey = 'kling_motion', prompt = '', keepOriginalSound = true) {
+async function generateVideoWithKlingMotion(imageUrl, videoUrl, mode = 'pro', characterOrientation = 'image', prompt = '', keepOriginalSound = false) {
   try {
     if (!imageUrl || !videoUrl) {
       throw new Error('Both image and reference video are required for Kling Motion Control');
     }
 
-    // Встановлюємо параметри залежно від типу моделі
-    const isDuration5 = modelKey === 'kling_motion_minimal';
     const input = {
-      mode: "pro",
+      mode: mode,                           // "std" або "pro"
       image: imageUrl,
       video: videoUrl,
-      prompt: prompt,
-      duration: isDuration5 ? 5 : 10,                    // 5s для minimal, 10s для full
-      keep_original_sound: keepOriginalSound,
-      character_orientation: isDuration5 ? "image" : "video"  // "image" для minimal, "video" для full
+      character_orientation: characterOrientation,  // "image" (до 10с) або "video" (до 30с)
+      keep_original_sound: keepOriginalSound
     };
 
-    console.log(`Kling Motion Control: ${modelKey} - duration: ${input.duration}, orientation: ${input.character_orientation}`);
+    // Додаємо prompt якщо є
+    if (prompt && prompt.trim()) {
+      input.prompt = prompt;
+    }
+
+    console.log(`🎬 Kling Motion Control: mode=${mode}, orientation=${characterOrientation}, sound=${keepOriginalSound}`);
+    console.log(`📝 Prompt: ${prompt || '(none)'}`);
 
     const output = await replicate.run(
       "kwaivgi/kling-v2.6-motion-control",
@@ -562,6 +576,91 @@ async function generateVideoWithKlingMotion(imageUrl, videoUrl, modelKey = 'klin
   }
 }
 
+/**
+ * Генерація відео через Google Veo 3.1
+ * Підтримує:
+ * - startImage: перший кадр відео (image-to-video)
+ * - reference_images: до 3 зображень для консистентності (тільки 16:9)
+ * - last_frame: кінцевий кадр для інтерполяції
+ * - duration: 4, 6 або 8 секунд
+ * - generate_audio: true/false
+ */
+async function generateVideoWithVeo(prompt, referenceImages = [], lastFrame = null, aspectRatio = '16:9', duration = 8, negativePrompt = '', startImage = null, generateAudio = true) {
+  try {
+    console.log(`Starting Veo 3.1 video generation:`, {
+      prompt: prompt.substring(0, 100),
+      aspectRatio,
+      duration,
+      generateAudio,
+      referenceCount: referenceImages.length,
+      hasLastFrame: !!lastFrame,
+      hasStartImage: !!startImage
+    });
+
+    const input = {
+      prompt: prompt,
+      aspect_ratio: aspectRatio,  // "16:9" або "9:16"
+      duration: Math.min(Math.max(duration, 4), 8),  // 4, 6 або 8 секунд
+      resolution: '1080p',
+      generate_audio: generateAudio  // true/false
+    };
+
+    // Додаємо start image (перший кадр) якщо є
+    if (startImage) {
+      input.image = startImage;
+      console.log(`✅ Adding start image (first frame) for image-to-video`);
+    }
+
+    // Додаємо reference images якщо вони є (тільки для 16:9!)
+    if (referenceImages && referenceImages.length > 0 && aspectRatio === '16:9') {
+      input.reference_images = referenceImages.slice(0, 3);  // Max 3 reference images
+      console.log(`✅ Adding ${input.reference_images.length} reference image(s) for subject-consistent generation`);
+    }
+
+    // Додаємо last_frame якщо немає reference images
+    // (last_frame ігнорується якщо є reference images)
+    if (!input.reference_images || input.reference_images.length === 0) {
+      if (lastFrame) {
+        input.last_frame = lastFrame;
+        console.log(`✅ Adding last_frame for interpolation`);
+      }
+    }
+
+    // Додаємо negative prompt якщо є
+    if (negativePrompt && negativePrompt.trim()) {
+      input.negative_prompt = negativePrompt;
+    }
+
+    console.log(`🎬 Veo 3.1 input:`, {
+      prompt_length: input.prompt.length,
+      aspect_ratio: input.aspect_ratio,
+      duration: input.duration,
+      generate_audio: input.generate_audio,
+      has_start_image: !!input.image,
+      reference_images: input.reference_images?.length || 0,
+      has_last_frame: !!input.last_frame,
+      has_negative_prompt: !!input.negative_prompt
+    });
+
+    const output = await replicate.run(
+      "google/veo-3.1",
+      { input }
+    );
+
+    return {
+      success: true,
+      videoUrl: Array.isArray(output) ? output[0] : output
+    };
+
+  } catch (error) {
+    console.error('Veo 3.1 API Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 module.exports = {
   generateWithFlux,
   generateWithStableDiffusion,
@@ -573,5 +672,6 @@ module.exports = {
   generateVideoWithRunwayTurbo,
   generateVideoWithKling,
   generateVideoWithKlingMotion,
-  generateVideoWithRunway
+  generateVideoWithRunway,
+  generateVideoWithVeo
 };
