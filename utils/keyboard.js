@@ -181,15 +181,18 @@ function createSubscriptionsMenu() {
   const paidPlans = ['starter', 'basic', 'pro', 'premium'];
   const emojis = { starter: '🚀', basic: '💎', pro: '🔥', premium: '👑' };
 
+  // Показуємо tokensLiqPay (більше токенів за картку) на кнопках
+  const getTokens = (plan) => subscriptions[plan].tokensLiqPay || subscriptions[plan].tokens;
+
   // По 2 кнопки в ряд
   const buttons = [
     [
-      Markup.button.callback(`${emojis.starter} ${subscriptions.starter.tokens}⚡`, 'sub_starter'),
-      Markup.button.callback(`${emojis.basic} ${subscriptions.basic.tokens}⚡`, 'sub_basic')
+      Markup.button.callback(`${emojis.starter} ${getTokens('starter')}⚡`, 'sub_starter'),
+      Markup.button.callback(`${emojis.basic} ${getTokens('basic')}⚡`, 'sub_basic')
     ],
     [
-      Markup.button.callback(`${emojis.pro} ${subscriptions.pro.tokens}⚡`, 'sub_pro'),
-      Markup.button.callback(`${emojis.premium} ${subscriptions.premium.tokens}⚡`, 'sub_premium')
+      Markup.button.callback(`${emojis.pro} ${getTokens('pro')}⚡`, 'sub_pro'),
+      Markup.button.callback(`${emojis.premium} ${getTokens('premium')}⚡`, 'sub_premium')
     ],
     [Markup.button.callback('← Назад', 'main_menu')]
   ];

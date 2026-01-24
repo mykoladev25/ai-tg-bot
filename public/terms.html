@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Угода користувача - neuro.lab.ai</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e8e8e8;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 30px;
+            backdrop-filter: blur(10px);
+        }
+        h1 {
+            color: #00d4ff;
+            margin-bottom: 20px;
+            font-size: 28px;
+            text-align: center;
+        }
+        h2 {
+            color: #00d4ff;
+            margin: 25px 0 15px;
+            font-size: 20px;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.3);
+            padding-bottom: 10px;
+        }
+        h3 {
+            color: #ffd700;
+            margin: 20px 0 10px;
+            font-size: 16px;
+        }
+        p {
+            margin-bottom: 15px;
+            color: #c8c8c8;
+        }
+        ul, ol {
+            margin: 15px 0;
+            padding-left: 25px;
+        }
+        li {
+            margin-bottom: 8px;
+            color: #c8c8c8;
+        }
+        .highlight {
+            background: rgba(0, 212, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border-left: 3px solid #00d4ff;
+        }
+        .warning {
+            background: rgba(255, 193, 7, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border-left: 3px solid #ffc107;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        th {
+            background: rgba(0, 212, 255, 0.2);
+            color: #00d4ff;
+            font-weight: 600;
+        }
+        tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .price {
+            color: #4ade80;
+            font-weight: 600;
+        }
+        .tokens {
+            color: #ffd700;
+            font-weight: 600;
+        }
+        .back-btn {
+            display: inline-block;
+            margin-top: 30px;
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 25px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .back-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 212, 255, 0.4);
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: #888;
+            font-size: 14px;
+        }
+        .date {
+            color: #888;
+            font-size: 14px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📋 Угода користувача</h1>
+        <p class="date">Остання редакція: 24 січня 2026 року</p>
+
+        <h2>1. Загальні положення</h2>
+        <p>Ця Угода регулює відносини між ФОП Черевань А.О. (далі — «Продавець») та користувачем Telegram-бота <strong>neuro.lab.ai</strong> (@neuro_lab_ai_bot) (далі — «Користувач»).</p>
+        <p>Використовуючи бота, Користувач підтверджує, що ознайомився з цією Угодою та приймає її умови в повному обсязі.</p>
+
+        <h2>2. Опис послуг</h2>
+        <p>Бот <strong>neuro.lab.ai</strong> надає доступ до AI-генерації контенту:</p>
+        <ul>
+            <li><strong>Генерація зображень</strong> — створення картинок за текстовим описом</li>
+            <li><strong>Генерація відео</strong> — створення відео за текстом або зображенням</li>
+            <li><strong>AI-асистент (Claude)</strong> — текстові відповіді, аналіз зображень</li>
+        </ul>
+
+        <h2>3. Вартість послуг</h2>
+
+        <h3>3.1. Пакети токенів (LiqPay/WayForPay — картка)</h3>
+        <table>
+            <tr>
+                <th>Пакет</th>
+                <th>Ціна</th>
+                <th>Токени</th>
+                <th>Ціна за токен</th>
+            </tr>
+            <tr>
+                <td>🚀 STARTER</td>
+                <td class="price">$7</td>
+                <td class="tokens">260⚡</td>
+                <td>$0.0269</td>
+            </tr>
+            <tr>
+                <td>💎 BASIC</td>
+                <td class="price">$20</td>
+                <td class="tokens">870⚡</td>
+                <td>$0.0230</td>
+            </tr>
+            <tr>
+                <td>🔥 PRO</td>
+                <td class="price">$45</td>
+                <td class="tokens">2100⚡</td>
+                <td>$0.0214</td>
+            </tr>
+            <tr>
+                <td>👑 PREMIUM</td>
+                <td class="price">$110</td>
+                <td class="tokens">5700⚡</td>
+                <td>$0.0193</td>
+            </tr>
+        </table>
+
+        <h3>3.2. Пакети токенів (Telegram Stars)</h3>
+        <table>
+            <tr>
+                <th>Пакет</th>
+                <th>Ціна</th>
+                <th>Токени</th>
+            </tr>
+            <tr>
+                <td>🚀 STARTER</td>
+                <td class="price">299⭐</td>
+                <td class="tokens">186⚡</td>
+            </tr>
+            <tr>
+                <td>💎 BASIC</td>
+                <td class="price">899⭐</td>
+                <td class="tokens">620⚡</td>
+            </tr>
+            <tr>
+                <td>🔥 PRO</td>
+                <td class="price">1999⭐</td>
+                <td class="tokens">1500⚡</td>
+            </tr>
+            <tr>
+                <td>👑 PREMIUM</td>
+                <td class="price">4999⭐</td>
+                <td class="tokens">4080⚡</td>
+            </tr>
+        </table>
+
+        <div class="highlight">
+            <strong>💡 Чим більший пакет — тим вигідніше!</strong><br>
+            Оплата карткою (LiqPay/WayForPay) дає більше токенів через меншу комісію платіжної системи.
+        </div>
+
+        <h3>3.3. Вартість генерацій</h3>
+        <table>
+            <tr>
+                <th>Послуга</th>
+                <th>Вартість</th>
+            </tr>
+            <tr>
+                <td>🌀 Stable Diffusion (зображення)</td>
+                <td class="tokens">1⚡</td>
+            </tr>
+            <tr>
+                <td>🌊 Seedream 2K</td>
+                <td class="tokens">3⚡</td>
+            </tr>
+            <tr>
+                <td>🌊 Seedream 4K</td>
+                <td class="tokens">6⚡</td>
+            </tr>
+            <tr>
+                <td>🍌 Nano Banana PRO 2K</td>
+                <td class="tokens">14⚡</td>
+            </tr>
+            <tr>
+                <td>🍌🍌 Nano Banana PRO 4K</td>
+                <td class="tokens">27⚡</td>
+            </tr>
+            <tr>
+                <td>🎯 Ideogram v3.0</td>
+                <td class="tokens">3⚡</td>
+            </tr>
+            <tr>
+                <td>🔮 Clarity Upscaler</td>
+                <td class="tokens">2⚡</td>
+            </tr>
+            <tr>
+                <td>🎭 Kling v2.5 (5 сек)</td>
+                <td class="tokens">30⚡</td>
+            </tr>
+            <tr>
+                <td>🎭 Kling v2.5 (10 сек)</td>
+                <td class="tokens">60⚡</td>
+            </tr>
+            <tr>
+                <td>🔥 Kling Motion Control</td>
+                <td class="tokens">35-140⚡</td>
+            </tr>
+            <tr>
+                <td>🌟 Google Veo 3.1 (з аудіо)</td>
+                <td class="tokens">112-336⚡</td>
+            </tr>
+            <tr>
+                <td>🌟 Google Veo 3.1 (без аудіо)</td>
+                <td class="tokens">56-168⚡</td>
+            </tr>
+            <tr>
+                <td>✍️ Claude AI (текст)</td>
+                <td class="tokens">1⚡</td>
+            </tr>
+        </table>
+
+        <h2>4. Умови оплати та повернення</h2>
+        <div class="warning">
+            <strong>⚠️ Важливо:</strong>
+            <ul>
+                <li>Токени НЕ згорають і діють безстроково</li>
+                <li>Повернення коштів за придбані токени <strong>не передбачено</strong></li>
+                <li>Повернення токенів за виконані генерації <strong>не здійснюється</strong></li>
+                <li>Результат AI-генерації може відрізнятися від очікувань — це особливість технології</li>
+            </ul>
+        </div>
+
+        <h2>5. Права та обов'язки сторін</h2>
+        <h3>Користувач зобов'язується:</h3>
+        <ul>
+            <li>Не використовувати бота для створення незаконного контенту</li>
+            <li>Не намагатися обійти обмеження системи</li>
+            <li>Не передавати доступ до свого акаунту третім особам</li>
+        </ul>
+
+        <h3>Продавець зобов'язується:</h3>
+        <ul>
+            <li>Забезпечувати працездатність сервісу</li>
+            <li>Нараховувати токени після успішної оплати</li>
+            <li>Надавати технічну підтримку</li>
+        </ul>
+
+        <h2>6. Обмеження відповідальності</h2>
+        <p>Продавець не несе відповідальності за:</p>
+        <ul>
+            <li>Якість та відповідність AI-генерацій очікуванням користувача</li>
+            <li>Тимчасову недоступність сторонніх AI-сервісів (Replicate, Google тощо)</li>
+            <li>Втрату даних через дії користувача</li>
+        </ul>
+
+        <h2>7. Контактна інформація</h2>
+        <p><strong>ФОП Черевань А.О.</strong></p>
+        <ul>
+            <li>📧 Email: cherevan.n.s@gmail.com</li>
+            <li>📱 Телефон: +34605260851</li>
+            <li>📍 Адреса: м. Полтава, вул. Європейська 20, Україна</li>
+            <li>🌐 Сайт: <a href="https://neurolab.fun" style="color: #00d4ff;">neurolab.fun</a></li>
+        </ul>
+
+        <div class="footer">
+            <a href="https://t.me/neuro_lab_ai_bot" class="back-btn">🤖 Повернутись в бот</a>
+            <p style="margin-top: 20px;">© 2026 neuro.lab.ai — ФОП Черевань А.О.</p>
+        </div>
+    </div>
+</body>
+</html>
+

@@ -256,15 +256,16 @@ module.exports = {
             ]
         },
 
-        // Target: ~1.35 грн/⚡  => 299 / 1.35 ≈ 221.48
         starter: {
             name: 'STARTER',
-            tokens: 220,
+            // Stars: ~260 * 0.714 = 186
+            tokens: 186,
             tokensLiqPay: 260,
             price: 299,
             priceUSD: 7,
             features: [
-                '🚀 220⚡ токенів',
+                '🚀 186⚡ токенів (Telegram Stars)',
+                '🚀 260⚡ токенів (LiqPay)',
                 '💎 Доступ до всіх моделей',
                 '⏰ Токени НЕ згорають',
                 '✨ Комбінуйте як завгодно!',
@@ -272,15 +273,16 @@ module.exports = {
             ]
         },
 
-        // Target: ~1.25 грн/⚡  => 899 / 1.25 ≈ 719.2
         basic: {
             name: 'BASIC',
-            tokens: 720,
+            // Stars: ~870 * 0.714 = 621
+            tokens: 620,
             tokensLiqPay: 870,
             price: 899,
             priceUSD: 20,
             features: [
-                '💎 720⚡ токенів',
+                '💎 620⚡ токенів (Telegram Stars)',
+                '💎 870⚡ токенів (LiqPay)',
                 '🎨 Для активних користувачів',
                 '⏰ Токени НЕ згорають',
                 '✨ Комбінуйте як завгодно!',
@@ -288,15 +290,16 @@ module.exports = {
             ]
         },
 
-        // Target: ~1.15 грн/⚡  => 1999 / 1.15 ≈ 1738.26
         pro: {
             name: 'PRO',
-            tokens: 1740,
+            // Stars: ~2100 * 0.714 = 1500
+            tokens: 1500,
             tokensLiqPay: 2100,
             price: 1999,
             priceUSD: 45,
             features: [
-                '🔥 1740⚡ токенів',
+                '🔥 1500⚡ токенів (Telegram Stars)',
+                '🔥 2100⚡ токенів (LiqPay)',
                 '🚀 Для професіоналів',
                 '⏰ Токени НЕ згорають',
                 '⚡ Найкраще співвідношення',
@@ -304,15 +307,16 @@ module.exports = {
             ]
         },
 
-        // Target: ~1.05 грн/⚡  => 4999 / 1.05 ≈ 4760.95
         premium: {
             name: 'PREMIUM',
-            tokens: 4760,
+            // Stars: ~5700 * 0.714 = 4071
+            tokens: 4080,
             tokensLiqPay: 5700,
             price: 4999,
             priceUSD: 110,
             features: [
-                '👑 4760⚡ токенів',
+                '👑 4080⚡ токенів (Telegram Stars)',
+                '👑 5700⚡ токенів (LiqPay)',
                 '💫 Максимум можливостей',
                 '⏰ Токени НЕ згорають',
                 '👑 VIP підтримка 24/7',
