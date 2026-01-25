@@ -2728,6 +2728,7 @@ bot.action('motion_generate_now', async (ctx) => {
 async function generateKlingMotionVideo(ctx, state) {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
   const model = models.video.models.find(m => m.key === 'kling_motion');
 
   if (!model) {
@@ -2755,69 +2756,81 @@ async function generateKlingMotionVideo(ctx, state) {
     `⏱️ Макс: ${maxDuration} сек\n` +
     `🔊 Звук: ${state.keepOriginalSound ? 'Зберегти' : 'Без'}\n\n` +
     `📝 Промпт: "${state.prompt?.substring(0, 100) || '(без промпту)'}"\n\n` +
-    `⏱️ Це може зайняти 2-5 хвилин...`,
+    `⏱️ Це може зайняти 2-5 хвилин...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
     { parse_mode: 'HTML' }
   );
 
-  try {
-    const result = await replicate.generateVideoWithKlingMotion(
-      state.imageUrl,
-      state.videoUrl,
-      state.mode,
-      state.orientation,
-      state.prompt || '',
-      state.keepOriginalSound
-    );
+  // ✅ ОЧИЩУЄМО СТАН ОДРАЗУ - щоб користувач міг працювати з ботом далі
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
 
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId, username, action: 'kling_motion_generation', model: model.name
-      });
-      await ctx.telegram.editMessageText(
-        ctx.chat.id, statusMsg.message_id, null,
-        `❌ Помилка генерації Kling Motion.\n\n${result.error}\n\nСпробуйте ще раз.`
+  // ✅ ЗАПУСКАЄМО ГЕНЕРАЦІЮ У ФОНІ
+  const generationData = { ...state };
+
+  (async () => {
+    try {
+      const result = await replicate.generateVideoWithKlingMotion(
+        generationData.imageUrl,
+        generationData.videoUrl,
+        generationData.mode,
+        generationData.orientation,
+        generationData.prompt || '',
+        generationData.keepOriginalSound
       );
-      userState.delete(userId);
-      return;
-    }
 
-    await userBalance.deductTokens(userId, motionCost, `${model.name} generation`, {
-      modelKey: 'kling_motion', modelName: model.name, apiCost: apiCost,
-      mode: state.mode, orientation: state.orientation,
-      keepOriginalSound: state.keepOriginalSound
-    });
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-
-    await ctx.reply(
-      `✅ <b>Kling Motion готово!</b>\n\n` +
-      `⚠️ <b>ЗАВАНТАЖТЕ ОДРАЗУ!</b> Посилання активне 1 ГОДИНУ!\n\n` +
-      `⚙️ ${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'} | ` +
-      `${state.orientation === 'image' ? '📷' : '🎥'} | ` +
-      `${state.keepOriginalSound ? '🔊' : '🔇'}\n\n` +
-      `💰 Витрачено: ${motionCost}⚡`,
-      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
-    );
-
-    await ctx.replyWithVideo(
-      { url: result.videoUrl },
-      {
-        caption: `🔥 Kling Motion\n\n⚙️ ${state.mode.toUpperCase()} | ${state.orientation} | ${state.keepOriginalSound ? '🔊' : '🔇'}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${motionCost}⚡`,
-        ...keyboard.createBackButton('video_menu')
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId, username, action: 'kling_motion_generation', model: model.name
+        });
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації Kling Motion.\n\n${result.error}\n\nСпробуйте ще раз.`
+        );
+        return;
       }
-    );
 
-    userState.delete(userId);
+      await userBalance.deductTokens(userId, motionCost, `${model.name} generation`, {
+        modelKey: 'kling_motion', modelName: model.name, apiCost: apiCost,
+        mode: generationData.mode, orientation: generationData.orientation,
+        keepOriginalSound: generationData.keepOriginalSound
+      });
 
-  } catch (error) {
-    console.error('Kling Motion generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'kling_motion_generation' });
-    await ctx.telegram.editMessageText(
-      ctx.chat.id, statusMsg.message_id, null,
-      '❌ Помилка генерації Kling Motion. Спробуйте ще раз.'
-    );
-    userState.delete(userId);
-  }
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>Kling Motion готово!</b>\n\n` +
+        `⚠️ <b>ЗАВАНТАЖТЕ ОДРАЗУ!</b> Посилання активне 1 ГОДИНУ!\n\n` +
+        `⚙️ ${generationData.mode === 'pro' ? '💎 PRO' : '⚡ STD'} | ` +
+        `${generationData.orientation === 'image' ? '📷' : '🎥'} | ` +
+        `${generationData.keepOriginalSound ? '🔊' : '🔇'}\n\n` +
+        `💰 Витрачено: ${motionCost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await bot.telegram.sendVideo(
+        chatId,
+        result.videoUrl,
+        {
+          caption: `🔥 Kling Motion\n\n⚙️ ${generationData.mode.toUpperCase()} | ${generationData.orientation} | ${generationData.keepOriginalSound ? '🔊' : '🔇'}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${motionCost}⚡`,
+          ...keyboard.createBackButton('video_menu')
+        }
+      );
+
+    } catch (error) {
+      console.error('Kling Motion generation failed:', error);
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'kling_motion_generation' });
+      try {
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          '❌ Помилка генерації Kling Motion. Спробуйте ще раз.'
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації Kling Motion. Спробуйте ще раз.');
+      }
+    }
+  })();
 }
 
 // Генерувати Kling відразу
@@ -2840,6 +2853,7 @@ bot.action('kling_generate_now', async (ctx) => {
 async function generateKlingVideo(ctx, state) {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
   const model = models.video.models.find(m => m.key === 'kling');
 
   if (!model) {
@@ -2868,72 +2882,84 @@ async function generateKlingVideo(ctx, state) {
     `🖼️ Start image: ${hasStartImage ? 'Так' : 'Ні'}\n` +
     `🎬 End image: ${hasEndImage ? 'Так' : 'Ні'}\n\n` +
     `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
-    `⏱️ Це може зайняти 2-5 хвилин...`,
+    `⏱️ Це може зайняти 2-5 хвилин...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
     { parse_mode: 'HTML' }
   );
 
-  try {
-    const result = await replicate.generateVideoWithKling(
-      state.prompt,
-      state.startImage || null,
-      state.endImage || null,
-      duration,
-      state.aspectRatio || '16:9'
-    );
+  // ✅ ОЧИЩУЄМО СТАН ОДРАЗУ - щоб користувач міг працювати з ботом далі
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
 
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId, username, action: 'kling_generation', model: model.name,
-        prompt: state.prompt, duration: duration
-      });
-      await ctx.telegram.editMessageText(
-        ctx.chat.id, statusMsg.message_id, null,
-        `❌ Помилка генерації Kling.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+  // ✅ ЗАПУСКАЄМО ГЕНЕРАЦІЮ У ФОНІ
+  const generationData = { ...state };
+
+  (async () => {
+    try {
+      const result = await replicate.generateVideoWithKling(
+        generationData.prompt,
+        generationData.startImage || null,
+        generationData.endImage || null,
+        duration,
+        generationData.aspectRatio || '16:9'
       );
-      userState.delete(userId);
-      return;
-    }
 
-    await userBalance.deductTokens(userId, klingCost, `${model.name} generation`, {
-      modelKey: 'kling', modelName: model.name, apiCost: apiCost,
-      prompt: state.prompt, duration: duration,
-      hasStartImage: hasStartImage,
-      hasEndImage: hasEndImage
-    });
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-
-    await ctx.reply(
-      `✅ <b>Kling v2.5 готово!</b>\n\n` +
-      `⏱️ Тривалість: ${duration} сек\n` +
-      `📐 Пропорції: ${state.aspectRatio || '16:9'}\n` +
-      `📝 Промпт: ${state.prompt?.substring(0, 100)}...\n\n` +
-      `💰 Витрачено: ${klingCost}⚡`,
-      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
-    );
-
-    await ctx.replyWithVideo(
-      { url: result.videoUrl },
-      {
-        caption: `🎭 Kling v2.5\n\n⏱️ ${duration}сек | 📐 ${state.aspectRatio || '16:9'}\n📝 ${state.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${klingCost}⚡`,
-        ...keyboard.createBackButton('video_menu')
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId, username, action: 'kling_generation', model: model.name,
+          prompt: generationData.prompt, duration: duration
+        });
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації Kling.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+        );
+        return;
       }
-    );
 
-    // ✅ Записуємо Trial usage
-    recordTrialUsage(userId, 'kling');
+      await userBalance.deductTokens(userId, klingCost, `${model.name} generation`, {
+        modelKey: 'kling', modelName: model.name, apiCost: apiCost,
+        prompt: generationData.prompt, duration: duration,
+        hasStartImage: hasStartImage,
+        hasEndImage: hasEndImage
+      });
 
-    userState.delete(userId);
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
 
-  } catch (error) {
-    console.error('Kling generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'kling_generation', model: model.name });
-    await ctx.telegram.editMessageText(
-      ctx.chat.id, statusMsg.message_id, null,
-      '❌ Помилка генерації Kling. Спробуйте ще раз.'
-    );
-    userState.delete(userId);
-  }
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>Kling v2.5 готово!</b>\n\n` +
+        `⏱️ Тривалість: ${duration} сек\n` +
+        `📐 Пропорції: ${generationData.aspectRatio || '16:9'}\n` +
+        `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
+        `💰 Витрачено: ${klingCost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await bot.telegram.sendVideo(
+        chatId,
+        result.videoUrl,
+        {
+          caption: `🎭 Kling v2.5\n\n⏱️ ${duration}сек | 📐 ${generationData.aspectRatio || '16:9'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${klingCost}⚡`,
+          ...keyboard.createBackButton('video_menu')
+        }
+      );
+
+      // ✅ Записуємо Trial usage
+      recordTrialUsage(userId, 'kling');
+
+    } catch (error) {
+      console.error('Kling generation failed:', error);
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'kling_generation', model: model.name });
+      try {
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          '❌ Помилка генерації Kling. Спробуйте ще раз.'
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації Kling. Спробуйте ще раз.');
+      }
+    }
+  })();
 }
 
 // ==================== VEO GENERATION FUNCTION ====================
@@ -2941,6 +2967,7 @@ async function generateKlingVideo(ctx, state) {
 async function generateVeoVideo(ctx, state) {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
   const model = models.video.models.find(m => m.key === 'veo');
 
   if (!model) {
@@ -2976,81 +3003,95 @@ async function generateVeoVideo(ctx, state) {
     `📸 Референсів: ${state.references?.length || 0}\n` +
     `🎬 Last frame: ${hasLastFrame ? 'Так' : 'Ні'}\n\n` +
     `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
-    `⏱️ Це може зайняти 2-5 хвилин...`,
+    `⏱️ Це може зайняти 2-5 хвилин...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
     { parse_mode: 'HTML' }
   );
 
-  try {
-    const result = await replicate.generateVideoWithVeo(
-      state.prompt,
-      state.references || [],
-      state.lastFrame || null,
-      state.aspectRatio,
-      duration,
-      '', // negative prompt
-      state.startImage || null,
-      generateAudio
-    );
+  // ✅ ОЧИЩУЄМО СТАН ОДРАЗУ - щоб користувач міг працювати з ботом далі
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
 
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-        userId, username, action: 'veo_generation', model: model.name,
-        prompt: state.prompt, aspectRatio: state.aspectRatio
-      });
-      await ctx.telegram.editMessageText(
-        ctx.chat.id, statusMsg.message_id, null,
-        `❌ Помилка генерації Veo 3.1.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+  // ✅ ЗАПУСКАЄМО ГЕНЕРАЦІЮ У ФОНІ (без await на верхньому рівні)
+  // Зберігаємо необхідні дані локально
+  const generationData = { ...state };
+
+  // Асинхронна функція що виконується у фоні
+  (async () => {
+    try {
+      const result = await replicate.generateVideoWithVeo(
+        generationData.prompt,
+        generationData.references || [],
+        generationData.lastFrame || null,
+        generationData.aspectRatio,
+        duration,
+        '', // negative prompt
+        generationData.startImage || null,
+        generateAudio
       );
-      userState.delete(userId);
-      return;
-    }
 
-    await userBalance.deductTokens(userId, veoCost, `${model.name} generation`, {
-      modelKey: 'veo', modelName: model.name, apiCost: apiCost,
-      prompt: state.prompt, aspectRatio: state.aspectRatio,
-      duration: duration, generateAudio: generateAudio,
-      hasStartImage: hasStartImage,
-      references: state.references?.length || 0,
-      hasLastFrame: hasLastFrame
-    });
-
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-
-    // Попередження перед відео
-    await ctx.reply(
-      `✅ <b>Google Veo 3.1 готово!</b>\n\n` +
-      `⚠️ <b>ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
-      `Посилання активне тільки <b>1 ГОДИНУ</b>!\n\n` +
-      `📐 Пропорції: ${state.aspectRatio}\n` +
-      `⏱️ Тривалість: ${duration} сек\n` +
-      `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
-      `📝 Промпт: ${state.prompt?.substring(0, 100)}...\n\n` +
-      `💾 <b>Як зберегти:</b>\n` +
-      `1️⃣ Натисніть на відео нижче\n` +
-      `2️⃣ Натисніть ⋮ → "Зберегти"\n\n` +
-      `💰 Витрачено: ${veoCost}⚡`,
-      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
-    );
-
-    await ctx.replyWithVideo(
-      { url: result.videoUrl },
-      {
-        caption: `🌟 Google Veo 3.1\n\n📐 ${state.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${state.prompt?.substring(0, 80)}...\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${veoCost}⚡`,
-        ...keyboard.createBackButton('video_menu')
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId, username, action: 'veo_generation', model: model.name,
+          prompt: generationData.prompt, aspectRatio: generationData.aspectRatio
+        });
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації Veo 3.1.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+        );
+        return;
       }
-    );
 
-    userState.delete(userId);
+      await userBalance.deductTokens(userId, veoCost, `${model.name} generation`, {
+        modelKey: 'veo', modelName: model.name, apiCost: apiCost,
+        prompt: generationData.prompt, aspectRatio: generationData.aspectRatio,
+        duration: duration, generateAudio: generateAudio,
+        hasStartImage: hasStartImage,
+        references: generationData.references?.length || 0,
+        hasLastFrame: hasLastFrame
+      });
 
-  } catch (error) {
-    console.error('Veo 3.1 generation failed:', error);
-    await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'veo_generation', model: model.name });
-    await ctx.telegram.editMessageText(
-      ctx.chat.id, statusMsg.message_id, null,
-      '❌ Помилка генерації Veo 3.1. Спробуйте ще раз.'
-    );
-    userState.delete(userId);
-  }
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+
+      // Попередження перед відео
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>Google Veo 3.1 готово!</b>\n\n` +
+        `⚠️ <b>ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
+        `Посилання активне тільки <b>1 ГОДИНУ</b>!\n\n` +
+        `📐 Пропорції: ${generationData.aspectRatio}\n` +
+        `⏱️ Тривалість: ${duration} сек\n` +
+        `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
+        `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
+        `💾 <b>Як зберегти:</b>\n` +
+        `1️⃣ Натисніть на відео нижче\n` +
+        `2️⃣ Натисніть ⋮ → "Зберегти"\n\n` +
+        `💰 Витрачено: ${veoCost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await bot.telegram.sendVideo(
+        chatId,
+        result.videoUrl,
+        {
+          caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${veoCost}⚡`,
+          ...keyboard.createBackButton('video_menu')
+        }
+      );
+
+    } catch (error) {
+      console.error('Veo 3.1 generation failed:', error);
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'veo_generation', model: model.name });
+      try {
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          '❌ Помилка генерації Veo 3.1. Спробуйте ще раз.'
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації Veo 3.1. Спробуйте ще раз.');
+      }
+    }
+  })();
 }
 
 // Audio Models
@@ -5306,8 +5347,28 @@ async function startBot() {
 
         const fetchTime = Date.now() - startTime;
 
-        // Ціна 1 токена в USD (STARTER план - найгірший випадок)
-        const tokenPriceUSD = 7 / 260; // ≈ $0.0269
+        // ============================================================
+        // TOKEN PRICE CALCULATION PER PLAN
+        // Formula: tokenPriceUSD = priceUSD / tokensLiqPay (LiqPay дає більше токенів)
+        // ============================================================
+        const tokenPriceUSDByPlan = {
+          starter: subscriptions.starter ? +(subscriptions.starter.priceUSD / subscriptions.starter.tokensLiqPay).toFixed(5) : 0,
+          basic: subscriptions.basic ? +(subscriptions.basic.priceUSD / subscriptions.basic.tokensLiqPay).toFixed(5) : 0,
+          pro: subscriptions.pro ? +(subscriptions.pro.priceUSD / subscriptions.pro.tokensLiqPay).toFixed(5) : 0,
+          premium: subscriptions.premium ? +(subscriptions.premium.priceUSD / subscriptions.premium.tokensLiqPay).toFixed(5) : 0
+        };
+
+        // Default tokenPriceUSD = premium plan (найкращий для клієнта, найгірший для нас)
+        // Використовується для backwards compatibility та UI calculations
+        const tokenPriceUSD = tokenPriceUSDByPlan.premium || 0.02311; // fallback: 110/4760
+
+        // Helper: calculate gross margin for a model
+        const calcGrossMargin = (cost, apiCost) => {
+          if (!apiCost || apiCost === 0) return null;
+          const revenue = cost * tokenPriceUSD;
+          const margin = ((revenue - apiCost) / revenue) * 100;
+          return +margin.toFixed(1);
+        };
 
         ['starter', 'basic', 'pro', 'premium'].forEach(planKey => {
           const sub = subscriptions[planKey];
@@ -5328,21 +5389,40 @@ async function startBot() {
               priceUAHDynamic: priceUAHDynamic, // LiqPay динамічна ціна
               exchangeRate: rate, // Поточний курс USD/UAH
               tgStarRate: tgStarRate, // Динамічний курс TG Star до USD
+              // Per-plan token price
+              tokenPriceUSD: tokenPriceUSDByPlan[planKey],
               features: sub.features  // Показуємо всі features як є
             };
           }
         });
 
-        // Моделі для comparison таблиць
+        // ============================================================
+        // DESIGN MODELS with debug fields
+        // ============================================================
         const designModels = models.design.models
           .filter(m => m.available)
-          .map(m => ({
-            name: m.name.replace(/[🌀🍌🌊🔮🎯🖼️]/g, '').trim(),
-            key: m.key,
-            cost: m.cost,
-            priceUSD: +(m.cost * tokenPriceUSD).toFixed(3)
-          }));
+          .map(m => {
+            const result = {
+              name: m.name.replace(/[🌀🍌🌊🔮🎯🖼️]/g, '').trim(),
+              key: m.key,
+              cost: m.cost,
+              priceUSD: +(m.cost * tokenPriceUSD).toFixed(4),
+              resolution: m.resolution || m.size || null,
+              maxImages: m.maxImages || 1
+            };
+            // Debug fields (optional)
+            if (m.apiCost !== undefined) {
+              result._debug = {
+                apiCost: m.apiCost,
+                grossMarginPct: calcGrossMargin(m.cost, m.apiCost)
+              };
+            }
+            return result;
+          });
 
+        // ============================================================
+        // VIDEO MODELS with debug fields, durations, minSeconds/maxSeconds
+        // ============================================================
         const videoModels = models.video.models
           .filter(m => m.available)
           .map(m => {
@@ -5350,33 +5430,72 @@ async function startBot() {
               name: m.name.replace(/[🎭🔥🌟🎬🌊💜💎]/g, '').trim(),
               key: m.key
             };
+
             // Kling v2.5 - ціна за секунду
             if (m.costPerSecond) {
               result.costPerSecond = m.costPerSecond;
-              result.pricePerSecondUSD = +(m.costPerSecond * tokenPriceUSD).toFixed(3);
+              result.pricePerSecondUSD = +(m.costPerSecond * tokenPriceUSD).toFixed(4);
               result.durations = m.durations || [5, 10];
-              result.minSeconds = m.durations?.[0] || 5;
-              result.maxSeconds = m.durations?.[m.durations.length - 1] || 10;
+              result.minSeconds = result.durations[0];
+              result.maxSeconds = result.durations[result.durations.length - 1];
+              // Debug
+              if (m.apiCostPerSecond !== undefined) {
+                result._debug = {
+                  apiCostPerSecond: m.apiCostPerSecond,
+                  grossMarginPct: calcGrossMargin(m.costPerSecond, m.apiCostPerSecond)
+                };
+              }
             }
             // Kling Motion - різні режими
             else if (m.costs) {
               result.costs = m.costs;
+              result.pricesUSD = {};
+              Object.entries(m.costs).forEach(([mode, cost]) => {
+                result.pricesUSD[mode] = +(cost * tokenPriceUSD).toFixed(2);
+              });
+              // Debug
+              if (m.apiCosts) {
+                result._debug = {
+                  apiCosts: m.apiCosts,
+                  grossMarginsPct: {}
+                };
+                Object.entries(m.costs).forEach(([mode, cost]) => {
+                  const apiCost = m.apiCosts[mode];
+                  result._debug.grossMarginsPct[mode] = calcGrossMargin(cost, apiCost);
+                });
+              }
             }
             // Veo - ціна за секунду з/без аудіо
             else if (m.costPerSecondAudio) {
               result.costPerSecondAudio = m.costPerSecondAudio;
               result.costPerSecondNoAudio = m.costPerSecondNoAudio;
-              result.pricePerSecondAudioUSD = +(m.costPerSecondAudio * tokenPriceUSD).toFixed(3);
-              result.pricePerSecondNoAudioUSD = +(m.costPerSecondNoAudio * tokenPriceUSD).toFixed(3);
+              result.pricePerSecondAudioUSD = +(m.costPerSecondAudio * tokenPriceUSD).toFixed(4);
+              result.pricePerSecondNoAudioUSD = +(m.costPerSecondNoAudio * tokenPriceUSD).toFixed(4);
               result.durations = m.durations || [4, 6, 8];
-              result.minSeconds = m.durations?.[0] || 4;
-              result.maxSeconds = m.durations?.[m.durations.length - 1] || 8;
+              result.minSeconds = m.minSeconds || result.durations[0];
+              result.maxSeconds = result.durations[result.durations.length - 1];
               result.supportsAudio = true;
+              // Debug
+              if (m.apiCostPerSecondAudio !== undefined) {
+                result._debug = {
+                  apiCostPerSecondAudio: m.apiCostPerSecondAudio,
+                  apiCostPerSecondNoAudio: m.apiCostPerSecondNoAudio,
+                  grossMarginAudioPct: calcGrossMargin(m.costPerSecondAudio, m.apiCostPerSecondAudio),
+                  grossMarginNoAudioPct: calcGrossMargin(m.costPerSecondNoAudio, m.apiCostPerSecondNoAudio)
+                };
+              }
             }
             // Звичайна модель (фіксована ціна)
             else {
               result.cost = m.cost;
-              result.priceUSD = +(m.cost * tokenPriceUSD).toFixed(2);
+              result.priceUSD = +(m.cost * tokenPriceUSD).toFixed(4);
+              // Debug
+              if (m.apiCost !== undefined) {
+                result._debug = {
+                  apiCost: m.apiCost,
+                  grossMarginPct: calcGrossMargin(m.cost, m.apiCost)
+                };
+              }
             }
             return result;
           });
@@ -5384,19 +5503,37 @@ async function startBot() {
         const totalTime = Date.now() - startTime;
         console.log(`📊 /api/plans response time: ${totalTime}ms (rate fetch: ${fetchTime}ms)`);
 
-        // Trial (FREE) план - без tokensLiqPay, показуємо діапазон можливостей
+        // ============================================================
+        // TRIAL PLAN with explicit usage (snake_case keys matching model keys)
+        // ============================================================
         const trialTokens = models.subscriptions.trial?.tokens || 75;
+
+        // Helper: safe division avoiding 0
+        const safeDiv = (tokens, cost) => cost > 0 ? Math.floor(tokens / cost) : 0;
+
         const trialPlan = {
           name: 'TRIAL (FREE)',
           tokens: trialTokens,
           price: 0,
           priceUSD: 0,
-          // Що можна згенерувати за ці токени (min/max)
+          // Explicit usage keyed by model.key (snake_case)
           usage: {
-            stableDiffusion: { min: trialTokens, max: trialTokens, costPerGen: 1 },      // 75 генерацій
-            seedream2k: { min: Math.floor(trialTokens / 3), max: Math.floor(trialTokens / 3), costPerGen: 3 },  // 25 генерацій
-            nanoBanana2k: { min: Math.floor(trialTokens / 14), max: Math.floor(trialTokens / 14), costPerGen: 14 }, // 5 генерацій
-            kling5s: { min: Math.floor(trialTokens / 30), max: Math.floor(trialTokens / 30), costPerGen: 30 },  // 2 генерації
+            // Design models
+            stable_diffusion: { count: safeDiv(trialTokens, 1), cost: 1 },
+            seedream_2k: { count: safeDiv(trialTokens, 3), cost: 3 },
+            seedream_4k: { count: safeDiv(trialTokens, 6), cost: 6 },
+            nano_banana_2k: { count: safeDiv(trialTokens, 14), cost: 14 },
+            nano_banana_4k: { count: safeDiv(trialTokens, 27), cost: 27, limited: models.TRIAL_RESTRICTIONS.limitedModels.nano_banana_4k || 1 },
+            clarity: { count: safeDiv(trialTokens, 2), cost: 2 },
+            ideogram: { count: safeDiv(trialTokens, 3), cost: 3 },
+            // Video models
+            kling_5s: { count: safeDiv(trialTokens, 30), cost: 30, limited: models.TRIAL_RESTRICTIONS.limitedModels.kling || 2 },
+            kling_10s: { count: safeDiv(trialTokens, 60), cost: 60, limited: models.TRIAL_RESTRICTIONS.limitedModels.kling || 2 },
+            runway_turbo: { count: safeDiv(trialTokens, 22), cost: 22, limited: models.TRIAL_RESTRICTIONS.limitedModels.runway_turbo || 1 },
+            // Blocked models (count=0, blocked=true)
+            veo: { count: 0, cost: 112, blocked: true },
+            kling_motion: { count: 0, cost: 35, blocked: true },
+            runway_gen4: { count: 0, cost: 94, blocked: true }
           },
           features: [
             `🎁 ${trialTokens}⚡ безкоштовних токенів`,
@@ -5410,7 +5547,6 @@ async function startBot() {
           blockedModels: models.TRIAL_RESTRICTIONS.blockedModels,
           limitedModels: models.TRIAL_RESTRICTIONS.limitedModels,
           blockedModes: models.TRIAL_RESTRICTIONS.blockedModes,
-          // Скільки генерацій доступно на trial
           freeGenerations: {
             total: trialTokens,
             perModel: models.TRIAL_RESTRICTIONS.limitedModels
@@ -5423,17 +5559,20 @@ async function startBot() {
             trial: trialPlan,
             ...plans
           },
-          // Додаємо ціни моделей для comparison
+          // Models for comparison tables
           models: {
-            tokenPriceUSD: +tokenPriceUSD.toFixed(4),
+            // Default token price (premium-anchored, worst-case for us)
+            tokenPriceUSD: tokenPriceUSD,
+            // Per-plan token prices for accurate UI calculations
+            tokenPriceUSDByPlan: tokenPriceUSDByPlan,
             design: designModels,
             video: videoModels
           },
-          // Trial/FREE обмеження
+          // Trial/FREE restrictions
           trialRestrictions,
           rates: {
             'USD/UAH': rate,
-            'USD/TGStar': +tgStarRate.toFixed(4) // ✅ number, не string
+            'USD/TGStar': +tgStarRate.toFixed(4) // ✅ number, not string
           },
           responseTime: totalTime,
           timestamp: new Date().toISOString()
@@ -5471,21 +5610,42 @@ async function startBot() {
     // ✅ Get all models with prices (for comparison tables, webpack site, etc.)
     app.get('/api/models', async (req, res) => {
       try {
-        // Ціна 1 токена в USD (найгірший випадок - STARTER план)
-        // STARTER: $7 за 260 токенів LiqPay
-        const tokenPriceUSD = 7 / 260; // ≈ $0.0269 за токен
+        const subscriptions = models.subscriptions;
+
+        // ============================================================
+        // TOKEN PRICE CALCULATION PER PLAN
+        // Formula: tokenPriceUSD = priceUSD / tokensLiqPay
+        // ============================================================
+        const tokenPriceUSDByPlan = {
+          starter: subscriptions.starter ? +(subscriptions.starter.priceUSD / subscriptions.starter.tokensLiqPay).toFixed(5) : 0,
+          basic: subscriptions.basic ? +(subscriptions.basic.priceUSD / subscriptions.basic.tokensLiqPay).toFixed(5) : 0,
+          pro: subscriptions.pro ? +(subscriptions.pro.priceUSD / subscriptions.pro.tokensLiqPay).toFixed(5) : 0,
+          premium: subscriptions.premium ? +(subscriptions.premium.priceUSD / subscriptions.premium.tokensLiqPay).toFixed(5) : 0
+        };
+
+        // Default = premium (worst-case for us, best for customer)
+        const tokenPriceUSD = tokenPriceUSDByPlan.premium || 0.01930; // 110/5700 = 0.01930
+
+        // Helper: calculate gross margin
+        const calcGrossMargin = (cost, apiCost) => {
+          if (!apiCost || apiCost === 0) return null;
+          const revenue = cost * tokenPriceUSD;
+          const margin = ((revenue - apiCost) / revenue) * 100;
+          return +margin.toFixed(1);
+        };
 
         res.json({
           success: true,
 
-          // Формула для розрахунку ціни в USD: cost * tokenPriceUSD
+          // Pricing info
           pricing: {
             tokenPriceUSD: tokenPriceUSD,
-            formula: 'priceUSD = cost * tokenPriceUSD',
-            note: 'Ціна розрахована за STARTER планом ($7/260⚡). Більші плани дешевші за токен.'
+            tokenPriceUSDByPlan: tokenPriceUSDByPlan,
+            formula: 'priceUSD = cost × tokenPriceUSD',
+            note: 'tokenPriceUSD anchored to PREMIUM plan ($110/5700⚡). Smaller plans have higher token cost.'
           },
 
-          // Пакети токенів
+          // Subscription packages
           subscriptions: Object.entries(models.subscriptions)
             .filter(([key]) => key !== 'trial')
             .reduce((acc, [key, sub]) => {
@@ -5495,64 +5655,88 @@ async function startBot() {
                 tokensLiqPay: sub.tokensLiqPay,
                 price: sub.price,
                 priceUSD: sub.priceUSD,
-                pricePerToken: (sub.priceUSD / sub.tokensLiqPay).toFixed(4)
+                tokenPriceUSD: tokenPriceUSDByPlan[key]
               };
               return acc;
             }, {}),
 
-          // Моделі генерації зображень
+          // Design models with debug
           design: models.design.models
             .filter(m => m.available)
-            .map(m => ({
-              name: m.name.replace(/[🌀🍌🌊🔮🎯🖼️]/g, '').trim(),
-              key: m.key,
-              cost: m.cost,
-              priceUSD: (m.cost * tokenPriceUSD).toFixed(3),
-              resolution: m.resolution || m.size || null,
-              maxImages: m.maxImages || 1
-            })),
+            .map(m => {
+              const result = {
+                name: m.name.replace(/[🌀🍌🌊🔮🎯🖼️]/g, '').trim(),
+                key: m.key,
+                cost: m.cost,
+                priceUSD: +(m.cost * tokenPriceUSD).toFixed(4),
+                resolution: m.resolution || m.size || null,
+                maxImages: m.maxImages || 1
+              };
+              if (m.apiCost !== undefined) {
+                result._debug = {
+                  apiCost: m.apiCost,
+                  grossMarginPct: calcGrossMargin(m.cost, m.apiCost)
+                };
+              }
+              return result;
+            }),
 
-          // Моделі генерації відео
+          // Video models with debug, durations, minSeconds/maxSeconds
           video: models.video.models
             .filter(m => m.available)
             .map(m => {
               const result = {
-                name: m.name.replace(/[🎭🔥🌟🎬🌊💜]/g, '').trim(),
+                name: m.name.replace(/[🎭🔥🌟🎬🌊💜💎]/g, '').trim(),
                 key: m.key
               };
 
-              // Kling v2.5 - ціна за секунду
+              // Kling v2.5 - cost per second
               if (m.costPerSecond) {
                 result.costPerSecond = m.costPerSecond;
-                result.pricePerSecondUSD = +(m.costPerSecond * tokenPriceUSD).toFixed(3);
+                result.pricePerSecondUSD = +(m.costPerSecond * tokenPriceUSD).toFixed(4);
                 result.durations = m.durations || [5, 10];
-                result.minSeconds = m.durations?.[0] || 5;
-                result.maxSeconds = m.durations?.[m.durations.length - 1] || 10;
-                result.examples = (m.durations || [5, 10]).map(d => ({
+                result.minSeconds = result.durations[0];
+                result.maxSeconds = result.durations[result.durations.length - 1];
+                result.examples = result.durations.map(d => ({
                   duration: d,
                   cost: d * m.costPerSecond,
                   priceUSD: +(d * m.costPerSecond * tokenPriceUSD).toFixed(2)
                 }));
+                if (m.apiCostPerSecond !== undefined) {
+                  result._debug = {
+                    apiCostPerSecond: m.apiCostPerSecond,
+                    grossMarginPct: calcGrossMargin(m.costPerSecond, m.apiCostPerSecond)
+                  };
+                }
               }
-              // Kling Motion - різні режими
+              // Kling Motion - multiple modes
               else if (m.costs) {
                 result.costs = m.costs;
-                result.pricesUSD = Object.entries(m.costs).reduce((acc, [mode, cost]) => {
-                  acc[mode] = +(cost * tokenPriceUSD).toFixed(2);
-                  return acc;
-                }, {});
+                result.pricesUSD = {};
+                Object.entries(m.costs).forEach(([mode, cost]) => {
+                  result.pricesUSD[mode] = +(cost * tokenPriceUSD).toFixed(2);
+                });
+                if (m.apiCosts) {
+                  result._debug = {
+                    apiCosts: m.apiCosts,
+                    grossMarginsPct: {}
+                  };
+                  Object.entries(m.costs).forEach(([mode, cost]) => {
+                    result._debug.grossMarginsPct[mode] = calcGrossMargin(cost, m.apiCosts[mode]);
+                  });
+                }
               }
-              // Veo - ціна за секунду з/без аудіо
+              // Veo - cost per second with/without audio
               else if (m.costPerSecondAudio) {
                 result.costPerSecondAudio = m.costPerSecondAudio;
                 result.costPerSecondNoAudio = m.costPerSecondNoAudio;
-                result.pricePerSecondAudioUSD = +(m.costPerSecondAudio * tokenPriceUSD).toFixed(3);
-                result.pricePerSecondNoAudioUSD = +(m.costPerSecondNoAudio * tokenPriceUSD).toFixed(3);
+                result.pricePerSecondAudioUSD = +(m.costPerSecondAudio * tokenPriceUSD).toFixed(4);
+                result.pricePerSecondNoAudioUSD = +(m.costPerSecondNoAudio * tokenPriceUSD).toFixed(4);
                 result.durations = m.durations || [4, 6, 8];
-                result.minSeconds = m.durations?.[0] || 4;
-                result.maxSeconds = m.durations?.[m.durations.length - 1] || 8;
+                result.minSeconds = m.minSeconds || result.durations[0];
+                result.maxSeconds = result.durations[result.durations.length - 1];
                 result.supportsAudio = true;
-                result.examples = (m.durations || [4, 6, 8]).map(d => ({
+                result.examples = result.durations.map(d => ({
                   duration: d,
                   withAudio: {
                     cost: d * m.costPerSecondAudio,
@@ -5563,23 +5747,37 @@ async function startBot() {
                     priceUSD: +(d * m.costPerSecondNoAudio * tokenPriceUSD).toFixed(2)
                   }
                 }));
+                if (m.apiCostPerSecondAudio !== undefined) {
+                  result._debug = {
+                    apiCostPerSecondAudio: m.apiCostPerSecondAudio,
+                    apiCostPerSecondNoAudio: m.apiCostPerSecondNoAudio,
+                    grossMarginAudioPct: calcGrossMargin(m.costPerSecondAudio, m.apiCostPerSecondAudio),
+                    grossMarginNoAudioPct: calcGrossMargin(m.costPerSecondNoAudio, m.apiCostPerSecondNoAudio)
+                  };
+                }
               }
-              // Звичайна модель
+              // Standard model (fixed price)
               else {
                 result.cost = m.cost;
-                result.priceUSD = +(m.cost * tokenPriceUSD).toFixed(2);
+                result.priceUSD = +(m.cost * tokenPriceUSD).toFixed(4);
+                if (m.apiCost !== undefined) {
+                  result._debug = {
+                    apiCost: m.apiCost,
+                    grossMarginPct: calcGrossMargin(m.cost, m.apiCost)
+                  };
+                }
               }
 
               return result;
             }),
 
-          // Trial/FREE обмеження
+          // Trial/FREE restrictions
           trialRestrictions: {
             freeTokens: models.subscriptions.trial?.tokens || 75,
             blockedModels: models.TRIAL_RESTRICTIONS.blockedModels,
             limitedModels: models.TRIAL_RESTRICTIONS.limitedModels,
             blockedModes: models.TRIAL_RESTRICTIONS.blockedModes,
-            description: 'Безкоштовні користувачі мають обмежений доступ до дорогих моделей'
+            description: 'Free users have limited access to expensive models'
           },
 
           timestamp: new Date().toISOString()
