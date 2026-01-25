@@ -25,6 +25,7 @@ const replicatePricing = require('./services/replicatePricing');
 const keyboard = require('./utils/keyboard');
 const userBalance = require('./utils/userBalance');
 const blockedUsersUtil = require('./utils/blockedUsers');
+const gracefulShutdown = require('./utils/gracefulShutdown');
 const db = require('./database/connection');
 
 // Імпортуємо конфігурацію
@@ -4184,7 +4185,22 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   const isAlbum = Array.isArray(imageInput) && imageInput.length > 1;
   const mode = imageInput ? (isAlbum ? `album (${imageInput.length})` : 'img2img') : 'text2img';
 
+  // 🛑 Перевіряємо чи не йде shutdown
+  if (gracefulShutdown.isInShutdown()) {
+    await ctx.reply('⚠️ Бот оновлюється. Спробуйте через 1-2 хвилини.');
+    return;
+  }
+
   const statusMsg = await ctx.reply(`${model.name} генерація (${mode})...\n\nПромпт: "${prompt}"`);
+
+  // 🛑 Реєструємо генерацію для graceful shutdown
+  const requestId = gracefulShutdown.generateRequestId();
+  gracefulShutdown.registerGeneration(requestId, {
+    userId,
+    chatId: ctx.chat.id,
+    model: model.name,
+    modelKey
+  });
 
   try {
     const replicateFunctions = {
@@ -4681,6 +4697,9 @@ async function startBot() {
     console.log('🤖 Starting bot...');
     console.log('✅ Bot started successfully!');
     console.log('📱 Bot username: @neuro_lab_ai_bot');
+
+    // 🛑 Ініціалізуємо graceful shutdown (для pm2 restart)
+    gracefulShutdown.initShutdownHandlers(bot);
 
     // 💰 Перевірка цін Replicate при старті
     replicatePricing.logPriceComparison();

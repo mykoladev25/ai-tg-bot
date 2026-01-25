@@ -635,14 +635,25 @@ router.get('/dashboard', (req, res) => {
         const tbody = document.getElementById('pricing-body');
         const prices = data.data.officialPrices;
         tbody.innerHTML = Object.entries(prices).map(([key, p]) => {
-          const price = p.pricePerRun || p.pricePerSecond || p.pricePerSecondNoAudio || 0;
-          const unit = p.pricePerSecond ? '/сек' : p.pricePerSecondAudio ? '/сек' : '/run';
+          // Спеціальна обробка для Veo (два варіанти цін)
+          let priceDisplay = '';
+          let unit = '/run';
+          
+          if (p.pricePerSecondAudio && p.pricePerSecondNoAudio) {
+            // Veo - показуємо обидва варіанти
+            priceDisplay = \`$\${p.pricePerSecondAudio.toFixed(2)}/сек 🔊<br>$\${p.pricePerSecondNoAudio.toFixed(2)}/сек 🔇\`;
+          } else if (p.pricePerSecond) {
+            priceDisplay = \`$\${p.pricePerSecond.toFixed(2)}/сек\`;
+          } else if (p.pricePerRun) {
+            priceDisplay = \`$\${p.pricePerRun.toFixed(2)}/run\`;
+          }
+          
           const isOk = !data.data.discrepancies.find(d => d.model === p.model);
           return \`
             <tr>
               <td><strong>\${p.model}</strong></td>
               <td>—</td>
-              <td>$\${price.toFixed(2)}\${unit}</td>
+              <td>\${priceDisplay}</td>
               <td><span class="badge badge-\${isOk ? 'success' : 'danger'}">\${isOk ? '✅ OK' : '❌'}</span></td>
               <td><a href="\${p.source}" target="_blank" class="price-link">Replicate ↗</a></td>
             </tr>
