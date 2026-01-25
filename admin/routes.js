@@ -185,7 +185,7 @@ router.get('/dashboard', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>neuro.lab.ai - Admin Dashboard</title>
+  <title>neuro.lab.ai - Адмін панель</title>
   <style>
     :root {
       --bg: #0f0f0f;
@@ -250,7 +250,13 @@ router.get('/dashboard', (req, res) => {
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .card-hint {
+      font-size: 10px;
+      color: var(--text-muted);
       margin-bottom: 8px;
+      font-style: italic;
     }
     .card-value {
       font-size: 28px;
@@ -273,8 +279,13 @@ router.get('/dashboard', (req, res) => {
     }
     .section-title {
       font-size: 18px;
-      margin-bottom: 16px;
+      margin-bottom: 8px;
       color: var(--accent);
+    }
+    .section-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
     }
     table {
       width: 100%;
@@ -315,6 +326,31 @@ router.get('/dashboard', (req, res) => {
     .badge-success { background: rgba(0, 200, 83, 0.2); color: var(--success); }
     .badge-warning { background: rgba(255, 171, 0, 0.2); color: var(--warning); }
     .badge-danger { background: rgba(255, 82, 82, 0.2); color: var(--danger); }
+    .legend {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+    .legend h3 {
+      font-size: 14px;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .legend-item {
+      display: flex;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+    .legend-term {
+      font-weight: bold;
+      min-width: 120px;
+      color: var(--text);
+    }
+    .legend-desc {
+      color: var(--text-muted);
+    }
     @media (max-width: 768px) {
       .cards { grid-template-columns: 1fr 1fr; }
       .header { flex-direction: column; gap: 16px; }
@@ -323,54 +359,80 @@ router.get('/dashboard', (req, res) => {
 </head>
 <body>
   <div class="header">
-    <h1>📊 neuro.lab.ai Admin</h1>
+    <h1>📊 Адмін панель neuro.lab.ai</h1>
     <div class="period-select">
-      <button class="period-btn" data-days="1">Today</button>
-      <button class="period-btn" data-days="7">7 Days</button>
-      <button class="period-btn active" data-days="30">30 Days</button>
-      <button class="period-btn" data-days="90">90 Days</button>
+      <button class="period-btn" data-days="1">Сьогодні</button>
+      <button class="period-btn" data-days="7">7 днів</button>
+      <button class="period-btn active" data-days="30">30 днів</button>
+      <button class="period-btn" data-days="90">90 днів</button>
+    </div>
+  </div>
+
+  <div class="legend">
+    <h3>📖 Словник термінів</h3>
+    <div class="legend-item">
+      <span class="legend-term">💰 Дохід</span>
+      <span class="legend-desc">— скільки грошей отримали від клієнтів</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-term">💸 Собівартість</span>
+      <span class="legend-desc">— скільки МИ платимо за API (Replicate, тощо)</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-term">📈 Прибуток</span>
+      <span class="legend-desc">— Дохід мінус Собівартість = наш заробіток</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-term">🔥 Trial витрати</span>
+      <span class="legend-desc">— собівартість генерацій безкоштовних юзерів (вони не платять, ми - платимо)</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-term">📊 Маржа</span>
+      <span class="legend-desc">— відсоток прибутку від доходу (чим більше - тим краще)</span>
     </div>
   </div>
 
   <div id="error" class="error" style="display:none;"></div>
 
   <div class="cards" id="summary">
-    <div class="loading">Loading...</div>
+    <div class="loading">Завантаження...</div>
   </div>
 
   <div class="section">
-    <h2 class="section-title">💰 Purchases by Plan</h2>
+    <h2 class="section-title">💳 Покупки по тарифах</h2>
+    <p class="section-hint">Скільки разів купили кожен пакет токенів</p>
     <table id="purchases-table">
       <thead>
         <tr>
-          <th>Plan</th>
-          <th>Count</th>
-          <th>Revenue USD</th>
-          <th>Tokens</th>
-          <th>Users</th>
+          <th>Пакет</th>
+          <th>К-сть</th>
+          <th>Дохід $</th>
+          <th>Токенів</th>
+          <th>Юзерів</th>
         </tr>
       </thead>
       <tbody id="purchases-body">
-        <tr><td colspan="5" class="loading">Loading...</td></tr>
+        <tr><td colspan="5" class="loading">Завантаження...</td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="section">
-    <h2 class="section-title">🔧 Top Models by COGS</h2>
+    <h2 class="section-title">🤖 Топ моделей по витратах</h2>
+    <p class="section-hint">Які моделі найбільше "з'їдають" на API (собівартість)</p>
     <table id="models-table">
       <thead>
         <tr>
-          <th>Model</th>
-          <th>Count</th>
-          <th>COGS $</th>
-          <th>Revenue $</th>
-          <th>Margin</th>
-          <th>Fail %</th>
+          <th>Модель</th>
+          <th>Генерацій</th>
+          <th>Собівартість $</th>
+          <th>Дохід $</th>
+          <th>Маржа</th>
+          <th>Помилок</th>
         </tr>
       </thead>
       <tbody id="models-body">
-        <tr><td colspan="6" class="loading">Loading...</td></tr>
+        <tr><td colspan="6" class="loading">Завантаження...</td></tr>
       </tbody>
     </table>
   </div>
@@ -384,7 +446,7 @@ router.get('/dashboard', (req, res) => {
     async function fetchAPI(endpoint) {
       const url = API_BASE + endpoint + (endpoint.includes('?') ? '&' : '?') + 'token=' + TOKEN;
       const res = await fetch(url);
-      if (!res.ok) throw new Error('API error: ' + res.status);
+      if (!res.ok) throw new Error('Помилка API: ' + res.status);
       return res.json();
     }
     
@@ -408,34 +470,40 @@ router.get('/dashboard', (req, res) => {
           const d = summary.data;
           document.getElementById('summary').innerHTML = \`
             <div class="card">
-              <div class="card-title">Revenue</div>
+              <div class="card-title">💰 Дохід</div>
+              <div class="card-hint">Скільки заплатили клієнти</div>
               <div class="card-value success">\${formatUSD(d.revenue.usd)}</div>
-              <div class="card-subtitle">\${d.revenue.purchases} purchases</div>
+              <div class="card-subtitle">\${d.revenue.purchases} покупок</div>
             </div>
             <div class="card">
-              <div class="card-title">COGS (Est.)</div>
+              <div class="card-title">💸 Собівартість</div>
+              <div class="card-hint">Скільки ми платимо API</div>
               <div class="card-value warning">\${formatUSD(d.cogs.estimated)}</div>
-              <div class="card-subtitle">\${d.cogs.generations} generations</div>
+              <div class="card-subtitle">\${d.cogs.generations} генерацій</div>
             </div>
             <div class="card">
-              <div class="card-title">Gross Margin</div>
+              <div class="card-title">📈 Прибуток</div>
+              <div class="card-hint">Дохід - Собівартість</div>
               <div class="card-value">\${formatUSD(d.gross.estimated)}</div>
-              <div class="card-subtitle">\${d.gross.marginPercent}% margin</div>
+              <div class="card-subtitle">\${d.gross.marginPercent}% маржа</div>
             </div>
             <div class="card">
-              <div class="card-title">Trial Burn</div>
+              <div class="card-title">🔥 Trial витрати</div>
+              <div class="card-hint">Безкоштовні юзери "з'їли"</div>
               <div class="card-value danger">\${formatUSD(d.trial.burnUSD)}</div>
-              <div class="card-subtitle">\${d.trial.users} trial users</div>
+              <div class="card-subtitle">\${d.trial.users} trial юзерів</div>
             </div>
             <div class="card">
-              <div class="card-title">Success Rate</div>
+              <div class="card-title">✅ Успішність</div>
+              <div class="card-hint">% вдалих генерацій</div>
               <div class="card-value">\${d.cogs.successRate}%</div>
-              <div class="card-subtitle">\${d.cogs.activeUsers} active users</div>
+              <div class="card-subtitle">\${d.cogs.activeUsers} активних юзерів</div>
             </div>
             <div class="card">
-              <div class="card-title">Paid Users</div>
+              <div class="card-title">👥 Платних юзерів</div>
+              <div class="card-hint">Хто купив токени</div>
               <div class="card-value success">\${d.revenue.paidUsers}</div>
-              <div class="card-subtitle">in period</div>
+              <div class="card-subtitle">за період</div>
             </div>
           \`;
         }
@@ -445,7 +513,7 @@ router.get('/dashboard', (req, res) => {
         if (purchases.success) {
           const tbody = document.getElementById('purchases-body');
           if (purchases.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5">No purchases in period</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5">Немає покупок за період</td></tr>';
           } else {
             tbody.innerHTML = purchases.data.map(p => \`
               <tr>
@@ -464,7 +532,7 @@ router.get('/dashboard', (req, res) => {
         if (models.success) {
           const tbody = document.getElementById('models-body');
           if (models.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6">No generations in period</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6">Немає генерацій за період</td></tr>';
           } else {
             tbody.innerHTML = models.data.map(m => {
               const marginClass = m.margin > 50 ? 'success' : m.margin > 30 ? 'warning' : 'danger';
@@ -485,7 +553,7 @@ router.get('/dashboard', (req, res) => {
         
         document.getElementById('error').style.display = 'none';
       } catch (err) {
-        document.getElementById('error').textContent = 'Error: ' + err.message;
+        document.getElementById('error').textContent = 'Помилка: ' + err.message;
         document.getElementById('error').style.display = 'block';
       }
     }

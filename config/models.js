@@ -262,7 +262,7 @@ module.exports = {
             tokens: 186,
             tokensLiqPay: 260,
             price: 299,
-            priceUSD: 7,
+            priceUSD: 0.1,
             features: [
                 '🚀 186⚡ токенів (Telegram Stars)',
                 '🚀 260⚡ токенів (LiqPay)',

@@ -2804,6 +2804,19 @@ async function generateKlingMotionVideo(ctx, state) {
           chatId, statusMsg.message_id, null,
           `❌ Помилка генерації Kling Motion.\n\n${result.error}\n\nСпробуйте ще раз.`
         );
+
+        // 📊 Логуємо невдалу генерацію
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'kling_motion',
+          success: false,
+          options: { mode: generationData.mode, orientation: generationData.orientation },
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100)
+        });
+
         return;
       }
 
@@ -2811,6 +2824,17 @@ async function generateKlingMotionVideo(ctx, state) {
         modelKey: 'kling_motion', modelName: model.name, apiCost: apiCost,
         mode: generationData.mode, orientation: generationData.orientation,
         keepOriginalSound: generationData.keepOriginalSound
+      });
+
+      // 📊 Логуємо успішну генерацію
+      const isTrialMotion = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey: 'kling_motion',
+        success: true,
+        options: { mode: generationData.mode, orientation: generationData.orientation },
+        isTrial: isTrialMotion,
+        isFree: isTrialMotion
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -2930,6 +2954,19 @@ async function generateKlingVideo(ctx, state) {
           chatId, statusMsg.message_id, null,
           `❌ Помилка генерації Kling.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
         );
+
+        // 📊 Логуємо невдалу генерацію
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'kling',
+          success: false,
+          options: { duration },
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100)
+        });
+
         return;
       }
 
@@ -2938,6 +2975,17 @@ async function generateKlingVideo(ctx, state) {
         prompt: generationData.prompt, duration: duration,
         hasStartImage: hasStartImage,
         hasEndImage: hasEndImage
+      });
+
+      // 📊 Логуємо успішну генерацію
+      const isTrialKling = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey: 'kling',
+        success: true,
+        options: { duration },
+        isTrial: isTrialKling,
+        isFree: isTrialKling
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -3056,6 +3104,19 @@ async function generateVeoVideo(ctx, state) {
           chatId, statusMsg.message_id, null,
           `❌ Помилка генерації Veo 3.1.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
         );
+
+        // 📊 Логуємо невдалу генерацію
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'veo',
+          success: false,
+          options: { duration, generateAudio },
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100)
+        });
+
         return;
       }
 
@@ -3066,6 +3127,17 @@ async function generateVeoVideo(ctx, state) {
         hasStartImage: hasStartImage,
         references: generationData.references?.length || 0,
         hasLastFrame: hasLastFrame
+      });
+
+      // 📊 Логуємо успішну генерацію
+      const isTrialVeo = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey: 'veo',
+        success: true,
+        options: { duration, generateAudio },
+        isTrial: isTrialVeo,
+        isFree: isTrialVeo
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -4087,10 +4159,32 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
     if (!result.success) {
       await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_generation`, model: model.name, prompt, hasImage: !!imageInput });
       await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка генерації.\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`);
+
+      // 📊 Логуємо невдалу генерацію
+      const isTrial = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey,
+        success: false,
+        isTrial,
+        isFree: isTrial,
+        errorCode: result.error?.substring(0, 100)
+      });
+
       return;
     }
 
     await userBalance.deductTokens(userId, model.cost, `${model.name} generation`, { modelKey, modelName: model.name, apiCost: model.apiCost, prompt, hasImage: !!imageInput });
+
+    // 📊 Логуємо успішну генерацію
+    const isTrialImg = await isTrialUser(userId);
+    await monitoringLoggers.logUsageEvent({
+      userId,
+      modelKey,
+      success: true,
+      isTrial: isTrialImg,
+      isFree: isTrialImg
+    });
 
     // ✅ Записуємо Trial usage для лімітованих моделей
     if (TRIAL_RESTRICTIONS.limitedModels[modelKey]) {

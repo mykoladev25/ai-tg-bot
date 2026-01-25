@@ -1,10 +1,15 @@
 /**
- * Monitoring Alerts - notify admin on anomalies
+ * Monitoring Alerts - сповіщення адміну при проблемах
+ *
+ * СЛОВНИК:
+ * - COGS = Собівартість = скільки ми платимо за API
+ * - Trial Burn = "Згоріло на безкоштовних" = API витрати на trial юзерів
+ * - Fail Rate = Відсоток помилок генерації
  */
 
 const aggregations = require('./aggregations');
 
-// Default thresholds (can be overridden via env)
+// Пороги для алертів (з .env або дефолтні)
 const ALERT_COGS_USD_DAILY = parseFloat(process.env.ALERT_COGS_USD_DAILY) || 50;
 const ALERT_TRIAL_BURN_USD_DAILY = parseFloat(process.env.ALERT_TRIAL_BURN_USD_DAILY) || 20;
 const ALERT_FAIL_RATE_PCT = parseFloat(process.env.ALERT_FAIL_RATE_PCT) || 15;

@@ -1,6 +1,11 @@
 /**
- * Monitoring Loggers - instrument generation and payment events
- * Call these from bot handlers to track all activity
+ * Monitoring Loggers - логування генерацій та платежів
+ *
+ * СЛОВНИК:
+ * - COGS (Cost of Goods Sold) = Собівартість = скільки ми платимо API за генерацію
+ * - Revenue = Дохід = скільки клієнт заплатив нам
+ * - Gross Margin = Валовий прибуток = Revenue - COGS (наш заробіток)
+ * - Trial Burn = "Згоріло на безкоштовних" = COGS для trial користувачів (ми платимо, вони - ні)
  */
 
 const crypto = require('crypto');
@@ -8,8 +13,9 @@ const UsageEvent = require('../database/models/UsageEvent');
 const PaymentEvent = require('../database/models/PaymentEvent');
 const models = require('../config/models');
 
-// Token price for revenue calculation (worst case from premium plan)
-const TOKEN_PRICE_USD = 110 / 4760; // ≈ 0.0231
+// Ціна 1 токена в USD (найгірший випадок з premium плану)
+// Потрібна для розрахунку Revenue
+const TOKEN_PRICE_USD = 110 / 4760; // ≈ $0.0231 за токен
 
 /**
  * Generate unique request ID
@@ -176,11 +182,24 @@ async function logUsageEvent(payload) {
 
     await event.save();
 
-    console.log(`📊 [Monitor] Usage logged: ${modelKey} | user=${userId} | success=${success} | cost=$${apiCost.toFixed(4)} | trial=${isTrial}`);
+    // 📊 Логуємо простими словами
+    const trialLabel = isTrial ? '🆓 TRIAL (безкоштовно)' : '💰 PAID (платний)';
+    const successLabel = success ? '✅' : '❌';
+    console.log(`
+📊 ═══════════════════════════════════════
+   ГЕНЕРАЦІЯ ${successLabel}
+   ├─ 🤖 Модель: ${modelConfig?.name || modelKey}
+   ├─ 👤 Користувач: ${userId} ${trialLabel}
+   ├─ ⚡ Токенів списано: ${tokensSpent}
+   ├─ 💵 Собівартість (COGS): $${apiCost.toFixed(4)}
+   ├─ 💰 Наш дохід: $${estimatedRevenueUSD.toFixed(4)}
+   └─ 📈 Прибуток: $${(estimatedRevenueUSD - apiCost).toFixed(4)}
+═══════════════════════════════════════
+`);
 
     return { success: true, requestId, event };
   } catch (error) {
-    console.error('❌ [Monitor] Failed to log usage event:', error.message);
+    console.error('❌ [Monitor] Помилка логування генерації:', error.message);
     return { success: false, error: error.message };
   }
 }
@@ -235,9 +254,27 @@ async function logPaymentEvent(payload) {
     });
 
     if (result.isNew) {
-      console.log(`💰 [Monitor] Payment logged: ${provider} | ${planKey} | user=${userId} | $${amountUSD || 0} | status=${status}`);
+      // 💰 Логуємо платіж простими словами
+      const providerName = {
+        'wayforpay': '💳 WayForPay (картка)',
+        'stars': '⭐ Telegram Stars',
+        'liqpay': '💳 LiqPay',
+        'stripe': '💳 Stripe'
+      }[provider] || provider;
+
+      console.log(`
+💰 ═══════════════════════════════════════
+   НОВИЙ ПЛАТІЖ ✅
+   ├─ 👤 Користувач: ${userId}
+   ├─ 📦 Пакет: ${planName}
+   ├─ 💵 Сума: $${amountUSD || 0} / ${amountUAH || 0} грн
+   ├─ ⚡ Токенів нараховано: ${tokensGranted}
+   ├─ 🏦 Спосіб: ${providerName}
+   └─ 🔖 ID платежу: ${providerPaymentId}
+═══════════════════════════════════════
+`);
     } else {
-      console.log(`⚠️ [Monitor] Payment already exists: ${provider}/${providerPaymentId}`);
+      console.log(`⚠️ [Monitor] Платіж вже існує: ${provider}/${providerPaymentId}`);
     }
 
     return result;
