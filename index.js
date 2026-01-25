@@ -15,6 +15,11 @@ const exchangeRate = require('./services/exchangeRate');
 // Імпортуємо webhooks
 const stripeWebhook = require('./webhooks/stripe');
 
+// Імпортуємо моніторинг
+const monitoringLoggers = require('./monitoring/loggers');
+const monitoringAlerts = require('./monitoring/alerts');
+const adminRoutes = require('./admin/routes');
+
 // Імпортуємо утиліти
 const keyboard = require('./utils/keyboard');
 const userBalance = require('./utils/userBalance');
@@ -849,11 +854,23 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
     return;
   }
 
+  // Парсимо username та firstName з тексту повідомлення
+  // Формат: 👤 Від: @username (FirstName)
+  const messageText = ctx.callbackQuery?.message?.text || ctx.callbackQuery?.message?.caption || '';
+  let username = 'unknown';
+  let firstName = 'Unknown';
+
+  const userMatch = messageText.match(/👤 Від: @(\S+) \(([^)]+)\)/);
+  if (userMatch) {
+    username = userMatch[1] || 'unknown';
+    firstName = userMatch[2] || 'Unknown';
+  }
+
   // Блокуємо користувача в БД
   const success = await blockedUsersUtil.blockUser(
     userId,
-    'unknown',
-    'Unknown',
+    username,
+    firstName,
     parseInt(adminId),
     'Spam or inappropriate behavior',
     'Blocked via feedback system'
@@ -4673,6 +4690,15 @@ async function startBot() {
     const wayforpayWebhook = createWayForPayRouter(bot);
     app.use('/webhook', wayforpayWebhook);
 
+    // ✅ Admin routes (protected by ADMIN_TOKEN)
+    app.use('/admin', adminRoutes);
+
+    // ✅ Schedule monitoring alerts
+    if (process.env.NODE_ENV === 'production' || process.env.ENABLE_ALERTS === 'true') {
+      monitoringAlerts.scheduleAlerts(bot);
+      console.log('📢 Monitoring alerts scheduled');
+    }
+
 
     // ==================== PAGES ====================
 
@@ -5900,6 +5926,7 @@ async function startBot() {
       console.log(`💳 WayForPay checkout: GET http://127.0.0.1:${PORT}/pay/wayforpay?plan=starter`);
       console.log(`💱 Exchange Rate API: GET http://127.0.0.1:${PORT}/api/exchange-rate`);
       console.log(`📊 Plans API: GET http://127.0.0.1:${PORT}/api/plans`);
+      console.log(`📈 Admin Dashboard: GET http://127.0.0.1:${PORT}/admin/dashboard?token=YOUR_TOKEN`);
     });
 
     // ==================== START BOT ====================

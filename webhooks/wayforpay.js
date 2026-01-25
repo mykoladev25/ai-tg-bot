@@ -3,6 +3,7 @@ const router = express.Router();
 const wayforpay = require('../services/wayforpay');
 const userBalance = require('../utils/userBalance');
 const models = require('../config/models');
+const { logPaymentEvent } = require('../monitoring/loggers');
 
 module.exports = function(bot) {
 
@@ -126,6 +127,19 @@ module.exports = function(bot) {
                     );
 
                     console.log(`✅ WayForPay: +${tokens}⚡ to user ${userId} (${sub.name})`);
+
+                    // ✅ Log payment event for monitoring
+                    await logPaymentEvent({
+                        userId: String(userId),
+                        provider: 'wayforpay',
+                        providerPaymentId: orderReference,
+                        planKey: planKey,
+                        amountUAH: amount,
+                        amountUSD: sub.priceUSD || null,
+                        tokensGranted: tokens,
+                        status: 'success',
+                        raw: data
+                    });
 
                     // Повідомляємо користувача
                     try {
