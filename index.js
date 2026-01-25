@@ -1944,7 +1944,7 @@ bot.action(/^(kling|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ct
     return;
   }
 
-  // Для Runway Turbo показуємо флоу: промпт -> image + параметри
+  // Для Runway Turbo показуємо флоу: image -> параметри -> промпт
   if (modelKey === 'runway_turbo') {
     const durations = model.durations || [5];
     const minDuration = Math.min(...durations);
@@ -1952,18 +1952,25 @@ bot.action(/^(kling|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ct
     const costPerSec = model.costPerSecond || (model.cost / minDuration);
     const minCost = minDuration * costPerSec;
     const maxCost = maxDuration * costPerSec;
+    const aspectRatios = model.aspectRatios || ['16:9'];
+    const defaultAspect = aspectRatios[0];
     userState.set(ctx.from.id, {
       action: 'runway_turbo_generation',
-      step: 'waiting_prompt'
+      step: 'waiting_image',
+      duration: minDuration,
+      aspectRatio: defaultAspect
     });
 
     await ctx.reply(
       `🎬 <b>Runway Gen-4 Turbo</b>\n\n` +
-      `📝 <b>Крок 1: Введіть промпт</b>\n\n` +
-      `Опишіть рух/анімацію для відео.\n\n` +
+      `🖼️ <b>Крок 1: Додайте Initial image</b>\n\n` +
+      `Це перший кадр відео.\n\n` +
       `⏱️ Тривалість: ${minDuration}-${maxDuration} сек\n` +
       `💰 Вартість: ${minCost.toFixed(1)}—${maxCost.toFixed(1)}⚡\n\n` +
-      `✍️ Надішліть текстовий промпт:`,
+      `📐 Поточні налаштування:\n` +
+      `• Тривалість: ${minDuration} сек\n` +
+      `• Aspect ratio: ${defaultAspect}\n\n` +
+      `📤 Надішліть одне зображення:`,
       {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
@@ -2127,7 +2134,7 @@ bot.action(/^veo_audio_(on|off)$/, async (ctx) => {
     ...state,
     generateAudio: generateAudio,
     veoCost: finalCost,
-    step: 'waiting_prompt'
+    step: 'ask_start_image'
   });
 
   await ctx.reply(
@@ -2136,14 +2143,18 @@ bot.action(/^veo_audio_(on|off)$/, async (ctx) => {
     `⏱️ Тривалість: <b>${state.duration} секунд</b>\n` +
     `🔊 Аудіо: <b>${generateAudio ? 'Так' : 'Ні'}</b>\n` +
     `💰 Вартість: <b>${finalCost}⚡</b>\n\n` +
-    `📝 <b>Крок 4: Напишіть промпт</b>\n\n` +
-    `Опишіть детально що хочете бачити у відео.\n\n` +
-    `💡 <b>Приклади:</b>\n` +
-    `• A woman walking through a sunlit forest\n` +
-    `• Drone shot of a city at sunset, cinematic\n` +
-    `• A cat playing with a ball, slow motion\n\n` +
-    `✍️ <b>Надішліть текстовий промпт:</b>`,
-    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    `🖼️ <b>Крок 4: Стартове зображення (опціонально)</b>\n\n` +
+    `Це перший кадр відео. AI анімує його.\n` +
+    `Якщо не маєте — пропустіть.\n\n` +
+    `📤 Оберіть дію:`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🖼️ Завантажу зображення', 'veo_add_start_image')],
+        [Markup.button.callback('⏭️ Без зображення', 'veo_skip_start_image')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
   );
 });
 
@@ -2175,7 +2186,6 @@ bot.action(/^runway_turbo_duration_(\d+)$/, async (ctx) => {
 
   await ctx.reply(
     `🎬 <b>Runway Gen-4 Turbo</b>\n\n` +
-    `📝 Промпт: "${state.prompt?.substring(0, 80)}${state.prompt?.length > 80 ? '...' : ''}"\n` +
     `⏱️ Тривалість: <b>${duration} сек</b>\n` +
     `💰 Вартість: <b>${cost.toFixed(1)}⚡</b>\n\n` +
     `📐 <b>Крок 3: Оберіть aspect ratio</b>`,
@@ -2208,17 +2218,16 @@ bot.action(/^runway_turbo_aspect_(.+)$/, async (ctx) => {
   userState.set(userId, {
     ...state,
     aspectRatio: aspectRatio,
-    step: 'waiting_image'
+    step: 'waiting_prompt'
   });
 
   await ctx.reply(
     `🎬 <b>Runway Gen-4 Turbo</b>\n\n` +
-    `📝 Промпт: "${state.prompt?.substring(0, 80)}${state.prompt?.length > 80 ? '...' : ''}"\n` +
     `⏱️ Тривалість: <b>${duration} сек</b>\n` +
     `📐 Aspect ratio: <b>${aspectRatio}</b>\n` +
     `💰 Вартість: <b>${cost.toFixed(1)}⚡</b>\n\n` +
-    `🖼️ <b>Крок 4: Додайте Initial image</b>\n` +
-    `Це перший кадр відео.`,
+    `✍️ <b>Крок 4: Введіть промпт</b>\n\n` +
+    `Опишіть рух/анімацію для відео.`,
     { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
   );
 });
@@ -2421,15 +2430,21 @@ bot.action('veo_references_done', async (ctx) => {
 
   const refCount = state.references?.length || 0;
 
-  // Якщо є референси - last_frame ігнорується, генеруємо одразу
+  // Якщо є референси - last_frame ігнорується, переходимо до промпту
   if (refCount > 0) {
+    userState.set(userId, {
+      ...state,
+      step: 'waiting_prompt',
+      lastFrame: null
+    });
+
     await ctx.reply(
       `✅ <b>Референсів завантажено: ${refCount}</b>\n\n` +
       `⚠️ <i>Last frame ігнорується при використанні референсів</i>\n\n` +
-      `🚀 Починаємо генерацію...`,
-      { parse_mode: 'HTML' }
+      `✍️ <b>Крок 6: Введіть промпт</b>\n\n` +
+      `Опишіть детально що хочете бачити у відео.`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
-    await generateVeoVideo(ctx, state);
     return;
   }
 
@@ -2451,7 +2466,7 @@ bot.action('veo_references_done', async (ctx) => {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
         [Markup.button.callback('📷 Так, завантажу', 'veo_add_last_frame')],
-        [Markup.button.callback('⏭️ Ні, генерувати без', 'veo_skip_last_frame')],
+        [Markup.button.callback('⏭️ Ні, без last frame → далі', 'veo_skip_last_frame')],
         [Markup.button.callback('← Назад', 'video_menu')]
       ])
     }
@@ -2487,7 +2502,7 @@ bot.action('veo_skip_references', async (ctx) => {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
         [Markup.button.callback('📷 Так, завантажу', 'veo_add_last_frame')],
-        [Markup.button.callback('⏭️ Ні, генерувати без', 'veo_skip_last_frame')],
+        [Markup.button.callback('⏭️ Ні, без last frame → далі', 'veo_skip_last_frame')],
         [Markup.button.callback('← Назад', 'video_menu')]
       ])
     }
@@ -2518,7 +2533,7 @@ bot.action('veo_add_last_frame', async (ctx) => {
   );
 });
 
-// Пропустити last frame - генеруємо
+// Пропустити last frame - переходимо до промпту
 bot.action('veo_skip_last_frame', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -2529,11 +2544,20 @@ bot.action('veo_skip_last_frame', async (ctx) => {
     return;
   }
 
-  await ctx.reply('🚀 Починаємо генерацію...');
-  await generateVeoVideo(ctx, state);
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_prompt',
+    lastFrame: null
+  });
+
+  await ctx.reply(
+    `✍️ <b>Крок 6: Введіть промпт</b>\n\n` +
+    `Опишіть детально що хочете бачити у відео.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
 });
 
-// Генерувати одразу (без додаткових опцій)
+// Перейти до промпту (без додаткових опцій)
 bot.action('veo_generate_now', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -2544,8 +2568,16 @@ bot.action('veo_generate_now', async (ctx) => {
     return;
   }
 
-  await ctx.reply('🚀 Починаємо генерацію...');
-  await generateVeoVideo(ctx, state);
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_prompt'
+  });
+
+  await ctx.reply(
+    `✍️ <b>Крок 6: Введіть промпт</b>\n\n` +
+    `Опишіть детально що хочете бачити у відео.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
 });
 
 // ==================== KLING v2.5 CALLBACKS ====================
@@ -2669,22 +2701,26 @@ bot.action('kling_skip_start_image', async (ctx) => {
   userState.set(userId, {
     ...state,
     startImage: null,
-    step: 'waiting_prompt'
+    step: 'ask_end_image'
   });
 
   await ctx.reply(
     `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
-    `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
-    `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
-    `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
-    `📝 <b>Крок 4: Напишіть промпт</b>\n\n` +
-    `Опишіть детально що хочете бачити у відео.\n\n` +
-    `💡 <b>Приклади:</b>\n` +
-    `• A dog running on the beach, slow motion\n` +
-    `• Cinematic drone shot of mountains at sunrise\n` +
-    `• A dancer performing ballet, elegant movements\n\n` +
-    `✍️ <b>Надішліть текстовий промпт:</b>`,
-    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
+    `<b>Що це:</b> Зображення для кінця відео.\n` +
+    `AI створить плавний перехід від першого до останнього кадру.\n\n` +
+    `<b>🎯 Приклад:</b>\n` +
+    `• Початок: людина стоїть\n` +
+    `• Кінець: людина сидить\n` +
+    `• Результат: анімація присідання`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📷 Завантажу end_image', 'kling_add_end_image')],
+        [Markup.button.callback('⏭️ Перейти до промпту', 'kling_skip_end_image')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
   );
 });
 
@@ -3632,7 +3668,7 @@ bot.on('text', async (ctx) => {
 
   if (text.startsWith('/')) return;
 
-  // ✅ VEO: Обробка промпту
+  // ✅ VEO: Обробка промпту (останній крок)
   if (state?.action === 'veo_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -3643,41 +3679,18 @@ bot.on('text', async (ctx) => {
       return;
     }
 
-    // Зберігаємо промпт і питаємо про стартове зображення
     userState.set(userId, {
       ...state,
       prompt: text,
-      step: 'ask_start_image'
+      step: 'ready_to_generate'
     });
 
-    const model = models.video.models.find(m => m.key === 'veo');
-    const idealSize = state.aspectRatio === '16:9' ? '1280×720' : '720×1280';
-
-    // Питаємо про стартове зображення (працює для обох пропорцій)
-    await ctx.reply(
-      `✅ <b>Промпт збережено!</b>\n\n` +
-      `📝 "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n\n` +
-      `🖼️ <b>Крок 3: Стартове зображення (опціонально)</b>\n\n` +
-      `<b>Що це:</b> Зображення яке стане першим кадром відео.\n` +
-      `AI анімує його згідно з промптом.\n\n` +
-      `<b>🎯 Приклади:</b>\n` +
-      `• Фото людини → відео де вона рухається\n` +
-      `• Пейзаж → камера летить над ним\n` +
-      `• Продукт → обертання 360°\n\n` +
-      `💡 Ідеальний розмір: ${idealSize}`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🖼️ Завантажу зображення', 'veo_add_start_image')],
-          [Markup.button.callback('⏭️ Без зображення (text-to-video)', 'veo_skip_start_image')],
-          [Markup.button.callback('← Назад', 'video_menu')]
-        ])
-      }
-    );
+    await ctx.reply('🚀 Промпт збережено! Починаємо генерацію...');
+    await generateVeoVideo(ctx, { ...state, prompt: text });
     return;
   }
 
-  // ✅ RUNWAY TURBO: Обробка промпту
+  // ✅ RUNWAY TURBO: Обробка промпту (останній крок)
   if (state?.action === 'runway_turbo_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -3688,29 +3701,20 @@ bot.on('text', async (ctx) => {
       return;
     }
 
-    const model = models.video.models.find(m => m.key === 'runway_turbo');
+    if (!state.startImage) {
+      await ctx.reply('❌ Немає Initial image. Почніть заново, оберіть Runway Turbo.');
+      userState.delete(userId);
+      return;
+    }
+
     userState.set(userId, {
       ...state,
       prompt: text,
-      step: 'select_duration'
+      step: 'ready_to_generate'
     });
 
-    const durations = model?.durations || [5];
-    const costPerSec = model?.costPerSecond || (model?.cost || 22) / 5;
-    const durationButtons = durations.map(d => Markup.button.callback(`${d} сек (${(d * costPerSec).toFixed(1)}⚡)`, `runway_turbo_duration_${d}`));
-
-    await ctx.reply(
-      `✅ <b>Промпт збережено!</b>\n\n` +
-      `📝 "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n\n` +
-      `⏱️ <b>Крок 2: Оберіть тривалість</b>`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          durationButtons,
-          [Markup.button.callback('← Назад', 'video_menu')]
-        ])
-      }
-    );
+    await ctx.reply('🚀 Промпт збережено! Починаємо генерацію...');
+    await generateRunwayTurboVideo(ctx, { ...state, prompt: text });
     return;
   }
 
@@ -3812,7 +3816,7 @@ bot.on('text', async (ctx) => {
     await ctx.reply(
       '🎬 <b>Runway Gen-4 Turbo</b>\n\n' +
       '⚠️ Спочатку натисніть Runway Turbo в меню відео.\n' +
-      'Потім: промпт → image.',
+      'Потім: image → промпт.',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
     return;
@@ -3944,7 +3948,7 @@ bot.on('photo', async (ctx) => {
           parse_mode: 'HTML',
           ...Markup.inlineKeyboard([
             [Markup.button.callback('📸 Додати референси (до 3)', 'veo_add_references')],
-            [Markup.button.callback('⏭️ Без референсів → генерувати', 'veo_generate_now')],
+            [Markup.button.callback('⏭️ Без референсів → далі', 'veo_skip_references')],
             [Markup.button.callback('← Назад', 'video_menu')]
           ])
         }
@@ -3959,7 +3963,7 @@ bot.on('photo', async (ctx) => {
           parse_mode: 'HTML',
           ...Markup.inlineKeyboard([
             [Markup.button.callback('📷 Завантажу last frame', 'veo_add_last_frame')],
-            [Markup.button.callback('⏭️ Генерувати без', 'veo_generate_now')],
+            [Markup.button.callback('⏭️ Без last frame → далі', 'veo_skip_last_frame')],
             [Markup.button.callback('← Назад', 'video_menu')]
           ])
         }
@@ -4011,11 +4015,15 @@ bot.on('photo', async (ctx) => {
     userState.set(userId, {
       ...state,
       lastFrame: imageUrl,
-      step: 'ready_to_generate'
+      step: 'waiting_prompt'
     });
 
-    await ctx.reply('🚀 Last frame отримано! Починаємо генерацію...');
-    await generateVeoVideo(ctx, { ...state, lastFrame: imageUrl });
+    await ctx.reply(
+      `✅ <b>Last frame отримано!</b>\n\n` +
+      `✍️ <b>Крок 6: Введіть промпт</b>\n\n` +
+      `Опишіть детально що хочете бачити у відео.`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
     return;
   }
 
@@ -4023,20 +4031,28 @@ bot.on('photo', async (ctx) => {
   if (state?.action === 'runway_turbo_generation' && state?.step === 'waiting_image') {
     const imageUrl = await getImageUrl(ctx);
 
-    if (!state.prompt) {
-      await ctx.reply('❌ Немає промпту. Почніть заново, оберіть Runway Turbo.');
-      userState.delete(userId);
-      return;
-    }
-
     userState.set(userId, {
       ...state,
       startImage: imageUrl,
-      step: 'ready_to_generate'
+      step: 'select_duration'
     });
 
-    await ctx.reply('🚀 Initial image отримано! Починаємо генерацію...');
-    await generateRunwayTurboVideo(ctx, { ...state, startImage: imageUrl });
+    const model = models.video.models.find(m => m.key === 'runway_turbo');
+    const durations = model?.durations || [5];
+    const costPerSec = model?.costPerSecond || (model?.cost || 22) / 5;
+    const durationButtons = durations.map(d => Markup.button.callback(`${d} сек (${(d * costPerSec).toFixed(1)}⚡)`, `runway_turbo_duration_${d}`));
+
+    await ctx.reply(
+      `✅ <b>Initial image отримано!</b>\n\n` +
+      `⏱️ <b>Крок 2: Оберіть тривалість</b>`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          durationButtons,
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
     return;
   }
 
