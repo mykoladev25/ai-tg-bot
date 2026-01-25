@@ -212,8 +212,8 @@ module.exports = {
             {
                 name: '🌊 Seedream 2K',
                 key: 'seedream_2k',
-                cost: 10,
-                apiCost: 0.1,
+                cost: 5,
+                apiCost: 0.04,
                 size: '2K',
                 maxImages: 14,
                 available: true
@@ -223,8 +223,8 @@ module.exports = {
             {
                 name: '🌊 Seedream 4.5 4K',
                 key: 'seedream_4k',
-                cost: 14,
-                apiCost: 0.15,
+                cost: 10,
+                apiCost: 0.04,
                 size: '4K',
                 maxImages: 14,
                 available: true
