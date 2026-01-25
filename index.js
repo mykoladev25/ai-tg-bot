@@ -4595,18 +4595,43 @@ function isAbsoluteHttpUrl(url) {
   return typeof url === 'string' && /^https?:\/\//i.test(url);
 }
 
+function extractMediaUrl(media) {
+  if (!media) return null;
+  if (typeof media === 'string') return media;
+  if (Array.isArray(media)) {
+    return media.length ? extractMediaUrl(media[0]) : null;
+  }
+  if (typeof media === 'object') {
+    if (typeof media.url === 'string') return media.url;
+    if (typeof media.output === 'string') return media.output;
+    if (typeof media.video === 'string') return media.video;
+    if (typeof media.image === 'string') return media.image;
+    if (media.output && typeof media.output.url === 'string') return media.output.url;
+  }
+  return null;
+}
+
+function normalizeMediaUrl(media) {
+  const url = extractMediaUrl(media);
+  if (!url) return null;
+  if (url.startsWith('//')) return `https:${url}`;
+  return url;
+}
+
 async function safeSendPhoto(chatId, url, options) {
-  if (!isAbsoluteHttpUrl(url)) {
+  const mediaUrl = normalizeMediaUrl(url);
+  if (!isAbsoluteHttpUrl(mediaUrl)) {
     throw new Error('Invalid media URL for photo');
   }
-  return bot.telegram.sendPhoto(chatId, { url }, options);
+  return bot.telegram.sendPhoto(chatId, { url: mediaUrl }, options);
 }
 
 async function safeSendVideo(chatId, url, options) {
-  if (!isAbsoluteHttpUrl(url)) {
+  const mediaUrl = normalizeMediaUrl(url);
+  if (!isAbsoluteHttpUrl(mediaUrl)) {
     throw new Error('Invalid media URL for video');
   }
-  return bot.telegram.sendVideo(chatId, url, options);
+  return bot.telegram.sendVideo(chatId, mediaUrl, options);
 }
 
 async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, aspectRatio = '1:1') {
