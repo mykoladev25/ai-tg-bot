@@ -179,8 +179,8 @@ module.exports = {
              * Keep standard models roughly 55–70% gross (competitive enough, funds ops).
              */
 
-            // apiCost 0.01, cost=1 => gross ~63.6%
-            {name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 1, apiCost: 0.01, available: true},
+            // apiCost 0.065 (офіційна ціна Replicate 2026-01), cost=3 => gross ~58%
+            {name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 3, apiCost: 0.065, available: true},
 
             // apiCost 0.15, cost=14 => rev 0.385; gross ~61%
             {

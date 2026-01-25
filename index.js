@@ -19,6 +19,7 @@ const stripeWebhook = require('./webhooks/stripe');
 const monitoringLoggers = require('./monitoring/loggers');
 const monitoringAlerts = require('./monitoring/alerts');
 const adminRoutes = require('./admin/routes');
+const replicatePricing = require('./services/replicatePricing');
 
 // Імпортуємо утиліти
 const keyboard = require('./utils/keyboard');
@@ -4680,6 +4681,9 @@ async function startBot() {
     console.log('🤖 Starting bot...');
     console.log('✅ Bot started successfully!');
     console.log('📱 Bot username: @neuro_lab_ai_bot');
+
+    // 💰 Перевірка цін Replicate при старті
+    replicatePricing.logPriceComparison();
 
     if (isShowBroadCast) {
       console.log('📢 Sending startup broadcast...');

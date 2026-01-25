@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const aggregations = require('../monitoring/aggregations');
 const DailySummary = require('../database/models/DailySummary');
+const replicatePricing = require('../services/replicatePricing');
 
 // Auth middleware
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || process.env.ADMIN_TELEGRAM_ID;
@@ -167,6 +168,34 @@ router.post('/metrics/compute-daily', async (req, res) => {
     res.json({ success: true, data: summary });
   } catch (error) {
     console.error('Admin compute-daily error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /admin/pricing/check
+ * Перевірка актуальності цін Replicate
+ */
+router.get('/pricing/check', (req, res) => {
+  try {
+    const discrepancies = replicatePricing.comparePrices();
+    const officialPrices = replicatePricing.getAllOfficialPrices();
+    const suggestedUpdates = replicatePricing.getSuggestedUpdates();
+
+    res.json({
+      success: true,
+      data: {
+        status: discrepancies.length === 0 ? 'OK' : 'NEEDS_UPDATE',
+        discrepancies,
+        suggestedUpdates,
+        officialPrices,
+        message: discrepancies.length === 0
+          ? '✅ Всі ціни актуальні!'
+          : `⚠️ Знайдено ${discrepancies.length} розбіжностей. Оновіть apiCost в models.js`
+      }
+    });
+  } catch (error) {
+    console.error('Admin pricing check error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
