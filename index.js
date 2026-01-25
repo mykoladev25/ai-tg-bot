@@ -42,7 +42,7 @@ const isShowBroadCast = process.env.SEND_STARTUP_BROADCAST === 'true' && false;
 const feedbackData = new Map(); // userId -> { type, message, timestamp }
 
 // Стан генерації зображень (новий флоу)
-// userId -> { model: string, prompt: string, step: 'prompt'|'references'|'ready' }
+// userId -> { model: string, prompt?: string, photos?: Array, step: 'waiting_photos'|'prompt' }
 const imageGenState = new Map();
 
 // Rate limiting для заблокованих користувачів (щоб не спамили)
@@ -166,7 +166,7 @@ async function checkTrialRestrictions(userId, modelKey, options = {}) {
   return { allowed: true };
 }
 
-// ✅ ГРАФІЧНІ МОДЕЛІ ДЛЯ НОВОГО ФЛОУ (промпт → референси → генерація)
+// ✅ ГРАФІЧНІ МОДЕЛІ ДЛЯ НОВОГО ФЛОУ (референси → промпт → генерація)
 const IMAGE_MODELS = [
   'stable_diffusion',
   'nano_banana_2k',
@@ -1702,52 +1702,54 @@ bot.action(/^(midjourney|flux|nano_banana_2k|nano_banana_4k|stable_diffusion|see
 
   userCurrentModel.set(ctx.from.id, modelKey);
 
-  // ✅ НОВИЙ ФЛОУ: Зберігаємо стан - чекаємо на промпт
+  const maxPhotos = (modelKey.includes('nano_banana') || modelKey.includes('seedream')) ? 14 : 1;
+
+  // ✅ НОВИЙ ФЛОУ: Зберігаємо стан - чекаємо на референси
   imageGenState.set(ctx.from.id, {
     model: modelKey,
-    step: 'prompt'
+    step: 'waiting_photos',
+    photos: []
   });
+
+  const refsStep = `📝 <b>Крок 1:</b> Надішліть референс-зображення (опціонально)\n` +
+    `💡 Можна до ${maxPhotos} фото\n\n` +
+    `✍️ <b>Крок 2:</b> Введіть промпт\n\n` +
+    `Натисніть <b>"Далі до промпту"</b> якщо без референсів.\n\n`;
 
   // Інструкції для різних моделей
   const messages = {
     clarity: `✨ <b>${model.name}</b>\n\n` +
       `🔮 Покращення якості зображень\n\n` +
-      `📝 <b>Крок 1:</b> Надішліть фото, яке хочете покращити\n` +
+      refsStep +
       `💬 Можете додати опис для кращого результату\n\n` +
       `💰 Вартість: ${model.cost}⚡\n` +
       `⏱️ Час: ~30-60 секунд`,
 
     stable_diffusion: `🌀 <b>${model.name}</b>\n\n` +
-      `📝 <b>Крок 1:</b> Введіть промпт\n\n` +
+      refsStep +
       `Опишіть детально що хочете згенерувати.\n\n` +
       `💡 Приклад: "A beautiful sunset over mountains, photorealistic, 8k"\n\n` +
       `💰 Вартість: ${model.cost}⚡\n` +
-      `⏱️ Час: ~30-40 секунд\n\n` +
-      `✍️ <b>Надішліть промпт:</b>`,
+      `⏱️ Час: ~30-40 секунд`,
 
     ideogram: `✏️ <b>${model.name}</b>\n\n` +
-      `📝 <b>Крок 1:</b> Введіть промпт\n\n` +
+      refsStep +
       `Опишіть детально що хочете згенерувати.\n` +
       `💡 Ideogram чудово працює з текстом на зображеннях!\n\n` +
       `💰 Вартість: ${model.cost}⚡\n` +
-      `⏱️ Час: ~30-40 секунд\n\n` +
-      `✍️ <b>Надішліть промпт:</b>`,
+      `⏱️ Час: ~30-40 секунд`,
 
     nano_banana: `🍌 <b>${model.name}</b>\n\n` +
-      `📝 <b>Крок 1:</b> Введіть промпт\n\n` +
+      refsStep +
       `Опишіть детально що хочете згенерувати.\n` +
-      `💡 Підтримує до 14 референс-зображень!\n\n` +
       `💰 Вартість: ${model.cost}⚡\n` +
-      `⏱️ Час: ~20-30 секунд\n\n` +
-      `✍️ <b>Надішліть промпт:</b>`,
+      `⏱️ Час: ~20-30 секунд`,
 
     seedream: `🌊 <b>${model.name}</b>\n\n` +
-      `📝 <b>Крок 1:</b> Введіть промпт\n\n` +
+      refsStep +
       `Опишіть детально що хочете згенерувати.\n` +
-      `💡 Підтримує до 14 референс-зображень!\n\n` +
       `💰 Вартість: ${model.cost}⚡\n` +
-      `⏱️ Час: ~20-40 секунд\n\n` +
-      `✍️ <b>Надішліть промпт:</b>`
+      `⏱️ Час: ~20-40 секунд`
   };
 
   // Для nano_banana та seedream моделей використовуємо спільний шаблон
@@ -1756,14 +1758,19 @@ bot.action(/^(midjourney|flux|nano_banana_2k|nano_banana_4k|stable_diffusion|see
   if (modelKey.startsWith('seedream')) messageKey = 'seedream';
 
   const defaultMessage = `🎨 <b>${model.name}</b>\n\n` +
-    `📝 <b>Крок 1:</b> Введіть промпт\n\n` +
+    refsStep +
     `Опишіть що хочете згенерувати.\n\n` +
-    `💰 Вартість: ${model.cost}⚡\n\n` +
-    `✍️ <b>Надішліть промпт:</b>`;
+    `💰 Вартість: ${model.cost}⚡`;
 
   await ctx.reply(
     messages[messageKey] || defaultMessage,
-    { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
+        [Markup.button.callback('← Назад', 'design_menu')]
+      ])
+    }
   );
 });
 
@@ -1775,17 +1782,31 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
 
   await ctx.answerCbQuery();
 
-  if (!imgState || !imgState.prompt) {
-    await ctx.reply('❌ Помилка: промпт не знайдено. Почніть заново.', keyboard.createBackButton('design_menu'));
+  if (!imgState) {
+    await ctx.reply('❌ Помилка: стан не знайдено. Почніть заново.', keyboard.createBackButton('design_menu'));
     imageGenState.delete(userId);
     return;
   }
 
+  // Якщо промпт ще не введено — переходимо до кроку промпту
+  if (!imgState.prompt) {
+    imageGenState.set(userId, { ...imgState, step: 'prompt' });
+
+    await ctx.reply(
+      `✍️ <b>Крок 2: Введіть промпт</b>\n\n` +
+      `Опишіть що хочете згенерувати.\n\n` +
+      `💡 Можете детально описати стиль, сцену, об'єкти.`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
+
   const prompt = imgState.prompt;
+  const references = normalizeReferenceOrder(imgState.photos || []);
   imageGenState.delete(userId);
 
   await ctx.reply('🚀 Починаємо генерацію...', { parse_mode: 'HTML' });
-  await handleImageGeneration(ctx, prompt, modelKey);
+  await handleImageGeneration(ctx, prompt, modelKey, references.length ? references : null);
 });
 
 // ✅ НОВИЙ ФЛОУ: Кнопка "Додати референси"
@@ -1796,15 +1817,15 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
 
   await ctx.answerCbQuery();
 
-  if (!imgState || !imgState.prompt) {
-    await ctx.reply('❌ Помилка: промпт не знайдено. Почніть заново.', keyboard.createBackButton('design_menu'));
+  if (!imgState) {
+    await ctx.reply('❌ Помилка: стан не знайдено. Почніть заново.', keyboard.createBackButton('design_menu'));
     imageGenState.delete(userId);
     return;
   }
 
-  // Оновлюємо стан - тепер чекаємо на фото
+  // Оновлюємо стан - чекаємо на фото (референси)
   imgState.step = 'waiting_photos';
-  imgState.photos = [];
+  imgState.photos = imgState.photos || [];
   imageGenState.set(userId, imgState);
 
   const model = models.design.models.find(m => m.key === modelKey);
@@ -1813,10 +1834,13 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
   await ctx.reply(
     `📷 <b>Завантажте референс-зображення</b>\n\n` +
     `💡 Можна до ${maxPhotos} фото\n` +
-    `🚀 Генерація почнеться автоматично`,
+    `✅ Натисніть "Далі до промпту" коли завершите`,
     {
       parse_mode: 'HTML',
-      ...keyboard.createBackButton('design_menu')
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
+        [Markup.button.callback('← Назад', 'design_menu')]
+      ])
     }
   );
 });
@@ -3804,49 +3828,39 @@ bot.on('text', async (ctx) => {
   }
 
   // ✅ НОВИЙ ФЛОУ ДЛЯ ГРАФІЧНИХ МОДЕЛЕЙ
-  // Якщо це графічна модель і ми чекаємо на промпт
   const imgState = imageGenState.get(userId);
-  if (imgState && imgState.step === 'prompt' && IMAGE_MODELS.includes(currentModel)) {
-    // Зберігаємо промпт і питаємо про референси
-    imgState.prompt = text;
-    imgState.step = 'references';
-    imageGenState.set(userId, imgState);
+  if (imgState && IMAGE_MODELS.includes(currentModel)) {
+    if (imgState.step === 'waiting_photos') {
+      imgState.prompt = text;
+      const references = normalizeReferenceOrder(imgState.photos || []);
+      imageGenState.delete(userId);
 
-    const model = models.design.models.find(m => m.key === currentModel);
-    const modelName = model?.name || currentModel;
-
-    // Перевіряємо чи модель підтримує референси
-    const supportsRefs = ['nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'stable_diffusion', 'ideogram'].includes(currentModel);
-
-    if (supportsRefs) {
-      await ctx.reply(
-        `✅ <b>Промпт збережено!</b>\n\n` +
-        `📝 "${text.length > 100 ? text.substring(0, 100) + '...' : text}"\n\n` +
-        `📷 <b>Крок 2:</b> Додати референс-зображення?\n\n` +
-        `Референси допоможуть AI краще зрозуміти що ви хочете.\n` +
-        (currentModel.includes('nano_banana') || currentModel.includes('seedream') ? `💡 Можна завантажити до 14 фото\n\n` : `💡 Можна завантажити 1 фото\n\n`) +
-        `Оберіть дію:`,
-        {
-          parse_mode: 'HTML',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('🚀 Почати генерацію', `img_gen_start_${currentModel}`)],
-            [Markup.button.callback('📷 Додати референси', `img_gen_refs_${currentModel}`)],
-            [Markup.button.callback('← Назад', 'design_menu')]
-          ])
-        }
-      );
-    } else {
-      // Модель не підтримує референси (clarity тощо) - одразу генеруємо
       await ctx.reply(
         `✅ <b>Промпт збережено!</b>\n\n` +
         `📝 "${text.length > 100 ? text.substring(0, 100) + '...' : text}"\n\n` +
         `🚀 Починаємо генерацію...`,
         { parse_mode: 'HTML' }
       );
-      imageGenState.delete(userId);
-      await handleImageGeneration(ctx, text, currentModel);
+
+      await handleImageGeneration(ctx, text, currentModel, references.length ? references : null);
+      return;
     }
-    return;
+
+    if (imgState.step === 'prompt') {
+      imgState.prompt = text;
+      const references = normalizeReferenceOrder(imgState.photos || []);
+      imageGenState.delete(userId);
+
+      await ctx.reply(
+        `✅ <b>Промпт збережено!</b>\n\n` +
+        `📝 "${text.length > 100 ? text.substring(0, 100) + '...' : text}"\n\n` +
+        `🚀 Починаємо генерацію...`,
+        { parse_mode: 'HTML' }
+      );
+
+      await handleImageGeneration(ctx, text, currentModel, references.length ? references : null);
+      return;
+    }
   }
 
 
@@ -4126,6 +4140,8 @@ bot.on('photo', async (ctx) => {
   // ✅ НОВИЙ ФЛОУ: Обробка референс-фото
   const imgState = imageGenState.get(userId);
   if (imgState && imgState.step === 'waiting_photos') {
+    const modelKey = imgState.model;
+    const maxPhotos = (modelKey.includes('nano_banana') || modelKey.includes('seedream')) ? 14 : 1;
     const mediaGroupId = ctx.message.media_group_id;
 
     // Якщо це альбом - збираємо всі фото через mediaGroups Map
@@ -4135,7 +4151,6 @@ bot.on('photo', async (ctx) => {
       if (!mediaGroups.has(albumKey)) {
         mediaGroups.set(albumKey, {
           photos: [],
-          prompt: imgState.prompt,
           model: imgState.model,
           userId,
           timeout: null
@@ -4146,7 +4161,7 @@ bot.on('photo', async (ctx) => {
       const photo = ctx.message.photo[ctx.message.photo.length - 1];
       const file = await ctx.telegram.getFile(photo.file_id);
       const photoUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-      group.photos.push(photoUrl);
+      group.photos.push({ id: ctx.message.message_id, url: photoUrl });
 
       // Скидаємо таймер
       if (group.timeout) clearTimeout(group.timeout);
@@ -4157,24 +4172,76 @@ bot.on('photo', async (ctx) => {
         if (!finalGroup) return;
 
         mediaGroups.delete(albumKey);
-        imageGenState.delete(userId);
+        const sortedAlbumPhotos = finalGroup.photos
+          .slice()
+          .sort((a, b) => a.id - b.id);
 
-        console.log(`📸 Album for new flow: ${finalGroup.photos.length} photos`);
-        await ctx.reply(`🚀 Починаємо генерацію з ${finalGroup.photos.length} референсами...`, { parse_mode: 'HTML' });
-        await handleImageGeneration(ctx, finalGroup.prompt, finalGroup.model, finalGroup.photos);
+        const current = imageGenState.get(userId) || { model: finalGroup.model, step: 'waiting_photos', photos: [] };
+        const merged = (current.photos || []).concat(sortedAlbumPhotos);
+        const limited = merged.slice(0, maxPhotos);
+
+        imageGenState.set(userId, {
+          ...current,
+          photos: limited,
+          step: 'prompt'
+        });
+
+        console.log(`📸 Album for new flow: ${sortedAlbumPhotos.length} photos`);
+        await ctx.reply(
+          `✅ <b>Референси отримано</b> (${limited.length}/${maxPhotos})\n\n` +
+          `✍️ <b>Крок 2: Введіть промпт</b>`,
+          { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+        );
       }, 500);
 
       return;
     }
 
-    // Одне фото - одразу генеруємо
+    // Одне фото - зберігаємо референс
     const imageUrl = await getImageUrl(ctx);
-    const prompt = imgState.prompt;
-    const modelKey = imgState.model;
-    imageGenState.delete(userId);
+    if (!imgState.photos) imgState.photos = [];
 
-    await ctx.reply('🚀 Починаємо генерацію з референсом...', { parse_mode: 'HTML' });
-    await handleImageGeneration(ctx, prompt, modelKey, imageUrl);
+    if (imgState.photos.length >= maxPhotos) {
+      await ctx.reply(
+        `⚠️ Досягнуто максимум ${maxPhotos} референсів.\n\n` +
+        `✍️ Натисніть "Далі до промпту" для продовження.`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
+            [Markup.button.callback('← Назад', 'design_menu')]
+          ])
+        }
+      );
+      return;
+    }
+
+    imgState.photos.push({ id: ctx.message.message_id, url: imageUrl });
+    imageGenState.set(userId, imgState);
+
+    const count = imgState.photos.length;
+    const reachedLimit = count >= maxPhotos;
+
+    if (reachedLimit) {
+      imageGenState.set(userId, { ...imgState, step: 'prompt' });
+      await ctx.reply(
+        `✅ Референсів: ${count}/${maxPhotos}\n\n` +
+        `✍️ <b>Крок 2: Введіть промпт</b>`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+      );
+    } else {
+      await ctx.reply(
+        `✅ Референс ${count}/${maxPhotos} завантажено!\n\n` +
+        `📤 Надішліть ще фото або натисніть "Далі до промпту".`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
+            [Markup.button.callback('← Назад', 'design_menu')]
+          ])
+        }
+      );
+    }
     return;
   }
 
@@ -4312,7 +4379,7 @@ bot.on('photo', async (ctx) => {
         '3:2': '🖼️ 3:2 (Classic)',
         '2:3': '🖼️ 2:3 (Classic Portrait)',
         '21:9': '🎬 21:9 (Ultrawide)',
-        'match_input_image': '🔄 Match Input Image'
+        'match_input_image': 'Auto'
       };
 
       // Показуємо меню вибору aspect ratio
@@ -4464,7 +4531,7 @@ async function handleMediaGroup(ctx, group) {
         '3:2': '🖼️ 3:2 (Classic)',
         '2:3': '🖼️ 2:3 (Classic Portrait)',
         '21:9': '🎬 21:9 (Ultrawide)',
-        'match_input_image': '🔄 Match Input Image'
+        'match_input_image': 'Auto'
       };
 
       // Показуємо меню вибору aspect ratio
@@ -4508,6 +4575,15 @@ async function validateImageCount(photos, maxCount = 14) {
   return photos.slice(0, maxCount);
 }
 
+function normalizeReferenceOrder(references) {
+  if (!Array.isArray(references) || references.length === 0) return references;
+  if (typeof references[0] === 'string') return references;
+  return references
+    .slice()
+    .sort((a, b) => (a.id || 0) - (b.id || 0))
+    .map((ref) => ref.url);
+}
+
 async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, aspectRatio = '1:1') {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
@@ -4519,6 +4595,8 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
     await ctx.reply('❌ Модель не знайдена. Спробуйте ще раз.');
     return;
   }
+
+  imageInput = normalizeReferenceOrder(imageInput);
 
   if (!(await userBalance.hasTokens(userId, model.cost))) {
     await showInsufficientTokens(ctx, model.cost);
