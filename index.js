@@ -3807,17 +3807,56 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ НОВИЙ ФЛОУ: Обробка референс-фото - ОДРАЗУ ГЕНЕРУЄМО
+  // ✅ НОВИЙ ФЛОУ: Обробка референс-фото
   const imgState = imageGenState.get(userId);
   if (imgState && imgState.step === 'waiting_photos') {
-    const imageUrl = await getImageUrl(ctx);
+    const mediaGroupId = ctx.message.media_group_id;
 
-    // Зберігаємо prompt та очищуємо стан
+    // Якщо це альбом - збираємо всі фото через mediaGroups Map
+    if (mediaGroupId) {
+      const albumKey = `ref_${mediaGroupId}`;
+
+      if (!mediaGroups.has(albumKey)) {
+        mediaGroups.set(albumKey, {
+          photos: [],
+          prompt: imgState.prompt,
+          model: imgState.model,
+          userId,
+          timeout: null
+        });
+      }
+
+      const group = mediaGroups.get(albumKey);
+      const photo = ctx.message.photo[ctx.message.photo.length - 1];
+      const file = await ctx.telegram.getFile(photo.file_id);
+      const photoUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+      group.photos.push(photoUrl);
+
+      // Скидаємо таймер
+      if (group.timeout) clearTimeout(group.timeout);
+
+      // Чекаємо 500мс на інші фото з альбому
+      group.timeout = setTimeout(async () => {
+        const finalGroup = mediaGroups.get(albumKey);
+        if (!finalGroup) return;
+
+        mediaGroups.delete(albumKey);
+        imageGenState.delete(userId);
+
+        console.log(`📸 Album for new flow: ${finalGroup.photos.length} photos`);
+        await ctx.reply(`🚀 Починаємо генерацію з ${finalGroup.photos.length} референсами...`, { parse_mode: 'HTML' });
+        await handleImageGeneration(ctx, finalGroup.prompt, finalGroup.model, finalGroup.photos);
+      }, 500);
+
+      return;
+    }
+
+    // Одне фото - одразу генеруємо
+    const imageUrl = await getImageUrl(ctx);
     const prompt = imgState.prompt;
     const modelKey = imgState.model;
     imageGenState.delete(userId);
 
-    // Одразу починаємо генерацію з референсом
     await ctx.reply('🚀 Починаємо генерацію з референсом...', { parse_mode: 'HTML' });
     await handleImageGeneration(ctx, prompt, modelKey, imageUrl);
     return;
