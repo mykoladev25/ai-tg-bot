@@ -42,6 +42,25 @@ const feedbackData = new Map(); // userId -> { type, message, timestamp }
 // Для накопичення довгих промптів (коли > 4096 символів)
 const pendingPrompts = new Map(); // userId -> { prompt: string, model: string }
 
+// Rate limiting для заблокованих користувачів (щоб не спамили)
+const blockedUserLastNotified = new Map(); // userId -> timestamp
+const BLOCKED_USER_COOLDOWN = 5 * 60 * 1000; // 5 хвилин між повідомленнями
+
+/**
+ * Перевіряє чи можна надіслати повідомлення заблокованому користувачу
+ * Повертає true якщо можна, false якщо ще рано (cooldown)
+ */
+function canNotifyBlockedUser(userId) {
+  const lastNotified = blockedUserLastNotified.get(userId);
+  const now = Date.now();
+
+  if (!lastNotified || (now - lastNotified) > BLOCKED_USER_COOLDOWN) {
+    blockedUserLastNotified.set(userId, now);
+    return true;
+  }
+  return false;
+}
+
 // ==================== TRIAL RESTRICTIONS ====================
 const { TRIAL_RESTRICTIONS } = models;
 
@@ -257,7 +276,10 @@ bot.on('text', async (ctx, next) => {
   // Перевіряємо чи користувач заблокований
   const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
   if (isBlocked) {
-    await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+    // Rate limit - відповідаємо тільки раз на 5 хвилин
+    if (canNotifyBlockedUser(userId)) {
+      await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+    }
     return;
   }
 
@@ -369,7 +391,10 @@ bot.on('text', async (ctx, next) => {
   // Перевіряємо чи користувач заблокований
   const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
   if (isBlocked) {
-    await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+    // Rate limit - відповідаємо тільки раз на 5 хвилин
+    if (canNotifyBlockedUser(userId)) {
+      await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+    }
     return;
   }
 
@@ -497,7 +522,10 @@ bot.start(async (ctx) => {
   // Перевіряємо чи користувач заблокований
   const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
   if (isBlocked) {
-    await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+    // Rate limit - відповідаємо тільки раз на 5 хвилин
+    if (canNotifyBlockedUser(userId)) {
+      await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+    }
     return;
   }
 
