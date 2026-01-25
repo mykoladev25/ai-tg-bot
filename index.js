@@ -41,8 +41,9 @@ const isShowBroadCast = process.env.SEND_STARTUP_BROADCAST === 'true' && false;
 // Для збирання feedback від користувачів
 const feedbackData = new Map(); // userId -> { type, message, timestamp }
 
-// Для накопичення довгих промптів (коли > 4096 символів)
-const pendingPrompts = new Map(); // userId -> { prompt: string, model: string }
+// Стан генерації зображень (новий флоу)
+// userId -> { model: string, prompt: string, step: 'prompt'|'references'|'ready' }
+const imageGenState = new Map();
 
 // Rate limiting для заблокованих користувачів (щоб не спамили)
 const blockedUserLastNotified = new Map(); // userId -> timestamp
@@ -165,15 +166,15 @@ async function checkTrialRestrictions(userId, modelKey, options = {}) {
   return { allowed: true };
 }
 
-
-// ✅ МОДЕЛІ КОТРІ ПІДТРИМУЮТЬ ДОВГІ ПРОМПТИ (накопичення через "...")
-const MODELS_WITH_LONG_PROMPTS = [
+// ✅ ГРАФІЧНІ МОДЕЛІ ДЛЯ НОВОГО ФЛОУ (промпт → референси → генерація)
+const IMAGE_MODELS = [
+  'stable_diffusion',
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_2k',
   'seedream_4k',
   'ideogram',
-  'veo'
+  'clarity'
 ];
 
 // ✅ МОДЕЛІ КОТРІ ПІДТРИМУЮТЬ ВИБІР ASPECT RATIO
@@ -596,16 +597,16 @@ bot.command('balance', async (ctx) => {
 bot.command('clear', async (ctx) => {
   const userId = ctx.from.id;
 
-  // Очищаємо накопичений промпт
-  const hadPrompt = pendingPrompts.has(userId);
-  pendingPrompts.delete(userId);
+  // Очищаємо стан генерації зображень (новий флоу)
+  const hadImageState = imageGenState.has(userId);
+  imageGenState.delete(userId);
 
   // Очищаємо стан генерації (але НЕ обрану модель!)
   const hadState = userState.has(userId);
   userState.delete(userId);
   // НЕ видаляємо userCurrentModel - користувач може продовжити з тією ж моделлю
 
-  if (hadPrompt || hadState) {
+  if (hadImageState || hadState) {
     const currentModel = userCurrentModel.get(userId);
     await ctx.reply(
       '🧹 <b>Очищено!</b>\n\n' +
@@ -1034,11 +1035,7 @@ bot.hears('🎨 Креативи', async (ctx) => {
 
   const creativesKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('💌 До Дня Закоханих', 'creative_love_is')],
-    [Markup.button.callback('❤️ Романтика', 'creative_romance')],
-    [Markup.button.callback('🏎️ Стиль & Техніка', 'creative_tech')],
-    [Markup.button.callback('🌃 Urban Vibes', 'creative_urban')],
-    [Markup.button.callback('✨ Фентезі', 'creative_fantasy')],
-    [Markup.button.callback('🔄 Mash-up', 'creative_mashup')],
+    [Markup.button.callback('❤️ Д', 'creative_hearts')],
     [Markup.button.callback('🏠 Головне меню', 'main_menu')]
   ]);
 
@@ -1064,44 +1061,9 @@ bot.hears('📝 Feedback', async (ctx) => {
 
 // Отримуємо ціни моделей
 const nanoBanana2kModel = models.design.models.find(m => m.key === 'nano_banana_2k');
-const nanoBanana4kModel = models.design.models.find(m => m.key === 'nano_banana_4k');
-const CREATIVE_COST_2K = nanoBanana2kModel?.cost || 16;
-const CREATIVE_COST_4K = nanoBanana4kModel?.cost || 31;
-const CREATIVE_COST = CREATIVE_COST_4K; // Default для інших креативів
-
-// Романтична фотосесія
-bot.action('creative_romance', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = ctx.from.id;
-
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST);
-    return;
-  }
-
-  userState.set(userId, {
-    creative: 'romance',
-    step: 'waiting_photo',
-    model: 'nano_banana_4k'
-  });
-
-  await ctx.reply(
-      `❤️ <b>Готовий креатив: Романтична фотосесія</b>\n\n` +
-      `📸 <b>Крок 1/2:</b> Надішліть своє фото\n\n` +
-      `💡 <b>Що буде:</b>\n` +
-      `• Романтична сцена на заході сонця\n` +
-      `• Ніжне тепле світло\n` +
-      `• Професійна якість\n` +
-      `• Ваші риси обличчя збережуться ✨\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
-      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
-      `👉 Надішліть фото зараз`,
-      {
-        parse_mode: 'HTML',
-        ...keyboard.createBackButton('main_menu')
-      }
-  );
-});
+const seedream4kModel = models.design.models.find(m => m.key === 'seedream_4k');
+const CREATIVE_COST_2K = nanoBanana2kModel?.cost || 14;
+const CREATIVE_COST_SEEDREAM_4K = seedream4kModel?.cost || 4;
 
 // ==================== UKRAINIAN ROMANTIC QUOTES FOR LOVE IS... ====================
 // Точно 25 цитат, як запропоновано
@@ -1377,135 +1339,30 @@ bot.action('creative_love_is', async (ctx) => {
   );
 });
 
-// Стиль & Техніка
-bot.action('creative_tech', async (ctx) => {
+// ❤️ Льодяник - Valentine's portrait з серцем-льодяником
+bot.action('creative_hearts', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
 
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST);
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_SEEDREAM_4K))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST_SEEDREAM_4K);
     return;
   }
 
   userState.set(userId, {
-    creative: 'tech',
+    creative: 'hearts',
     step: 'waiting_photo',
-    model: 'nano_banana_4k'
+    model: 'seedream_4k'
   });
 
-  await ctx.reply(
-      `🏎️ <b>Готовий креатив: Стиль & Техніка</b>\n\n` +
-      `📸 <b>Крок 1/2:</b> Надішліть своє фото\n\n` +
-      `💡 <b>Що буде:</b>\n` +
-      `• Ви поруч зі спортивним автомобілем\n` +
-      `• Стиль модного журналу\n` +
-      `• Контрастне професійне освітлення\n` +
-      `• Ваші риси обличчя збережуться ✨\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
-      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
-      `👉 Надішліть фото зараз`,
-      {
-        parse_mode: 'HTML',
-        ...keyboard.createBackButton('main_menu')
-      }
-  );
-});
-
-// Urban Vibes
-bot.action('creative_urban', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = ctx.from.id;
-
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST);
-    return;
-  }
-
-  userState.set(userId, {
-    creative: 'urban',
-    step: 'waiting_photo',
-    model: 'nano_banana_4k'
-  });
+  userCurrentModel.set(userId, 'hearts');
 
   await ctx.reply(
-      `🌃 <b>Готовий креатив: Urban Vibes</b>\n\n` +
-      `📸 <b>Крок 1/2:</b> Надішліть своє фото\n\n` +
-      `💡 <b>Що буде:</b>\n` +
-      `• Ви серед нічного міста з неоном\n` +
-      `• Стиль cyberpunk/fashion\n` +
-      `• Яскраві кольори, урбаністична естетика\n` +
-      `• Ваші риси обличчя збережуться ✨\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
+      `❤️ <b>Готовий креатив: Льодяник</b>\n\n` +
+      `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST_SEEDREAM_4K}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
-      `👉 Надішліть фото зараз`,
-      {
-        parse_mode: 'HTML',
-        ...keyboard.createBackButton('main_menu')
-      }
-  );
-});
-
-// Фентезі
-bot.action('creative_fantasy', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = ctx.from.id;
-
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST);
-    return;
-  }
-
-  userState.set(userId, {
-    creative: 'fantasy',
-    step: 'waiting_photo',
-    model: 'nano_banana_4k'
-  });
-
-  await ctx.reply(
-      `✨ <b>Готовий креатив: Фентезі</b>\n\n` +
-      `📸 <b>Крок 1/2:</b> Надішліть своє фото\n\n` +
-      `💡 <b>Що буде:</b>\n` +
-      `• Ви з магічним артефактом у лісі\n` +
-      `• Магічна атмосфера, містичне світло\n` +
-      `• Деталізація одягу та оточення\n` +
-      `• Ваші риси обличчя збережуться ✨\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
-      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
-      `👉 Надішліть фото зараз`,
-      {
-        parse_mode: 'HTML',
-        ...keyboard.createBackButton('main_menu')
-      }
-  );
-});
-
-// Mash-up
-bot.action('creative_mashup', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = ctx.from.id;
-
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST);
-    return;
-  }
-
-  userState.set(userId, {
-    creative: 'mashup',
-    step: 'waiting_photo',
-    model: 'nano_banana_4k'
-  });
-
-  await ctx.reply(
-      `🔄 <b>Готовий креатив: Mash-up</b>\n\n` +
-      `📸 <b>Крок 1/2:</b> Надішліть своє фото\n\n` +
-      `💡 <b>Що буде:</b>\n` +
-      `• Ви + фантастичний об'єкт/тварина\n` +
-      `• Сюрреалістичний стиль\n` +
-      `• Оригінальна креативна композиція\n` +
-      `• Ваші риси обличчя збережуться ✨\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST}⚡\n` +
-      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
-      `👉 Надішліть фото зараз`,
+      `👉 Надішліть своє селфі зараз`,
       {
         parse_mode: 'HTML',
         ...keyboard.createBackButton('main_menu')
@@ -1526,16 +1383,6 @@ async function handleCreativePhoto(ctx, imageUrl) {
 
   // Промпти (АНГЛІЙСЬКА + збереження рис обличчя)
   const prompts = {
-    romance: `Professional romantic photoshoot at golden hour sunset. Two people holding hands, warm soft lighting, carefully designed outfit details, cinematic quality. Based on uploaded photo, preserve facial features, identity and likeness. High detail portrait, 4K quality.`,
-
-    tech: `Fashion magazine style photoshoot with luxury sports car. One person posing near vehicle, dramatic lighting with strong shadows, high-end lookbook aesthetic. Based on uploaded photo, preserve facial features, identity and likeness. Professional lighting, 4K quality.`,
-
-    urban: `Cyberpunk fashion photoshoot in neon-lit night city. One person among bright neon lights, experimental lighting, urban details in background, vivid colors. Based on uploaded photo, preserve facial features, identity and likeness. Urban aesthetic, 4K quality.`,
-
-    fantasy: `Fantasy fairy tale photoshoot. Person with magical artifact in misty forest, magical atmosphere, mystical lighting, detailed costume design. Based on uploaded photo, preserve facial features, identity and likeness. High detail, 4K quality.`,
-
-    mashup: `Creative surrealist composition. Person with fantastical object or creature, harmonious interaction, vibrant colors, detailed rendering. Based on uploaded photo, preserve facial features, identity and likeness. Original creative style, 4K quality.`,
-
     love_is: (() => {
       const data = state.loveIsData;
       return `GOAL: Transform the uploaded photo of a real couple into a cute vintage bubblegum-wrapper "Love Is"-style sticker panel (romantic mini-comic). Keep the couple recognizable (hair, face proportions, key features), but simplify into classic chibi cartoon characters.
@@ -1578,22 +1425,48 @@ NEGATIVE / AVOID:
 - no blurry lines, no messy typography, no distorted faces, no extra fingers/limbs
 
 OUTPUT: Single sticker-style panel with "Love is…" at top-left and Ukrainian caption at bottom.`;
-    })()
+    })(),
+
+    hearts: `Dramatic overhead professional lighting with depth and sculpted shadows. Keep the EXACT selfie expression, mood, and gaze — do not change emotion or add any "sultry" look. Preserve the original head turn/tilt and camera angle from the uploaded selfie (if the head is slightly turned, keep it slightly turned; keep the same gaze direction). Preserve facial identity and all facial proportions strictly as in the selfie — do not alter facial features; keep her highly recognizable. Realistic skin texture with visible pores and natural highlights (no beauty blur, no plastic smoothing). IMPORTANT: keep all natural moles/beauty marks/freckles exactly as in the selfie — do not remove, do not smooth them out, do not retouch them away.
+
+Hair styled into two relaxed top buns on the crown (not side buns), with light volume and a few loose strands framing the face. Makeup: natural clean makeup only, soft neutral eyeshadow, subtle mascara, no graphic eyeliner, no exaggerated eye shapes, no face paint, no decals, no fantasy elements, keep eyebrows clean and natural. Matte rich red lipstick with a slightly darker contoured edge.
+
+Outfit: elegant red satin off-shoulder dress (smooth glossy satin fabric, soft folds, subtle specular highlights), neckline below the shoulders, fashion studio look.
+
+Heart lollipop: a large semi-transparent heart-shaped hard candy on a stick that covers ONE eye like an eye-patch; make it big (about one-third of the face), clear translucent red with realistic reflections; the stick visible and held in hand; position it precisely over the eye (not near the mouth). Glossy red almond-shaped manicure.
+
+Gold dangling earrings with a red heart-shaped gemstone. Gold choker necklace with a centered heart charm matching the earrings.
+
+Remove lipstick kiss marks. Add a small amount of glossy heart stickers: clustered on ONE side of the face only, plus a few on the neck/upper chest/shoulder area (not too many). Neutral studio background, clean.
+
+Framing: chest-up portrait (from upper chest to top of head), centered, no full-body. 9:16 8K
+
+NEGATIVE: any eyebrow decals, any "ear" shapes, any leaf/animal shapes, any fantasy makeup, any face markings, any graphic eyeliner, any mole removal, any skin-smoothing that erases pores or beauty marks.`
   };
 
   const prompt = prompts[creativeType];
+  
+  if (!prompt) {
+    console.error(`Unknown creative type: ${creativeType}`);
+    await ctx.reply('❌ Помилка: невідомий тип креативу.', keyboard.createBackButton('main_menu'));
+    userState.delete(userId);
+    return true;
+  }
 
   // Вибираємо правильну модель для кожного креативу
-  const modelKey = creativeType === 'love_is' ? 'nano_banana_2k' : 'nano_banana_4k';
+  let modelKey;
+  if (creativeType === 'love_is') {
+    modelKey = 'nano_banana_2k';
+  } else if (creativeType === 'hearts') {
+    modelKey = 'seedream_4k';
+  } else {
+    modelKey = 'nano_banana_4k';
+  }
   const model = models.design.models.find(m => m.key === modelKey);
 
   const creativeNames = {
     love_is: '💌 День Закоханих',
-    romance: '❤️ Романтика',
-    tech: '🏎️ Стиль & Техніка',
-    urban: '🌃 Urban Vibes',
-    fantasy: '✨ Фентезі',
-    mashup: '🔄 Mash-up'
+    hearts: '❤️ Льодяник'
   };
 
   const statusMsg = await ctx.reply(
@@ -1605,10 +1478,21 @@ OUTPUT: Single sticker-style panel with "Love is…" at top-left and Ukrainian c
       { parse_mode: 'HTML' }
   );
 
-  try {
-    // Вибираємо правильну точність для моделі
-    const resolution = modelKey === 'nano_banana_2k' ? '2K' : '4K';
-    const result = await replicate.generateWithNanoBanana(prompt, imageUrl, resolution);
+  try {let result;
+    
+    // Вибираємо правильну функцію генерації в залежності від креативу
+    // По дефолту використовуємо 9:16 для всіх креативів
+    if (creativeType === 'hearts') {
+      // Hearts використовує Seedream 4K з aspect ratio 9:16
+      result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
+    } else if (creativeType === 'love_is') {
+      // Love is... використовує NanoBanana 2K з aspect ratio 9:16
+      result = await replicate.generateWithNanoBanana(prompt, imageUrl, '2K', '9:16');
+    } else {
+      // Fallback для інших креативів - теж 9:16
+      const resolution = modelKey === 'nano_banana_2k' ? '2K' : '4K';
+      result = await replicate.generateWithNanoBanana(prompt, imageUrl, resolution, '9:16');
+    }
 
     if (!result.success) {
       await adminNotifier.notifyAdmin(
@@ -1817,32 +1701,156 @@ bot.action(/^(midjourney|flux|nano_banana_2k|nano_banana_4k|stable_diffusion|see
 
   userCurrentModel.set(ctx.from.id, modelKey);
 
-  // Інструкція про довгі промпти для моделей що підтримують
-  const longPromptHint = MODELS_WITH_LONG_PROMPTS.includes(modelKey)
-    ? `\n\n💡 <b>Довгий промпт?</b>\n` +
-      `• Надсилайте текст частинами з <code>...</code> в кінці\n` +
-      `• Остання частина - без крапок\n` +
-      `• Потім надішліть фото (до 14 шт) - використається накопичений промпт`
-    : '';
+  // ✅ НОВИЙ ФЛОУ: Зберігаємо стан - чекаємо на промпт
+  imageGenState.set(ctx.from.id, {
+    model: modelKey,
+    step: 'prompt'
+  });
 
+  // Інструкції для різних моделей
   const messages = {
-    clarity: `${model.name}\n\n🔮 Покращення якості зображень\n\nНадішліть фото, яке хочете покращити.\nМожете додати підпис (опис) для кращого результату.\n\n💰 Вартість: ${model.cost}⚡\n📈 Збільшення: 2x (scale factor)\n⏱️ Час обробки: ~30-60 секунд`,
-    stable_diffusion: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~30-40 секунд${longPromptHint}`,
-    ideogram: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~30-40 секунд${longPromptHint}`,
-    nano_banana: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💡 Підтримка до 14 зображень одночасно!\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~20-30 секунд${longPromptHint}`,
-    seedream: `${model.name}\n\n🎨 Text-to-Image і Image-to-Image\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для редагування\n\n💰 Вартість: ${model.cost}⚡\n⏱️ Час: ~20-40 секунд${longPromptHint}`
+    clarity: `✨ <b>${model.name}</b>\n\n` +
+      `🔮 Покращення якості зображень\n\n` +
+      `📝 <b>Крок 1:</b> Надішліть фото, яке хочете покращити\n` +
+      `💬 Можете додати опис для кращого результату\n\n` +
+      `💰 Вартість: ${model.cost}⚡\n` +
+      `⏱️ Час: ~30-60 секунд`,
+
+    stable_diffusion: `🌀 <b>${model.name}</b>\n\n` +
+      `📝 <b>Крок 1:</b> Введіть промпт\n\n` +
+      `Опишіть детально що хочете згенерувати.\n\n` +
+      `💡 Приклад: "A beautiful sunset over mountains, photorealistic, 8k"\n\n` +
+      `💰 Вартість: ${model.cost}⚡\n` +
+      `⏱️ Час: ~30-40 секунд\n\n` +
+      `✍️ <b>Надішліть промпт:</b>`,
+
+    ideogram: `✏️ <b>${model.name}</b>\n\n` +
+      `📝 <b>Крок 1:</b> Введіть промпт\n\n` +
+      `Опишіть детально що хочете згенерувати.\n` +
+      `💡 Ideogram чудово працює з текстом на зображеннях!\n\n` +
+      `💰 Вартість: ${model.cost}⚡\n` +
+      `⏱️ Час: ~30-40 секунд\n\n` +
+      `✍️ <b>Надішліть промпт:</b>`,
+
+    nano_banana: `🍌 <b>${model.name}</b>\n\n` +
+      `📝 <b>Крок 1:</b> Введіть промпт\n\n` +
+      `Опишіть детально що хочете згенерувати.\n` +
+      `💡 Підтримує до 14 референс-зображень!\n\n` +
+      `💰 Вартість: ${model.cost}⚡\n` +
+      `⏱️ Час: ~20-30 секунд\n\n` +
+      `✍️ <b>Надішліть промпт:</b>`,
+
+    seedream: `🌊 <b>${model.name}</b>\n\n` +
+      `📝 <b>Крок 1:</b> Введіть промпт\n\n` +
+      `Опишіть детально що хочете згенерувати.\n` +
+      `💡 Підтримує до 14 референс-зображень!\n\n` +
+      `💰 Вартість: ${model.cost}⚡\n` +
+      `⏱️ Час: ~20-40 секунд\n\n` +
+      `✍️ <b>Надішліть промпт:</b>`
   };
 
   // Для nano_banana та seedream моделей використовуємо спільний шаблон
   let messageKey = modelKey;
   if (modelKey.startsWith('nano_banana')) messageKey = 'nano_banana';
   if (modelKey.startsWith('seedream')) messageKey = 'seedream';
-  const defaultMessage = `${model.name}\n\nНадішліть текстовий опис зображення, яке хочете згенерувати.\n\nВартість: ${model.cost > 0 ? model.cost + '⚡' : 'Безкоштовно'}${longPromptHint}`;
+
+  const defaultMessage = `🎨 <b>${model.name}</b>\n\n` +
+    `📝 <b>Крок 1:</b> Введіть промпт\n\n` +
+    `Опишіть що хочете згенерувати.\n\n` +
+    `💰 Вартість: ${model.cost}⚡\n\n` +
+    `✍️ <b>Надішліть промпт:</b>`;
 
   await ctx.reply(
     messages[messageKey] || defaultMessage,
     { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
   );
+});
+
+// ✅ НОВИЙ ФЛОУ: Кнопка "Почати генерацію" (без референсів)
+bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
+  const modelKey = ctx.match[1];
+  const userId = ctx.from.id;
+  const imgState = imageGenState.get(userId);
+
+  await ctx.answerCbQuery();
+
+  if (!imgState || !imgState.prompt) {
+    await ctx.reply('❌ Помилка: промпт не знайдено. Почніть заново.', keyboard.createBackButton('design_menu'));
+    imageGenState.delete(userId);
+    return;
+  }
+
+  const prompt = imgState.prompt;
+  imageGenState.delete(userId);
+
+  await ctx.reply('🚀 Починаємо генерацію...', { parse_mode: 'HTML' });
+  await handleImageGeneration(ctx, prompt, modelKey);
+});
+
+// ✅ НОВИЙ ФЛОУ: Кнопка "Додати референси"
+bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
+  const modelKey = ctx.match[1];
+  const userId = ctx.from.id;
+  const imgState = imageGenState.get(userId);
+
+  await ctx.answerCbQuery();
+
+  if (!imgState || !imgState.prompt) {
+    await ctx.reply('❌ Помилка: промпт не знайдено. Почніть заново.', keyboard.createBackButton('design_menu'));
+    imageGenState.delete(userId);
+    return;
+  }
+
+  // Оновлюємо стан - тепер чекаємо на фото
+  imgState.step = 'waiting_photos';
+  imgState.photos = [];
+  imageGenState.set(userId, imgState);
+
+  const model = models.design.models.find(m => m.key === modelKey);
+  const maxPhotos = (modelKey.includes('nano_banana') || modelKey.includes('seedream')) ? 14 : 1;
+
+  await ctx.reply(
+    `📷 <b>Завантажте референс-зображення</b>\n\n` +
+    `💡 Можна завантажити до ${maxPhotos} фото\n` +
+    `📤 Надсилайте фото по одному або альбомом\n\n` +
+    `✅ Коли завантажите всі фото — натисніть "🚀 Генерувати"`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🚀 Генерувати з референсами', `img_gen_with_refs_${modelKey}`)],
+        [Markup.button.callback('← Назад', 'design_menu')]
+      ])
+    }
+  );
+});
+
+// ✅ НОВИЙ ФЛОУ: Кнопка "Генерувати з референсами"
+bot.action(/^img_gen_with_refs_(.+)$/, async (ctx) => {
+  const modelKey = ctx.match[1];
+  const userId = ctx.from.id;
+  const imgState = imageGenState.get(userId);
+
+  await ctx.answerCbQuery();
+
+  if (!imgState || !imgState.prompt) {
+    await ctx.reply('❌ Помилка: промпт не знайдено. Почніть заново.', keyboard.createBackButton('design_menu'));
+    imageGenState.delete(userId);
+    return;
+  }
+
+  const prompt = imgState.prompt;
+  const photos = imgState.photos || [];
+  imageGenState.delete(userId);
+
+  if (photos.length === 0) {
+    await ctx.reply('⚠️ Ви не завантажили жодного фото. Генеруємо без референсів...', { parse_mode: 'HTML' });
+  } else {
+    await ctx.reply(`🚀 Починаємо генерацію з ${photos.length} референс${photos.length === 1 ? 'ом' : 'ами'}...`, { parse_mode: 'HTML' });
+  }
+
+  // Передаємо фото як imageInput
+  const imageInput = photos.length > 0 ? (photos.length === 1 ? photos[0] : photos) : null;
+  await handleImageGeneration(ctx, prompt, modelKey, imageInput);
 });
 
 // Video Models
@@ -3531,41 +3539,52 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ ДОВГІ ПРОМПТИ: накопичення через "..." в кінці
-  // ВАЖЛИВО: перевіряємо що currentModel існує і підтримує довгі промпти
-  if (currentModel && MODELS_WITH_LONG_PROMPTS.includes(currentModel)) {
-    const pending = pendingPrompts.get(userId);
-    const continuePrompt = text.trim().endsWith('...');
+  // ✅ НОВИЙ ФЛОУ ДЛЯ ГРАФІЧНИХ МОДЕЛЕЙ
+  // Якщо це графічна модель і ми чекаємо на промпт
+  const imgState = imageGenState.get(userId);
+  if (imgState && imgState.step === 'prompt' && IMAGE_MODELS.includes(currentModel)) {
+    // Зберігаємо промпт і питаємо про референси
+    imgState.prompt = text;
+    imgState.step = 'references';
+    imageGenState.set(userId, imgState);
 
-    if (continuePrompt) {
-      // Користувач хоче продовжити - накопичуємо
-      const cleanText = text.trim().slice(0, -3); // Прибираємо "..."
-      const accumulated = pending ? pending.prompt + '\n' + cleanText : cleanText;
+    const model = models.design.models.find(m => m.key === currentModel);
+    const modelName = model?.name || currentModel;
 
-      pendingPrompts.set(userId, {
-        prompt: accumulated,
-        model: currentModel
-      });
+    // Перевіряємо чи модель підтримує референси
+    const supportsRefs = ['nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'stable_diffusion', 'ideogram'].includes(currentModel);
 
-      const charCount = accumulated.length;
+    if (supportsRefs) {
       await ctx.reply(
-        `📝 <b>Промпт накопичено</b>\n\n` +
-        `📊 Символів: <b>${charCount}</b>\n` +
-        `🔄 Продовжуйте надсилати текст з <code>...</code> в кінці\n\n` +
-        `✅ Коли готово - надішліть останню частину <b>БЕЗ</b> трьох крапок\n\n` +
-        `💡 Або надішліть <code>/clear</code> щоб очистити`,
+        `✅ <b>Промпт збережено!</b>\n\n` +
+        `📝 "${text.length > 100 ? text.substring(0, 100) + '...' : text}"\n\n` +
+        `📷 <b>Крок 2:</b> Додати референс-зображення?\n\n` +
+        `Референси допоможуть AI краще зрозуміти що ви хочете.\n` +
+        (currentModel.includes('nano_banana') || currentModel.includes('seedream') ? `💡 Можна завантажити до 14 фото\n\n` : `💡 Можна завантажити 1 фото\n\n`) +
+        `Оберіть дію:`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🚀 Почати генерацію', `img_gen_start_${currentModel}`)],
+            [Markup.button.callback('📷 Додати референси', `img_gen_refs_${currentModel}`)],
+            [Markup.button.callback('← Назад', 'design_menu')]
+          ])
+        }
+      );
+    } else {
+      // Модель не підтримує референси (clarity тощо) - одразу генеруємо
+      await ctx.reply(
+        `✅ <b>Промпт збережено!</b>\n\n` +
+        `📝 "${text.length > 100 ? text.substring(0, 100) + '...' : text}"\n\n` +
+        `🚀 Починаємо генерацію...`,
         { parse_mode: 'HTML' }
       );
-      return;
+      imageGenState.delete(userId);
+      await handleImageGeneration(ctx, text, currentModel);
     }
-
-    // Готово - об'єднуємо якщо є накопичене
-    if (pending) {
-      text = pending.prompt + '\n' + text.trim();
-      pendingPrompts.delete(userId);
-      console.log(`📝 Long prompt assembled: ${text.length} chars for ${currentModel}`);
-    }
+    return;
   }
+
 
   const handlers = {
     claude_vision: () => handleClaudeText(ctx, text),
@@ -3830,6 +3849,32 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
+  // ✅ НОВИЙ ФЛОУ: Обробка референс-фото
+  const imgState = imageGenState.get(userId);
+  if (imgState && imgState.step === 'waiting_photos') {
+    const imageUrl = await getImageUrl(ctx);
+
+    if (!imgState.photos) imgState.photos = [];
+    imgState.photos.push(imageUrl);
+    imageGenState.set(userId, imgState);
+
+    const model = models.design.models.find(m => m.key === imgState.model);
+    const maxPhotos = (imgState.model.includes('nano_banana') || imgState.model.includes('seedream')) ? 14 : 1;
+
+    await ctx.reply(
+      `✅ Фото ${imgState.photos.length}/${maxPhotos} завантажено!\n\n` +
+      `${imgState.photos.length < maxPhotos ? '📤 Надішліть ще фото або натисніть "🚀 Генерувати"' : '📸 Досягнуто максимум фото. Натисніть "🚀 Генерувати"'}`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🚀 Генерувати з референсами', `img_gen_with_refs_${imgState.model}`)],
+          [Markup.button.callback('← Назад', 'design_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
   // ✅ Спеціальний випадок: користувач обрав "🖼️ Завантажте зображення для аналізу" з гідлінгу Claude
   if (currentModel === 'image') {
     console.log(`🖼️ Image analysis mode selected, redirecting to Claude vision`);
@@ -3840,6 +3885,14 @@ bot.on('photo', async (ctx) => {
   // ✅ Спеціальний випадок: користувач обрав "💌 День Закоханих" креатив
   if (currentModel === 'love_is') {
     console.log(`💌 Love is... creative selected, handling creative photo`);
+    const imageUrl = await getImageUrl(ctx);
+    const handled = await handleCreativePhoto(ctx, imageUrl);
+    if (handled) return;
+  }
+
+  // ❤️ Льодяник креатив
+  if (currentModel === 'hearts') {
+    console.log(`❤️ Hearts creative selected, handling creative photo`);
     const imageUrl = await getImageUrl(ctx);
     const handled = await handleCreativePhoto(ctx, imageUrl);
     if (handled) return;
@@ -3881,16 +3934,9 @@ bot.on('photo', async (ctx) => {
   const videoModels = ['kling', 'runway_gen4', 'runway_turbo'];
   const imageModels = ['nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_2k', 'seedream_4k', 'ideogram'];
 
-  // ✅ Перевіряємо чи є накопичений промпт для довгих промптів
-  const pendingPrompt = pendingPrompts.get(userId);
+  // Отримуємо caption як промпт
   let prompt = ctx.message.caption || '';
 
-  if (pendingPrompt && MODELS_WITH_LONG_PROMPTS.includes(currentModel)) {
-    // Використовуємо накопичений промпт + caption якщо є
-    prompt = prompt ? pendingPrompt.prompt + '\n' + prompt : pendingPrompt.prompt;
-    pendingPrompts.delete(userId);
-    console.log(`📝 Using accumulated prompt for photo: ${prompt.length} chars`);
-  }
 
   // Якщо промпт пустий - використовуємо дефолтний
   if (!prompt) {
@@ -4055,15 +4101,9 @@ async function handleMediaGroup(ctx, group) {
     return;
   }
 
-  // ✅ Перевіряємо чи є накопичений промпт
-  const pendingPrompt = pendingPrompts.get(userId);
+  // Отримуємо промпт з caption
   let finalPrompt = caption || '';
 
-  if (pendingPrompt && MODELS_WITH_LONG_PROMPTS.includes(currentModel)) {
-    finalPrompt = finalPrompt ? pendingPrompt.prompt + '\n' + finalPrompt : pendingPrompt.prompt;
-    pendingPrompts.delete(userId);
-    console.log(`📝 Using accumulated prompt for album: ${finalPrompt.length} chars`);
-  }
 
   if (!finalPrompt) {
     finalPrompt = 'transform these images, masterpiece quality, highly detailed';
