@@ -1924,18 +1924,10 @@ bot.action(/^(kling|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ct
     const costPerSec = model.costPerSecond || (model.cost / minDuration);
     const minCost = minDuration * costPerSec;
     const maxCost = maxDuration * costPerSec;
-    const aspectRatios = model.aspectRatios || ['16:9'];
-    const defaultAspect = aspectRatios[0];
-
     userState.set(ctx.from.id, {
       action: 'runway_turbo_generation',
-      step: 'waiting_prompt',
-      duration: minDuration,
-      aspectRatio: defaultAspect
+      step: 'waiting_prompt'
     });
-
-    const durationButtons = durations.map(d => Markup.button.callback(`${d} сек (${(d * costPerSec).toFixed(1)}⚡)`, `runway_turbo_duration_${d}`));
-    const aspectButtons = aspectRatios.map(r => Markup.button.callback(`${r}`, `runway_turbo_aspect_${r}`));
 
     await ctx.reply(
       `🎬 <b>Runway Gen-4 Turbo</b>\n\n` +
@@ -1943,15 +1935,10 @@ bot.action(/^(kling|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ct
       `Опишіть рух/анімацію для відео.\n\n` +
       `⏱️ Тривалість: ${minDuration}-${maxDuration} сек\n` +
       `💰 Вартість: ${minCost.toFixed(1)}—${maxCost.toFixed(1)}⚡\n\n` +
-      `📐 Поточні налаштування:\n` +
-      `• Тривалість: ${minDuration} сек\n` +
-      `• Aspect ratio: ${defaultAspect}\n\n` +
       `✍️ Надішліть текстовий промпт:`,
       {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-          durationButtons,
-          aspectButtons,
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
       }
@@ -2141,7 +2128,7 @@ bot.action(/^runway_turbo_duration_(\d+)$/, async (ctx) => {
   const state = userState.get(userId);
   const model = models.video.models.find(m => m.key === 'runway_turbo');
 
-  if (!state || state.action !== 'runway_turbo_generation') {
+  if (!state || state.action !== 'runway_turbo_generation' || state.step !== 'select_duration') {
     await ctx.reply('❌ Помилка. Почніть заново, оберіть Runway Turbo');
     return;
   }
@@ -2151,10 +2138,27 @@ bot.action(/^runway_turbo_duration_(\d+)$/, async (ctx) => {
 
   userState.set(userId, {
     ...state,
-    duration: duration
+    duration: duration,
+    step: 'select_aspect'
   });
 
-  await ctx.answerCbQuery(`Тривалість: ${duration}с (${cost.toFixed(1)}⚡)`);
+  const aspectRatios = model?.aspectRatios || ['16:9'];
+  const aspectButtons = aspectRatios.map(r => Markup.button.callback(`${r}`, `runway_turbo_aspect_${r}`));
+
+  await ctx.reply(
+    `🎬 <b>Runway Gen-4 Turbo</b>\n\n` +
+    `📝 Промпт: "${state.prompt?.substring(0, 80)}${state.prompt?.length > 80 ? '...' : ''}"\n` +
+    `⏱️ Тривалість: <b>${duration} сек</b>\n` +
+    `💰 Вартість: <b>${cost.toFixed(1)}⚡</b>\n\n` +
+    `📐 <b>Крок 3: Оберіть aspect ratio</b>`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        aspectButtons,
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
 });
 
 bot.action(/^runway_turbo_aspect_(.+)$/, async (ctx) => {
@@ -2163,17 +2167,32 @@ bot.action(/^runway_turbo_aspect_(.+)$/, async (ctx) => {
   const aspectRatio = ctx.match[1];
   const state = userState.get(userId);
 
-  if (!state || state.action !== 'runway_turbo_generation') {
+  if (!state || state.action !== 'runway_turbo_generation' || state.step !== 'select_aspect') {
     await ctx.reply('❌ Помилка. Почніть заново, оберіть Runway Turbo');
     return;
   }
 
+  const model = models.video.models.find(m => m.key === 'runway_turbo');
+  const duration = state.duration || 5;
+  const costPerSec = model?.costPerSecond || (model?.cost || 22) / 5;
+  const cost = duration * costPerSec;
+
   userState.set(userId, {
     ...state,
-    aspectRatio: aspectRatio
+    aspectRatio: aspectRatio,
+    step: 'waiting_image'
   });
 
-  await ctx.answerCbQuery(`Aspect ratio: ${aspectRatio}`);
+  await ctx.reply(
+    `🎬 <b>Runway Gen-4 Turbo</b>\n\n` +
+    `📝 Промпт: "${state.prompt?.substring(0, 80)}${state.prompt?.length > 80 ? '...' : ''}"\n` +
+    `⏱️ Тривалість: <b>${duration} сек</b>\n` +
+    `📐 Aspect ratio: <b>${aspectRatio}</b>\n` +
+    `💰 Вартість: <b>${cost.toFixed(1)}⚡</b>\n\n` +
+    `🖼️ <b>Крок 4: Додайте Initial image</b>\n` +
+    `Це перший кадр відео.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
 });
 
 // ==================== VEO START IMAGE CALLBACKS ====================
@@ -3658,38 +3677,24 @@ bot.on('text', async (ctx) => {
     }
 
     const model = models.video.models.find(m => m.key === 'runway_turbo');
-    const duration = state.duration || 5;
-    const aspectRatio = state.aspectRatio || '16:9';
-    const costPerSec = model?.costPerSecond || (model?.cost || 22) / 5;
-    const totalCost = duration * costPerSec;
-
     userState.set(userId, {
       ...state,
       prompt: text,
-      step: 'waiting_image'
+      step: 'select_duration'
     });
 
-    const durationButtons = (model?.durations || [5]).map(d =>
-      Markup.button.callback(`${d} сек (${(d * costPerSec).toFixed(1)}⚡)`, `runway_turbo_duration_${d}`)
-    );
-    const aspectButtons = (model?.aspectRatios || ['16:9']).map(r =>
-      Markup.button.callback(`${r}`, `runway_turbo_aspect_${r}`)
-    );
+    const durations = model?.durations || [5];
+    const costPerSec = model?.costPerSecond || (model?.cost || 22) / 5;
+    const durationButtons = durations.map(d => Markup.button.callback(`${d} сек (${(d * costPerSec).toFixed(1)}⚡)`, `runway_turbo_duration_${d}`));
 
     await ctx.reply(
       `✅ <b>Промпт збережено!</b>\n\n` +
       `📝 "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n\n` +
-      `🖼️ <b>Крок 2: Додайте Initial image</b>\n` +
-      `Це перший кадр відео.\n\n` +
-      `📐 Aspect ratio: <b>${aspectRatio}</b>\n` +
-      `⏱️ Тривалість: <b>${duration} сек</b>\n` +
-      `💰 Вартість: <b>${totalCost.toFixed(1)}⚡</b>\n\n` +
-      `📤 Надішліть зображення без підпису (або можете додати, але не обов'язково).`,
+      `⏱️ <b>Крок 2: Оберіть тривалість</b>`,
       {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
           durationButtons,
-          aspectButtons,
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
       }
