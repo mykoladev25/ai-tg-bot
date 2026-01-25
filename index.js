@@ -305,9 +305,14 @@ async function sendFeedbackToAdmin(feedback, text, ctx, fileId = null) {
   // Відправляємо feedback адміну
   const adminId = process.env.ADMIN_TELEGRAM_ID;
   if (adminId) {
+    // Формуємо рядок з username - показуємо тільки якщо він є
+    const usernameDisplay = feedback.username && feedback.username !== 'unknown'
+      ? `@${feedback.username}`
+      : '(без username)';
+
     const adminMessage = `📨 <b>Новий ${feedback.typeName.toLowerCase()}</b>
 
-👤 Від: @${feedback.username} (${feedback.firstName})
+👤 Від: ${usernameDisplay} | ${feedback.firstName}
 🆔 ID: ${feedback.userId}
 ⏰ ${feedback.timestamp.toLocaleString('uk-UA')}
 
@@ -855,15 +860,24 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
   }
 
   // Парсимо username та firstName з тексту повідомлення
-  // Формат: 👤 Від: @username (FirstName)
+  // Новий формат: 👤 Від: @username | FirstName
+  // Або: 👤 Від: (без username) | FirstName
   const messageText = ctx.callbackQuery?.message?.text || ctx.callbackQuery?.message?.caption || '';
-  let username = 'unknown';
+  let username = null;
   let firstName = 'Unknown';
 
-  const userMatch = messageText.match(/👤 Від: @(\S+) \(([^)]+)\)/);
-  if (userMatch) {
-    username = userMatch[1] || 'unknown';
-    firstName = userMatch[2] || 'Unknown';
+  // Спробуємо знайти з username
+  const userMatchWithUsername = messageText.match(/👤 Від: @(\S+) \| (.+)/);
+  if (userMatchWithUsername) {
+    username = userMatchWithUsername[1];
+    firstName = userMatchWithUsername[2].trim();
+  } else {
+    // Спробуємо знайти без username
+    const userMatchNoUsername = messageText.match(/👤 Від: \(без username\) \| (.+)/);
+    if (userMatchNoUsername) {
+      username = null;
+      firstName = userMatchNoUsername[1].trim();
+    }
   }
 
   // Блокуємо користувача в БД
