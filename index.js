@@ -1035,7 +1035,7 @@ bot.hears('🎨 Креативи', async (ctx) => {
 
   const creativesKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('💌 До Дня Закоханих', 'creative_love_is')],
-    [Markup.button.callback('❤️ Д', 'creative_hearts')],
+    [Markup.button.callback('❤️ Льодяник', 'creative_hearts')],
     [Markup.button.callback('🏠 Головне меню', 'main_menu')]
   ]);
 
