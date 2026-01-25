@@ -1384,7 +1384,11 @@ async function handleCreativePhoto(ctx, imageUrl) {
   // Промпти (АНГЛІЙСЬКА + збереження рис обличчя)
   const prompts = {
     love_is: (() => {
-      const data = state.loveIsData;
+      const data = state.loveIsData || {
+        scenario: 'holding hands',
+        detail: 'with floating hearts around',
+        quote: 'бути разом у будь-яку погоду'
+      };
       return `GOAL: Transform the uploaded photo of a real couple into a cute vintage bubblegum-wrapper "Love Is"-style sticker panel (romantic mini-comic). Keep the couple recognizable (hair, face proportions, key features), but simplify into classic chibi cartoon characters.
 
 STYLE (match the classic "Love Is" sticker vibe):
