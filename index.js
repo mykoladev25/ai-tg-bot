@@ -4808,6 +4808,12 @@ function extractMediaUrl(media) {
     if (typeof media.video === 'string') return media.video;
     if (typeof media.image === 'string') return media.image;
     if (media.output && typeof media.output.url === 'string') return media.output.url;
+    if (media.output && Array.isArray(media.output)) return extractMediaUrl(media.output[0]);
+    if (typeof media.href === 'string') return media.href;
+    if (typeof media.toString === 'function') {
+      const asString = media.toString();
+      if (typeof asString === 'string') return asString;
+    }
   }
   return null;
 }
@@ -4815,8 +4821,9 @@ function extractMediaUrl(media) {
 function normalizeMediaUrl(media) {
   const url = extractMediaUrl(media);
   if (!url) return null;
-  if (url.startsWith('//')) return `https:${url}`;
-  return url;
+  const trimmed = typeof url === 'string' ? url.trim() : url;
+  if (typeof trimmed === 'string' && trimmed.startsWith('//')) return `https:${trimmed}`;
+  return trimmed;
 }
 
 async function safeSendPhoto(chatId, url, options) {
@@ -4832,7 +4839,7 @@ async function safeSendVideo(chatId, url, options) {
   if (!isAbsoluteHttpUrl(mediaUrl)) {
     throw new Error('Invalid media URL for video');
   }
-  return bot.telegram.sendVideo(chatId, mediaUrl, options);
+  return bot.telegram.sendVideo(chatId, { url: mediaUrl }, options);
 }
 
 async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, aspectRatio = '1:1') {
