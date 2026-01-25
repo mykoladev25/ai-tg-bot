@@ -1559,13 +1559,10 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
       );
     } else {
       // Файл нормальний - відправити як фото
-      await ctx.replyWithPhoto(
-          { url: result.imageUrl },
-          {
-            caption: `✅ ${creativeNames[creativeType]}\n\n⚠️ Посилання активне 1 ГОДИНУ - завантажте одразу! 📥\n\n💰 Витрачено: ${model.cost}⚡`,
-            ...keyboard.createBackButton('main_menu')
-          }
-      );
+      await safeSendPhoto(ctx.chat.id, result.imageUrl, {
+        caption: `✅ ${creativeNames[creativeType]}\n\n⚠️ Посилання активне 1 ГОДИНУ - завантажте одразу! 📥\n\n💰 Витрачено: ${model.cost}⚡`,
+        ...keyboard.createBackButton('main_menu')
+      });
     }
 
     userState.delete(userId);
@@ -3018,14 +3015,10 @@ async function generateKlingMotionVideo(ctx, state) {
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
 
-      await bot.telegram.sendVideo(
-        chatId,
-        result.videoUrl,
-        {
-          caption: `🔥 Kling Motion\n\n⚙️ ${generationData.mode.toUpperCase()} | ${generationData.orientation} | ${generationData.keepOriginalSound ? '🔊' : '🔇'}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${motionCost}⚡`,
-          ...keyboard.createBackButton('video_menu')
-        }
-      );
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `🔥 Kling Motion\n\n⚙️ ${generationData.mode.toUpperCase()} | ${generationData.orientation} | ${generationData.keepOriginalSound ? '🔊' : '🔇'}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${motionCost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
 
     } catch (error) {
       console.error('Kling Motion generation failed:', error);
@@ -3168,14 +3161,10 @@ async function generateKlingVideo(ctx, state) {
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
 
-      await bot.telegram.sendVideo(
-        chatId,
-        result.videoUrl,
-        {
-          caption: `🎭 Kling v2.5\n\n⏱️ ${duration}сек | 📐 ${generationData.aspectRatio || '16:9'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${klingCost}⚡`,
-          ...keyboard.createBackButton('video_menu')
-        }
-      );
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `🎭 Kling v2.5\n\n⏱️ ${duration}сек | 📐 ${generationData.aspectRatio || '16:9'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${klingCost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
 
       // ✅ Записуємо Trial usage
       recordTrialUsage(userId, 'kling');
@@ -3303,14 +3292,10 @@ async function generateRunwayTurboVideo(ctx, state) {
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
 
-      await bot.telegram.sendVideo(
-        chatId,
-        result.videoUrl,
-        {
-          caption: `🎬 Runway Turbo\n\n⏱️ ${duration}сек | 📐 ${aspectRatio}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${runwayCost.toFixed(1)}⚡`,
-          ...keyboard.createBackButton('video_menu')
-        }
-      );
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `🎬 Runway Turbo\n\n⏱️ ${duration}сек | 📐 ${aspectRatio}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${runwayCost.toFixed(1)}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
 
       recordTrialUsage(userId, 'runway_turbo');
 
@@ -3461,14 +3446,10 @@ async function generateVeoVideo(ctx, state) {
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
 
-      await bot.telegram.sendVideo(
-        chatId,
-        result.videoUrl,
-        {
-          caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${veoCost}⚡`,
-          ...keyboard.createBackButton('video_menu')
-        }
-      );
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${veoCost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
 
     } catch (error) {
       console.error('Veo 3.1 generation failed:', error);
@@ -4594,6 +4575,24 @@ function normalizeReferenceOrder(references) {
     .map((ref) => ref.url);
 }
 
+function isAbsoluteHttpUrl(url) {
+  return typeof url === 'string' && /^https?:\/\//i.test(url);
+}
+
+async function safeSendPhoto(chatId, url, options) {
+  if (!isAbsoluteHttpUrl(url)) {
+    throw new Error('Invalid media URL for photo');
+  }
+  return bot.telegram.sendPhoto(chatId, { url }, options);
+}
+
+async function safeSendVideo(chatId, url, options) {
+  if (!isAbsoluteHttpUrl(url)) {
+    throw new Error('Invalid media URL for video');
+  }
+  return bot.telegram.sendVideo(chatId, url, options);
+}
+
 async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, aspectRatio = '1:1') {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
@@ -4761,15 +4760,11 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
           console.warn('Could not delete status message:', e.message);
         }
 
-        await bot.telegram.sendPhoto(
-          chatId,
-          { url: result.imageUrl },
-          {
-            caption: `${generationData.modelName} (${generationData.mode})\n\n📝 Промпт: ${generationData.prompt.substring(0, 800)}${generationData.prompt.length > 800 ? '...' : ''}\n\n💰 Витрачено: ${generationData.modelCost}⚡`,
-            parse_mode: 'HTML',
-            ...keyboard.createBackButton('design_menu')
-          }
-        );
+        await safeSendPhoto(chatId, result.imageUrl, {
+          caption: `${generationData.modelName} (${generationData.mode})\n\n📝 Промпт: ${generationData.prompt.substring(0, 800)}${generationData.prompt.length > 800 ? '...' : ''}\n\n💰 Витрачено: ${generationData.modelCost}⚡`,
+          parse_mode: 'HTML',
+          ...keyboard.createBackButton('design_menu')
+        });
       }
 
       finished = true;
@@ -4891,14 +4886,10 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
 
-      await bot.telegram.sendVideo(
-        chatId,
-        result.videoUrl,
-        {
-          caption: `${model.name}\n\n📝 Промпт: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
-          ...keyboard.createBackButton('video_menu')
-        }
-      );
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `${model.name}\n\n📝 Промпт: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
 
       finished = true;
       gracefulShutdown.completeGeneration(requestId, true);
@@ -4996,7 +4987,7 @@ async function handleMidjourneyGeneration(ctx, prompt) {
       await userBalance.deductTokens(userId, model.cost, 'Midjourney generation', { modelKey: 'midjourney', modelName: model.name, apiCost: model.apiCost, prompt });
       const user = await userBalance.getUser(userId, ctx.from);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      await ctx.replyWithPhoto({ url: result.imageUrl }, {
+      await safeSendPhoto(ctx.chat.id, result.imageUrl, {
         caption: `✅ Готово!\n\nPrompt: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Використано: ${model.cost}⚡\n💰 Залишок: ${user.tokens.toFixed(2)}⚡`,
         ...keyboard.createGenerationActionsMenu(result.taskId)
       });
@@ -5033,7 +5024,7 @@ async function handleClarityUpscaler(ctx) {
 
     await userBalance.deductTokens(userId, model.cost, 'Clarity Upscaler', { modelKey: 'clarity', modelName: model.name, apiCost: model.apiCost, prompt });
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    await ctx.replyWithPhoto({ url: result.imageUrl }, {
+    await safeSendPhoto(ctx.chat.id, result.imageUrl, {
       caption: `🔮 Clarity Upscaler\n\n📝 Промпт: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
       ...keyboard.createBackButton('design_menu')
     });
