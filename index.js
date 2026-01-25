@@ -223,6 +223,11 @@ bot.on('callback_query', async (ctx, next) => {
     return next();
   }
 
+  // ✅ ДОЗВОЛЯЄМО RUNWAY TURBO CALLBACKS
+  if (callbackData.startsWith('runway_turbo_')) {
+    return next();
+  }
+
   if (MODELS_WITH_STATE.includes(callbackData)) {
     return next();
   }
@@ -246,6 +251,11 @@ bot.on('callback_query', async (ctx, next) => {
 
   // ✅ Дозволяємо kling_motion state
   if (state?.action === 'kling_motion_generation') {
+    return next();
+  }
+
+  // ✅ Дозволяємо runway turbo state
+  if (state?.action === 'runway_turbo_generation') {
     return next();
   }
 
