@@ -71,7 +71,11 @@ function calculateApiCost(modelConfig, options = {}) {
   // Kling - seconds-based
   if (modelConfig.key === 'kling' || modelConfig.key === 'kling_v2_6') {
     const secs = seconds || duration || 5;
-    return (modelConfig.apiCostPerSecond || 0.07) * secs;
+    const useAudio = generateAudio === true;
+    const perSec = useAudio
+      ? (modelConfig.apiCostPerSecondAudio ?? modelConfig.apiCostPerSecond ?? 0.07)
+      : (modelConfig.apiCostPerSecond ?? modelConfig.apiCostPerSecondNoAudio ?? 0.07);
+    return perSec * secs;
   }
 
   // Runway Turbo - seconds-based
@@ -110,7 +114,11 @@ function calculateTokenCost(modelConfig, options = {}) {
   // Kling
   if (modelConfig.key === 'kling' || modelConfig.key === 'kling_v2_6') {
     const secs = seconds || duration || 5;
-    return (modelConfig.costPerSecond || 6) * secs;
+    const useAudio = generateAudio === true;
+    const perSec = useAudio
+      ? (modelConfig.costPerSecondAudio ?? modelConfig.costPerSecond ?? 6)
+      : (modelConfig.costPerSecond ?? modelConfig.costPerSecondNoAudio ?? 6);
+    return perSec * secs;
   }
 
   // Runway Turbo

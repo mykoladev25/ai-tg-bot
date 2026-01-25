@@ -38,7 +38,10 @@ const TRIAL_RESTRICTIONS = {
 
     // Ліміт на кількість генерацій дорогих моделей (за весь час Trial)
     limitedModels: {
+        'seedream_4k': 3, // Максимум 3 генерації Seedream 4K
+        'nano_banana_2k': 5,  // Максимум 5 генерацій 2K
         'nano_banana_4k': 1,  // Максимум 1 генерація 4K
+        'nano_banana_2k': 3,  // Максимум 3 генерації 2K
         'kling': 2,          // Максимум 2 генерації Kling v2.5 (будь-якої тривалості)
         'kling_v2_6': 2,      // Максимум 2 генерації Kling v2.6 (будь-якої тривалості)
         'runway_turbo': 1 // Максимум 1 генерація Runway Turbo
@@ -121,9 +124,12 @@ module.exports = {
             {
                 name: '🎭 Kling v2.6',
                 key: 'kling_v2_6',
-                costPerSecond: 6,
+                costPerSecond: 6,           // без аудіо
+                costPerSecondAudio: 12,     // з аудіо
                 cost: 30, // default menu (5 sec): 5 * 6
-                apiCostPerSecond: 0.07,
+                apiCostPerSecond: 0.07,     // без аудіо
+                apiCostPerSecondAudio: 0.14, // з аудіо
+                audioParam: 'generate_audio',
                 available: true,
                 requiresImage: false,
                 durations: [5, 10],

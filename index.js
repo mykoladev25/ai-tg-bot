@@ -2612,6 +2612,37 @@ bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
     return;
   }
 
+  if (modelKey === 'kling_v2_6') {
+    const noAudioCost = duration * (model?.costPerSecond || 6);
+    const audioCost = duration * (model?.costPerSecondAudio || (model?.costPerSecond || 6));
+
+    userState.set(userId, {
+      action: 'kling_generation',
+      step: 'select_audio',
+      duration: duration,
+      modelKey
+    });
+
+    await ctx.reply(
+      `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
+      `⏱️ Тривалість: <b>${duration} секунд</b>\n\n` +
+      `🔊 <b>Крок 2: Оберіть аудіо</b>\n\n` +
+      `🔇 Без аудіо — <b>${noAudioCost}⚡</b>\n` +
+      `🔊 З аудіо — <b>${audioCost}⚡</b>`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback(`🔇 Без аудіо (${noAudioCost}⚡)`, 'kling_audio_off'),
+            Markup.button.callback(`🔊 З аудіо (${audioCost}⚡)`, 'kling_audio_on')
+          ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
   userState.set(userId, {
     action: 'kling_generation',
     step: 'select_aspect',
@@ -2625,6 +2656,53 @@ bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
     `⏱️ Тривалість: <b>${duration} секунд</b>\n` +
     `💰 Вартість: <b>${klingCost}⚡</b>\n\n` +
     `📐 <b>Крок 2: Оберіть пропорції</b>\n\n` +
+    `<i>Ігнорується якщо завантажите стартове зображення</i>`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🎬 16:9', 'kling_aspect_16:9'),
+          Markup.button.callback('📱 9:16', 'kling_aspect_9:16')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 2 (Kling v2.6): Вибір аудіо
+bot.action(/^kling_audio_(on|off)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const audioOn = ctx.match[1] === 'on';
+  const state = userState.get(userId);
+  const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
+  const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
+
+  if (!state || state.action !== 'kling_generation' || state.step !== 'select_audio') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const duration = state.duration || 5;
+  const costPerSec = audioOn
+    ? (model?.costPerSecondAudio || model?.costPerSecond || 6)
+    : (model?.costPerSecond || 6);
+  const klingCost = duration * costPerSec;
+
+  userState.set(userId, {
+    ...state,
+    generateAudio: audioOn,
+    klingCost,
+    step: 'select_aspect'
+  });
+
+  await ctx.reply(
+    `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
+    `⏱️ Тривалість: <b>${duration} секунд</b>\n` +
+    `🔊 Аудіо: <b>${audioOn ? 'Так' : 'Ні'}</b>\n` +
+    `💰 Вартість: <b>${klingCost}⚡</b>\n\n` +
+    `📐 <b>Крок 3: Оберіть пропорції</b>\n\n` +
     `<i>Ігнорується якщо завантажите стартове зображення</i>`,
     {
       parse_mode: 'HTML',
@@ -2659,12 +2737,21 @@ bot.action(/^kling_aspect_(.+)$/, async (ctx) => {
     step: 'ask_start_image'
   });
 
+  const useAudio = state.generateAudio === true;
+  const effectiveCost = state.klingCost || (state.duration * (useAudio ? (model?.costPerSecondAudio || model?.costPerSecond || 6) : (model?.costPerSecond || 6)));
+  const startImageStep = state?.generateAudio !== undefined ? 4 : 3;
+
+  const audioLine = state?.generateAudio !== undefined
+    ? `🔊 Аудіо: <b>${state.generateAudio ? 'Так' : 'Ні'}</b>\n`
+    : '';
+
   await ctx.reply(
     `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
     `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
     `📐 Пропорції: <b>${aspectRatio}</b>\n` +
-    `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
-    `🖼️ <b>Крок 3: Стартове зображення (опціонально)</b>\n\n` +
+    `${audioLine}` +
+    `💰 Вартість: <b>${effectiveCost}⚡</b>\n\n` +
+    `🖼️ <b>Крок ${startImageStep}: Стартове зображення (опціонально)</b>\n\n` +
     `Зображення стане першим кадром відео.\n` +
     `AI анімує його згідно з промптом.`,
     {
@@ -2717,6 +2804,10 @@ bot.action('kling_skip_start_image', async (ctx) => {
   }
 
   if (!supportsEndImage) {
+    const audioLine = state?.generateAudio !== undefined
+      ? `🔊 Аудіо: <b>${state.generateAudio ? 'Так' : 'Ні'}</b>\n`
+      : '';
+
     userState.set(userId, {
       ...state,
       startImage: null,
@@ -2729,6 +2820,7 @@ bot.action('kling_skip_start_image', async (ctx) => {
       `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
       `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
       `🖼️ Start image: <b>Ні</b>\n` +
+      `${audioLine}` +
       `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
       `📝 <b>Напишіть промпт</b>\n\n` +
       `Опишіть рух/анімацію для відео.\n\n` +
@@ -2834,6 +2926,10 @@ bot.action('kling_skip_end_image', async (ctx) => {
     return;
   }
 
+  const audioLine = state?.generateAudio !== undefined
+    ? `🔊 Аудіо: <b>${state.generateAudio ? 'Так' : 'Ні'}</b>\n`
+    : '';
+
   userState.set(userId, {
     ...state,
     endImage: null,
@@ -2845,6 +2941,7 @@ bot.action('kling_skip_end_image', async (ctx) => {
     `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
     `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
     `🖼️ Start image: <b>${state.startImage ? 'Так' : 'Ні'}</b>\n` +
+    `${audioLine}` +
     `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
     `📝 <b>Напишіть промпт</b>\n\n` +
     `Опишіть детально що хочете бачити у відео.\n\n` +
@@ -3147,8 +3244,15 @@ async function generateKlingVideo(ctx, state) {
 
   const supportsEndImage = model.supportsEndImage !== false;
   const duration = state.duration || model.durations?.[0] || 5;
-  const klingCost = state.klingCost || (duration * (model.costPerSecond || 6));
-  const apiCost = duration * (model.apiCostPerSecond || 0.07);
+  const useAudio = state.generateAudio === true;
+  const costPerSec = useAudio
+    ? (model.costPerSecondAudio || model.costPerSecond || 6)
+    : (model.costPerSecond || model.costPerSecondNoAudio || 6);
+  const apiCostPerSec = useAudio
+    ? (model.apiCostPerSecondAudio || model.apiCostPerSecond || 0.07)
+    : (model.apiCostPerSecond || model.apiCostPerSecondNoAudio || 0.07);
+  const klingCost = state.klingCost || (duration * costPerSec);
+  const apiCost = duration * apiCostPerSec;
 
   if (!(await userBalance.hasTokens(userId, klingCost))) {
     await showInsufficientTokens(ctx, klingCost);
@@ -3159,6 +3263,7 @@ async function generateKlingVideo(ctx, state) {
   const hasStartImage = !!state.startImage;
   const hasEndImage = supportsEndImage && !!state.endImage;
   const endImageLine = supportsEndImage ? `🎬 End image: ${hasEndImage ? 'Так' : 'Ні'}\n` : '';
+  const audioLine = state.generateAudio !== undefined ? `🔊 Аудіо: ${useAudio ? 'Так' : 'Ні'}\n` : '';
 
   const statusMsg = await ctx.reply(
     `<b>${model.name} - Генерація</b>\n\n` +
@@ -3166,6 +3271,7 @@ async function generateKlingVideo(ctx, state) {
     `📐 Пропорції: ${state.aspectRatio || '16:9'}\n` +
     `🖼️ Start image: ${hasStartImage ? 'Так' : 'Ні'}\n` +
     `${endImageLine}` +
+    `${audioLine}` +
     `\n📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
     `⏱️ Це може зайняти 2-5 хвилин...\n` +
     `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
@@ -3190,7 +3296,9 @@ async function generateKlingVideo(ctx, state) {
           generationData.prompt,
           generationData.startImage || null,
           duration,
-          generationData.aspectRatio || '16:9'
+          generationData.aspectRatio || '16:9',
+          generationData.generateAudio === true,
+          model.audioParam || 'generate_audio'
         )
         : await generator(
           generationData.prompt,
@@ -3216,7 +3324,7 @@ async function generateKlingVideo(ctx, state) {
           userId,
           modelKey,
           success: false,
-          options: { duration },
+          options: { duration, generateAudio: generationData.generateAudio === true },
           isTrial,
           isFree: isTrial,
           errorCode: result.error?.substring(0, 100)
@@ -3229,7 +3337,8 @@ async function generateKlingVideo(ctx, state) {
         modelKey, modelName: model.name, apiCost: apiCost,
         prompt: generationData.prompt, duration: duration,
         hasStartImage: hasStartImage,
-        hasEndImage: hasEndImage
+        hasEndImage: hasEndImage,
+        generateAudio: generationData.generateAudio === true
       });
 
       // 📊 Логуємо успішну генерацію
@@ -3238,7 +3347,7 @@ async function generateKlingVideo(ctx, state) {
         userId,
         modelKey,
         success: true,
-        options: { duration },
+        options: { duration, generateAudio: generationData.generateAudio === true },
         isTrial: isTrialKling,
         isFree: isTrialKling
       });
@@ -3250,13 +3359,14 @@ async function generateKlingVideo(ctx, state) {
         `✅ <b>${model.name} готово!</b>\n\n` +
         `⏱️ Тривалість: ${duration} сек\n` +
         `📐 Пропорції: ${generationData.aspectRatio || '16:9'}\n` +
+        `${audioLine}` +
         `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
         `💰 Витрачено: ${klingCost}⚡`,
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
 
       await safeSendVideo(chatId, result.videoUrl, {
-        caption: `${model.name}\n\n⏱️ ${duration}сек | 📐 ${generationData.aspectRatio || '16:9'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${klingCost}⚡`,
+        caption: `${model.name}\n\n⏱️ ${duration}сек | 📐 ${generationData.aspectRatio || '16:9'}${audioLine ? ` | ${useAudio ? '🔊 Аудіо' : '🔇 Без аудіо'}` : ''}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${klingCost}⚡`,
         ...keyboard.createBackButton('video_menu')
       });
 
@@ -4178,6 +4288,9 @@ bot.on('photo', async (ctx) => {
     const imageUrl = await getImageUrl(ctx);
     const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
     const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
+    const audioLine = state?.generateAudio !== undefined
+      ? `🔊 Аудіо: <b>${state.generateAudio ? 'Так' : 'Ні'}</b>\n`
+      : '';
 
     userState.set(userId, {
       ...state,
@@ -4192,6 +4305,7 @@ bot.on('photo', async (ctx) => {
       `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
       `🖼️ Start image: <b>Так</b>\n` +
       `🎬 End image: <b>Так</b>\n` +
+      `${audioLine}` +
       `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
       `📝 <b>Напишіть промпт</b>\n\n` +
       `Опишіть рух/перехід між початковим та кінцевим кадром.\n\n` +

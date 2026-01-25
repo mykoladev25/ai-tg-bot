@@ -418,13 +418,14 @@ async function generateVideoWithKling(prompt, startImage = null, endImage = null
  * - duration: 5 або 10 секунд
  * - aspect_ratio: 16:9 або 9:16 (ігнорується якщо є start_image)
  */
-async function generateVideoWithKling26(prompt, startImage = null, duration = 5, aspectRatio = '16:9') {
+async function generateVideoWithKling26(prompt, startImage = null, duration = 5, aspectRatio = '16:9', generateAudio = false, audioParam = 'generate_audio') {
   try {
     console.log('Starting Kling v2.6 video generation:', {
       prompt: prompt.substring(0, 100),
       duration,
       aspectRatio,
-      hasStartImage: !!startImage
+      hasStartImage: !!startImage,
+      generateAudio
     });
 
     const input = {
@@ -439,6 +440,11 @@ async function generateVideoWithKling26(prompt, startImage = null, duration = 5,
     } else {
       // aspect_ratio ігнорується якщо є start_image
       input.aspect_ratio = aspectRatio;
+    }
+
+    // Аудіо (якщо підтримується моделлю)
+    if (audioParam) {
+      input[audioParam] = !!generateAudio;
     }
 
     console.log('🎬 Kling v2.6 input:', input);
