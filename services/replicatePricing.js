@@ -83,6 +83,14 @@ const OFFICIAL_PRICING = {
     lastChecked: '2026-01-25',
     source: 'https://replicate.com/kwaivgi/kling-v2.5-turbo-pro'
   },
+  'kwaivgi/kling-v2.6': {
+    pricePerSecond: 0.07,
+    pricePerSecondNoAudio: 0.07,
+    pricePerSecondAudio: 0.14,
+    model: 'kling_v2_6',
+    lastChecked: '2026-01-25',
+    source: 'https://replicate.com/kwaivgi/kling-v2.6'
+  },
 
   'google/veo-3.1': {
     pricePerSecondAudio: 0.40,
@@ -112,6 +120,7 @@ const MODEL_MAPPING = {
   'ideogram': 'ideogram-ai/ideogram-v3',
   'clarity': 'philz1337x/clarity-upscaler',
   'kling': 'kwaivgi/kling-v2.5-turbo-pro',
+  'kling_v2_6': 'kwaivgi/kling-v2.6',
   'kling_motion': 'kwaivgi/kling-v2.5-turbo-pro',
   'veo': 'google/veo-3.1',
   'runway_turbo': 'runway/gen-4-turbo'
@@ -337,4 +346,3 @@ module.exports = {
   OFFICIAL_PRICING,
   MODEL_MAPPING
 };
-

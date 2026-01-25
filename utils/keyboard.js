@@ -31,7 +31,7 @@ function createInlineMenu(buttons, columns = 1) {
         text = `${btn.name} (${minCost}—${maxCost}⚡)`;
       }
       // Для Kling показуємо діапазон цін
-      else if (btn.key === 'kling' && btn.costPerSecond && btn.durations) {
+      else if (btn.key !== 'kling_motion' && btn.key.startsWith('kling') && btn.costPerSecond && btn.durations) {
         const minCost = Math.min(...btn.durations) * btn.costPerSecond;
         const maxCost = Math.max(...btn.durations) * btn.costPerSecond;
         text = `${btn.name} (${minCost}—${maxCost}⚡)`;

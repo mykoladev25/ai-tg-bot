@@ -190,6 +190,7 @@ const MODELS_WITH_ASPECT_RATIO = [
 // ✅ МАСИВ МОДЕЛЕЙ З БАГАТОКРОКОВИМ ПРОЦЕСОМ
 const MODELS_WITH_STATE = [
   'kling',                  // duration + aspect + start_image + end_image
+  'kling_v2_6',             // duration + aspect + start_image (no end_image)
   'kling_motion',           // mode + orientation + sound + фото + відео
   'veo',                    // aspect ratio + prompt + references + last_frame
   'nano_banana_pro',        // вибір розміру (майбутнє)
@@ -1854,7 +1855,7 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
 
 
 // Video Models
-bot.action(/^(kling|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ctx) => {
+bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.video.models.find(m => m.key === modelKey);
 
@@ -1919,24 +1920,33 @@ bot.action(/^(kling|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ct
   }
 
   // Для Kling показуємо спеціальне меню з вибором тривалості
-  if (modelKey === 'kling') {
-    const minCost = 5 * model.costPerSecond;   // 5 сек
-    const maxCost = 10 * model.costPerSecond;  // 10 сек
+  if (modelKey === 'kling' || modelKey === 'kling_v2_6') {
+    const durations = model.durations || [5];
+    const minDuration = Math.min(...durations);
+    const maxDuration = Math.max(...durations);
+    const minCost = minDuration * model.costPerSecond;
+    const maxCost = maxDuration * model.costPerSecond;
+    const durationButtons = durations.map(d =>
+      Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `kling_duration_${d}`)
+    );
+
+    userState.set(ctx.from.id, {
+      action: 'kling_generation',
+      step: 'select_duration',
+      modelKey
+    });
 
     await ctx.reply(
-      `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+      `<b>${model.name}</b>\n\n` +
       `📐 <b>Крок 1: Оберіть тривалість відео</b>\n\n` +
-      `⏱️ <b>5 секунд</b> — ${minCost}⚡\n` +
-      `⏱️ <b>10 секунд</b> — ${maxCost}⚡\n\n` +
+      `⏱️ <b>${minDuration} секунд</b> — ${minCost}⚡\n` +
+      `⏱️ <b>${maxDuration} секунд</b> — ${maxCost}⚡\n\n` +
       `📊 Якість: 1080p\n` +
       `💰 Вартість: ${minCost}—${maxCost}⚡`,
       {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-          [
-            Markup.button.callback(`5 сек (${minCost}⚡)`, 'kling_duration_5'),
-            Markup.button.callback(`10 сек (${maxCost}⚡)`, 'kling_duration_10')
-          ],
+          durationButtons,
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
       }
@@ -2587,11 +2597,13 @@ bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
   const duration = parseInt(ctx.match[1]);
-  const model = models.video.models.find(m => m.key === 'kling');
-  const klingCost = duration * model.costPerSecond;
+  const state = userState.get(userId);
+  const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
+  const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
+  const klingCost = duration * (model?.costPerSecond || 6);
 
   // ✅ TRIAL CHECK: 10 секунд заблоковано для Trial
-  const trialCheck = await checkTrialRestrictions(userId, 'kling', { duration });
+  const trialCheck = await checkTrialRestrictions(userId, modelKey, { duration });
   if (!trialCheck.allowed) {
     await ctx.reply(
       trialCheck.message,
@@ -2604,11 +2616,12 @@ bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
     action: 'kling_generation',
     step: 'select_aspect',
     duration: duration,
-    klingCost: klingCost
+    klingCost: klingCost,
+    modelKey
   });
 
   await ctx.reply(
-    `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+    `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
     `⏱️ Тривалість: <b>${duration} секунд</b>\n` +
     `💰 Вартість: <b>${klingCost}⚡</b>\n\n` +
     `📐 <b>Крок 2: Оберіть пропорції</b>\n\n` +
@@ -2632,6 +2645,8 @@ bot.action(/^kling_aspect_(.+)$/, async (ctx) => {
   const userId = ctx.from.id;
   const aspectRatio = ctx.match[1];
   const state = userState.get(userId);
+  const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
+  const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
 
   if (!state || state.action !== 'kling_generation') {
     await ctx.reply('❌ Помилка. Почніть заново.');
@@ -2645,7 +2660,7 @@ bot.action(/^kling_aspect_(.+)$/, async (ctx) => {
   });
 
   await ctx.reply(
-    `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+    `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
     `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
     `📐 Пропорції: <b>${aspectRatio}</b>\n` +
     `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
@@ -2692,9 +2707,34 @@ bot.action('kling_skip_start_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
   const state = userState.get(userId);
+  const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
+  const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
+  const supportsEndImage = model?.supportsEndImage !== false;
 
   if (!state || state.action !== 'kling_generation') {
     await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  if (!supportsEndImage) {
+    userState.set(userId, {
+      ...state,
+      startImage: null,
+      endImage: null,
+      step: 'waiting_prompt'
+    });
+
+    await ctx.reply(
+      `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
+      `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
+      `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
+      `🖼️ Start image: <b>Ні</b>\n` +
+      `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
+      `📝 <b>Напишіть промпт</b>\n\n` +
+      `Опишіть рух/анімацію для відео.\n\n` +
+      `✍️ <b>Надішліть текстовий промпт:</b>`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
     return;
   }
 
@@ -2705,7 +2745,7 @@ bot.action('kling_skip_start_image', async (ctx) => {
   });
 
   await ctx.reply(
-    `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+    `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
     `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
     `<b>Що це:</b> Зображення для кінця відео.\n` +
     `AI створить плавний перехід від першого до останнього кадру.\n\n` +
@@ -2729,6 +2769,8 @@ bot.action('kling_ask_end_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
   const state = userState.get(userId);
+  const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
+  const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
 
   if (!state || state.action !== 'kling_generation') {
     await ctx.reply('❌ Помилка. Почніть заново.');
@@ -2736,7 +2778,7 @@ bot.action('kling_ask_end_image', async (ctx) => {
   }
 
   await ctx.reply(
-    `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+    `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
     `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
     `<b>Що це:</b> Зображення для кінця відео.\n` +
     `AI створить плавний перехід від першого до останнього кадру.\n\n` +
@@ -2784,6 +2826,8 @@ bot.action('kling_skip_end_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
   const state = userState.get(userId);
+  const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
+  const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
 
   if (!state || state.action !== 'kling_generation') {
     await ctx.reply('❌ Помилка. Почніть заново.');
@@ -2797,7 +2841,7 @@ bot.action('kling_skip_end_image', async (ctx) => {
   });
 
   await ctx.reply(
-    `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+    `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
     `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
     `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
     `🖼️ Start image: <b>${state.startImage ? 'Так' : 'Ні'}</b>\n` +
@@ -3092,7 +3136,8 @@ async function generateKlingVideo(ctx, state) {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
   const chatId = ctx.chat.id;
-  const model = models.video.models.find(m => m.key === 'kling');
+  const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
+  const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
 
   if (!model) {
     await ctx.reply('❌ Модель Kling не знайдена');
@@ -3100,9 +3145,10 @@ async function generateKlingVideo(ctx, state) {
     return;
   }
 
-  const duration = state.duration || 5;
-  const klingCost = state.klingCost || (duration * model.costPerSecond);
-  const apiCost = duration * model.apiCostPerSecond;
+  const supportsEndImage = model.supportsEndImage !== false;
+  const duration = state.duration || model.durations?.[0] || 5;
+  const klingCost = state.klingCost || (duration * (model.costPerSecond || 6));
+  const apiCost = duration * (model.apiCostPerSecond || 0.07);
 
   if (!(await userBalance.hasTokens(userId, klingCost))) {
     await showInsufficientTokens(ctx, klingCost);
@@ -3111,15 +3157,16 @@ async function generateKlingVideo(ctx, state) {
   }
 
   const hasStartImage = !!state.startImage;
-  const hasEndImage = !!state.endImage;
+  const hasEndImage = supportsEndImage && !!state.endImage;
+  const endImageLine = supportsEndImage ? `🎬 End image: ${hasEndImage ? 'Так' : 'Ні'}\n` : '';
 
   const statusMsg = await ctx.reply(
-    `🎭 <b>Kling v2.5 - Генерація</b>\n\n` +
+    `<b>${model.name} - Генерація</b>\n\n` +
     `⏱️ Тривалість: ${duration} сек\n` +
     `📐 Пропорції: ${state.aspectRatio || '16:9'}\n` +
     `🖼️ Start image: ${hasStartImage ? 'Так' : 'Ні'}\n` +
-    `🎬 End image: ${hasEndImage ? 'Так' : 'Ні'}\n\n` +
-    `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
+    `${endImageLine}` +
+    `\n📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
     `⏱️ Це може зайняти 2-5 хвилин...\n` +
     `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
     { parse_mode: 'HTML' }
@@ -3134,13 +3181,24 @@ async function generateKlingVideo(ctx, state) {
 
   (async () => {
     try {
-      const result = await replicate.generateVideoWithKling(
-        generationData.prompt,
-        generationData.startImage || null,
-        generationData.endImage || null,
-        duration,
-        generationData.aspectRatio || '16:9'
-      );
+      const generator = modelKey === 'kling_v2_6'
+        ? replicate.generateVideoWithKling26
+        : replicate.generateVideoWithKling;
+
+      const result = modelKey === 'kling_v2_6'
+        ? await generator(
+          generationData.prompt,
+          generationData.startImage || null,
+          duration,
+          generationData.aspectRatio || '16:9'
+        )
+        : await generator(
+          generationData.prompt,
+          generationData.startImage || null,
+          supportsEndImage ? (generationData.endImage || null) : null,
+          duration,
+          generationData.aspectRatio || '16:9'
+        );
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
@@ -3156,7 +3214,7 @@ async function generateKlingVideo(ctx, state) {
         const isTrial = await isTrialUser(userId);
         await monitoringLoggers.logUsageEvent({
           userId,
-          modelKey: 'kling',
+          modelKey,
           success: false,
           options: { duration },
           isTrial,
@@ -3168,7 +3226,7 @@ async function generateKlingVideo(ctx, state) {
       }
 
       await userBalance.deductTokens(userId, klingCost, `${model.name} generation`, {
-        modelKey: 'kling', modelName: model.name, apiCost: apiCost,
+        modelKey, modelName: model.name, apiCost: apiCost,
         prompt: generationData.prompt, duration: duration,
         hasStartImage: hasStartImage,
         hasEndImage: hasEndImage
@@ -3178,7 +3236,7 @@ async function generateKlingVideo(ctx, state) {
       const isTrialKling = await isTrialUser(userId);
       await monitoringLoggers.logUsageEvent({
         userId,
-        modelKey: 'kling',
+        modelKey,
         success: true,
         options: { duration },
         isTrial: isTrialKling,
@@ -3189,7 +3247,7 @@ async function generateKlingVideo(ctx, state) {
 
       await bot.telegram.sendMessage(
         chatId,
-        `✅ <b>Kling v2.5 готово!</b>\n\n` +
+        `✅ <b>${model.name} готово!</b>\n\n` +
         `⏱️ Тривалість: ${duration} сек\n` +
         `📐 Пропорції: ${generationData.aspectRatio || '16:9'}\n` +
         `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
@@ -3198,12 +3256,12 @@ async function generateKlingVideo(ctx, state) {
       );
 
       await safeSendVideo(chatId, result.videoUrl, {
-        caption: `🎭 Kling v2.5\n\n⏱️ ${duration}сек | 📐 ${generationData.aspectRatio || '16:9'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${klingCost}⚡`,
+        caption: `${model.name}\n\n⏱️ ${duration}сек | 📐 ${generationData.aspectRatio || '16:9'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${klingCost}⚡`,
         ...keyboard.createBackButton('video_menu')
       });
 
       // ✅ Записуємо Trial usage
-      recordTrialUsage(userId, 'kling');
+      recordTrialUsage(userId, modelKey);
 
     } catch (error) {
       console.error('Kling generation failed:', error);
@@ -3873,6 +3931,7 @@ bot.on('text', async (ctx) => {
     seedream_4k: () => handleImageGeneration(ctx, text, 'seedream_4k'),
     ideogram: () => handleImageGeneration(ctx, text, 'ideogram'),
     kling: () => handleVideoGeneration(ctx, text, 'kling'),
+    kling_v2_6: () => handleVideoGeneration(ctx, text, 'kling_v2_6'),
     runway_gen4: () => handleVideoGeneration(ctx, text, 'runway_gen4'),
     suno: () => handleSunoGeneration(ctx, text)
   };
@@ -4060,6 +4119,32 @@ bot.on('photo', async (ctx) => {
   if (state?.action === 'kling_generation' && state?.step === 'waiting_start_image') {
     console.log(`✅ Processing Kling start image for user ${userId}`);
     const imageUrl = await getImageUrl(ctx);
+    const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
+    const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
+    const supportsEndImage = model?.supportsEndImage !== false;
+
+    if (!supportsEndImage) {
+      userState.set(userId, {
+        ...state,
+        startImage: imageUrl,
+        endImage: null,
+        step: 'waiting_prompt'
+      });
+
+      await ctx.reply(
+        `✅ <b>Стартове зображення завантажено!</b>\n\n` +
+        `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
+        `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
+        `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
+        `🖼️ Start image: <b>Так</b>\n` +
+        `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
+        `📝 <b>Напишіть промпт</b>\n\n` +
+        `Опишіть рух/анімацію для відео.\n\n` +
+        `✍️ <b>Надішліть текстовий промпт:</b>`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+      return;
+    }
 
     userState.set(userId, {
       ...state,
@@ -4091,6 +4176,8 @@ bot.on('photo', async (ctx) => {
   if (state?.action === 'kling_generation' && state?.step === 'waiting_end_image') {
     console.log(`✅ Processing Kling end image for user ${userId}`);
     const imageUrl = await getImageUrl(ctx);
+    const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
+    const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
 
     userState.set(userId, {
       ...state,
@@ -4100,7 +4187,7 @@ bot.on('photo', async (ctx) => {
 
     await ctx.reply(
       `✅ <b>End image завантажено!</b>\n\n` +
-      `🎭 <b>Kling v2.5 Turbo Pro</b>\n\n` +
+      `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
       `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
       `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
       `🖼️ Start image: <b>Так</b>\n` +
@@ -4318,7 +4405,7 @@ bot.on('photo', async (ctx) => {
   }
 
   // Обробка одного фото
-  const videoModels = ['kling', 'runway_gen4'];
+  const videoModels = ['kling', 'kling_v2_6', 'runway_gen4'];
   const imageModels = ['nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_2k', 'seedream_4k', 'ideogram'];
 
   // Отримуємо caption як промпт
@@ -4895,6 +4982,7 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
     try {
       const videoFunctions = {
         kling: replicate.generateVideoWithKling,
+        kling_v2_6: replicate.generateVideoWithKling26,
         runway_gen4: replicate.generateVideoWithRunway,
         runway_turbo: replicate.generateVideoWithRunwayTurbo
       };
@@ -6169,7 +6257,7 @@ async function startBot() {
               key: m.key
             };
 
-            // Kling v2.5 - ціна за секунду
+            // Kling - ціна за секунду
             if (m.costPerSecond) {
               result.costPerSecond = m.costPerSecond;
               result.pricePerSecondUSD = +(m.costPerSecond * tokenPriceUSD).toFixed(4);
@@ -6267,6 +6355,8 @@ async function startBot() {
             // Video models
             kling_5s: { count: safeDiv(trialTokens, 30), cost: 30, limited: models.TRIAL_RESTRICTIONS.limitedModels.kling || 2 },
             kling_10s: { count: safeDiv(trialTokens, 60), cost: 60, limited: models.TRIAL_RESTRICTIONS.limitedModels.kling || 2 },
+            kling_v2_6_5s: { count: safeDiv(trialTokens, 30), cost: 30, limited: models.TRIAL_RESTRICTIONS.limitedModels.kling_v2_6 || 2 },
+            kling_v2_6_10s: { count: safeDiv(trialTokens, 60), cost: 60, limited: models.TRIAL_RESTRICTIONS.limitedModels.kling_v2_6 || 2 },
             runway_turbo: { count: safeDiv(trialTokens, 22), cost: 22, limited: models.TRIAL_RESTRICTIONS.limitedModels.runway_turbo || 1 },
             // Blocked models (count=0, blocked=true)
             veo: { count: 0, cost: 112, blocked: true },
@@ -6428,7 +6518,7 @@ async function startBot() {
                 key: m.key
               };
 
-              // Kling v2.5 - cost per second
+              // Kling - cost per second
               if (m.costPerSecond) {
                 result.costPerSecond = m.costPerSecond;
                 result.pricePerSecondUSD = +(m.costPerSecond * tokenPriceUSD).toFixed(4);

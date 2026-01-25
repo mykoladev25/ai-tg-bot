@@ -30,13 +30,17 @@ const TRIAL_RESTRICTIONS = {
     blockedModes: {
         'kling': {
             durations: [10],  // Тільки 5 сек дозволено, 10 сек - блок
+        },
+        'kling_v2_6': {
+            durations: [10],  // Тільки 5 сек дозволено, 10 сек - блок
         }
     },
 
     // Ліміт на кількість генерацій дорогих моделей (за весь час Trial)
     limitedModels: {
         'nano_banana_4k': 1,  // Максимум 1 генерація 4K
-        'kling': 2,          // Максимум 2 генерації Kling (будь-якої тривалості)
+        'kling': 2,          // Максимум 2 генерації Kling v2.5 (будь-якої тривалості)
+        'kling_v2_6': 2,      // Максимум 2 генерації Kling v2.6 (будь-якої тривалості)
         'runway_turbo': 1 // Максимум 1 генерація Runway Turbo
     },
 
@@ -105,7 +109,25 @@ module.exports = {
                 apiCostPerSecond: 0.07,
                 available: true,
                 requiresImage: false,
-                durations: [5, 10]
+                durations: [5, 10],
+                supportsEndImage: true
+            },
+
+            /**
+             * Kling v2.6
+             * apiCostPerSecond 0.07 (update if Replicate pricing differs)
+             * costPerSecond=6 => revenue 6*0.0275=$0.165; gross ~57.6%
+             */
+            {
+                name: '🎭 Kling v2.6',
+                key: 'kling_v2_6',
+                costPerSecond: 6,
+                cost: 30, // default menu (5 sec): 5 * 6
+                apiCostPerSecond: 0.07,
+                available: true,
+                requiresImage: false,
+                durations: [5, 10],
+                supportsEndImage: false
             },
 
             /**

@@ -412,6 +412,54 @@ async function generateVideoWithKling(prompt, startImage = null, endImage = null
 }
 
 /**
+ * Генерація відео через Kling v2.6
+ * Підтримує:
+ * - start_image: перший кадр відео
+ * - duration: 5 або 10 секунд
+ * - aspect_ratio: 16:9 або 9:16 (ігнорується якщо є start_image)
+ */
+async function generateVideoWithKling26(prompt, startImage = null, duration = 5, aspectRatio = '16:9') {
+  try {
+    console.log('Starting Kling v2.6 video generation:', {
+      prompt: prompt.substring(0, 100),
+      duration,
+      aspectRatio,
+      hasStartImage: !!startImage
+    });
+
+    const input = {
+      prompt: prompt,
+      duration: duration  // 5 або 10 секунд
+    };
+
+    // Додаємо start_image якщо є
+    if (startImage) {
+      input.start_image = startImage;
+      console.log('✅ Adding start_image (first frame)');
+    } else {
+      // aspect_ratio ігнорується якщо є start_image
+      input.aspect_ratio = aspectRatio;
+    }
+
+    console.log('🎬 Kling v2.6 input:', input);
+
+    const output = await replicate.run("kwaivgi/kling-v2.6", { input });
+
+    return {
+      success: true,
+      videoUrl: Array.isArray(output) ? output[0] : output
+    };
+
+  } catch (error) {
+    console.error('Kling v2.6 API Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
  * Генерація відео через Runway Gen-4 Aleph
  */
 async function generateVideoWithRunway(prompt, imageUrl = null) {
@@ -672,6 +720,7 @@ module.exports = {
   generateWithSuno,
   generateVideoWithRunwayTurbo,
   generateVideoWithKling,
+  generateVideoWithKling26,
   generateVideoWithKlingMotion,
   generateVideoWithRunway,
   generateVideoWithVeo

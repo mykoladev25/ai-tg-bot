@@ -69,7 +69,7 @@ function calculateApiCost(modelConfig, options = {}) {
   }
 
   // Kling - seconds-based
-  if (modelConfig.key === 'kling') {
+  if (modelConfig.key === 'kling' || modelConfig.key === 'kling_v2_6') {
     const secs = seconds || duration || 5;
     return (modelConfig.apiCostPerSecond || 0.07) * secs;
   }
@@ -108,7 +108,7 @@ function calculateTokenCost(modelConfig, options = {}) {
   }
 
   // Kling
-  if (modelConfig.key === 'kling') {
+  if (modelConfig.key === 'kling' || modelConfig.key === 'kling_v2_6') {
     const secs = seconds || duration || 5;
     return (modelConfig.costPerSecond || 6) * secs;
   }

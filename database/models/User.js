@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema({
   trialUsage: {
     nano_banana_4k: { type: Number, default: 0 },
     kling: { type: Number, default: 0 },
+    kling_v2_6: { type: Number, default: 0 },
     runway_turbo: { type: Number, default: 0 },
     veo: { type: Number, default: 0 },
     kling_motion: { type: Number, default: 0 }
