@@ -204,23 +204,23 @@ module.exports = {
                 available: true
             },
 
-            // apiCost 0.03, cost=3 => gross ~63.6%
+            // apiCost 0.04 (офіційна ціна Replicate 2026-01), cost=3 => gross ~63%
             {
                 name: '🌊 Seedream 2K',
                 key: 'seedream_2k',
                 cost: 3,
-                apiCost: 0.03,
+                apiCost: 0.04,
                 size: '2K',
                 maxImages: 14,
                 available: true
             },
 
-            // apiCost 0.06, cost=6 => gross ~63.6%
+            // apiCost 0.04 (та сама модель, той самий прайс), cost=4 => gross ~63%
             {
                 name: '🌊 Seedream 4.5 4K',
                 key: 'seedream_4k',
-                cost: 6,
-                apiCost: 0.06,
+                cost: 4,
+                apiCost: 0.04,
                 size: '4K',
                 maxImages: 14,
                 available: true

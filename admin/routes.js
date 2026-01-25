@@ -380,9 +380,63 @@ router.get('/dashboard', (req, res) => {
     .legend-desc {
       color: var(--text-muted);
     }
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+    }
+    .tab-btn {
+      padding: 12px 20px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 14px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover {
+      color: var(--text);
+    }
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .price-status {
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .price-status.ok {
+      background: rgba(0, 200, 83, 0.1);
+      border: 1px solid var(--success);
+      color: var(--success);
+    }
+    .price-status.warning {
+      background: rgba(255, 171, 0, 0.1);
+      border: 1px solid var(--warning);
+      color: var(--warning);
+    }
+    .price-link {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .price-link:hover {
+      text-decoration: underline;
+    }
     @media (max-width: 768px) {
       .cards { grid-template-columns: 1fr 1fr; }
       .header { flex-direction: column; gap: 16px; }
+      .tabs { overflow-x: auto; }
     }
   </style>
 </head>
@@ -397,73 +451,135 @@ router.get('/dashboard', (req, res) => {
     </div>
   </div>
 
-  <div class="legend">
-    <h3>📖 Словник термінів</h3>
-    <div class="legend-item">
-      <span class="legend-term">💰 Дохід</span>
-      <span class="legend-desc">— скільки грошей отримали від клієнтів</span>
-    </div>
-    <div class="legend-item">
-      <span class="legend-term">💸 Собівартість</span>
-      <span class="legend-desc">— скільки МИ платимо за API (Replicate, тощо)</span>
-    </div>
-    <div class="legend-item">
-      <span class="legend-term">📈 Прибуток</span>
-      <span class="legend-desc">— Дохід мінус Собівартість = наш заробіток</span>
-    </div>
-    <div class="legend-item">
-      <span class="legend-term">🔥 Trial витрати</span>
-      <span class="legend-desc">— собівартість генерацій безкоштовних юзерів (вони не платять, ми - платимо)</span>
-    </div>
-    <div class="legend-item">
-      <span class="legend-term">📊 Маржа</span>
-      <span class="legend-desc">— відсоток прибутку від доходу (чим більше - тим краще)</span>
-    </div>
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="metrics">📊 Метрики</button>
+    <button class="tab-btn" data-tab="pricing">💰 Ціни Replicate</button>
   </div>
 
   <div id="error" class="error" style="display:none;"></div>
 
-  <div class="cards" id="summary">
-    <div class="loading">Завантаження...</div>
+  <!-- Tab: Metrics -->
+  <div id="tab-metrics" class="tab-content active">
+    <div class="legend">
+      <h3>📖 Словник термінів</h3>
+      <div class="legend-item">
+        <span class="legend-term">💰 Дохід</span>
+        <span class="legend-desc">— скільки грошей отримали від клієнтів</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-term">💸 Собівартість</span>
+        <span class="legend-desc">— скільки МИ платимо за API (Replicate, тощо)</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-term">📈 Прибуток</span>
+        <span class="legend-desc">— Дохід мінус Собівартість = наш заробіток</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-term">🔥 Trial витрати</span>
+        <span class="legend-desc">— собівартість генерацій безкоштовних юзерів (вони не платять, ми - платимо)</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-term">📊 Маржа</span>
+        <span class="legend-desc">— відсоток прибутку від доходу (чим більше - тим краще)</span>
+      </div>
+    </div>
+
+    <div class="cards" id="summary">
+      <div class="loading">Завантаження...</div>
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">💳 Покупки по тарифах</h2>
+      <p class="section-hint">Скільки разів купили кожен пакет токенів</p>
+      <table id="purchases-table">
+        <thead>
+          <tr>
+            <th>Пакет</th>
+            <th>К-сть</th>
+            <th>Дохід $</th>
+            <th>Токенів</th>
+            <th>Юзерів</th>
+          </tr>
+        </thead>
+        <tbody id="purchases-body">
+          <tr><td colspan="5" class="loading">Завантаження...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">🤖 Топ моделей по витратах</h2>
+      <p class="section-hint">Які моделі найбільше "з'їдають" на API (собівартість)</p>
+      <table id="models-table">
+        <thead>
+          <tr>
+            <th>Модель</th>
+            <th>Генерацій</th>
+            <th>Собівартість $</th>
+            <th>Дохід $</th>
+            <th>Маржа</th>
+            <th>Помилок</th>
+          </tr>
+        </thead>
+        <tbody id="models-body">
+          <tr><td colspan="6" class="loading">Завантаження...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
-  <div class="section">
-    <h2 class="section-title">💳 Покупки по тарифах</h2>
-    <p class="section-hint">Скільки разів купили кожен пакет токенів</p>
-    <table id="purchases-table">
-      <thead>
-        <tr>
-          <th>Пакет</th>
-          <th>К-сть</th>
-          <th>Дохід $</th>
-          <th>Токенів</th>
-          <th>Юзерів</th>
-        </tr>
-      </thead>
-      <tbody id="purchases-body">
-        <tr><td colspan="5" class="loading">Завантаження...</td></tr>
-      </tbody>
-    </table>
-  </div>
+  <!-- Tab: Pricing -->
+  <div id="tab-pricing" class="tab-content">
+    <div class="legend">
+      <h3>💡 Що це таке?</h3>
+      <div class="legend-item">
+        <span class="legend-desc">Перевірка чи наші ціни (apiCost в models.js) відповідають офіційним цінам Replicate.</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-desc">Якщо є розбіжності — треба оновити apiCost, інакше рахуємо прибуток неправильно!</span>
+      </div>
+    </div>
 
-  <div class="section">
-    <h2 class="section-title">🤖 Топ моделей по витратах</h2>
-    <p class="section-hint">Які моделі найбільше "з'їдають" на API (собівартість)</p>
-    <table id="models-table">
-      <thead>
-        <tr>
-          <th>Модель</th>
-          <th>Генерацій</th>
-          <th>Собівартість $</th>
-          <th>Дохід $</th>
-          <th>Маржа</th>
-          <th>Помилок</th>
-        </tr>
-      </thead>
-      <tbody id="models-body">
-        <tr><td colspan="6" class="loading">Завантаження...</td></tr>
-      </tbody>
-    </table>
+    <div id="pricing-status" class="price-status ok">
+      Завантаження...
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">📋 Офіційні ціни Replicate</h2>
+      <p class="section-hint">Ціни з офіційних сторінок моделей (перевірено: 2026-01-25)</p>
+      <table id="pricing-table">
+        <thead>
+          <tr>
+            <th>Модель</th>
+            <th>Наша ціна</th>
+            <th>Офіційна</th>
+            <th>Статус</th>
+            <th>Джерело</th>
+          </tr>
+        </thead>
+        <tbody id="pricing-body">
+          <tr><td colspan="5" class="loading">Завантаження...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section" id="discrepancies-section" style="display:none;">
+      <h2 class="section-title">⚠️ Розбіжності (потрібно виправити)</h2>
+      <p class="section-hint">Ці моделі мають неправильні apiCost в config/models.js</p>
+      <table id="discrepancies-table">
+        <thead>
+          <tr>
+            <th>Модель</th>
+            <th>Наша ціна</th>
+            <th>Офіційна</th>
+            <th>Різниця</th>
+            <th>Дія</th>
+          </tr>
+        </thead>
+        <tbody id="discrepancies-body"></tbody>
+      </table>
+    </div>
   </div>
 
   <script>
@@ -485,6 +601,75 @@ router.get('/dashboard', (req, res) => {
     
     function formatPct(val) {
       return (val || 0).toFixed(1) + '%';
+    }
+
+    // Tabs
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+        
+        if (btn.dataset.tab === 'pricing') {
+          loadPricing();
+        }
+      });
+    });
+
+    async function loadPricing() {
+      try {
+        const data = await fetchAPI('/pricing/check');
+        if (!data.success) throw new Error(data.error);
+
+        const statusEl = document.getElementById('pricing-status');
+        if (data.data.status === 'OK') {
+          statusEl.className = 'price-status ok';
+          statusEl.textContent = '✅ Всі ціни актуальні! Розбіжностей немає.';
+        } else {
+          statusEl.className = 'price-status warning';
+          statusEl.textContent = '⚠️ ' + data.data.message;
+        }
+
+        // Pricing table
+        const tbody = document.getElementById('pricing-body');
+        const prices = data.data.officialPrices;
+        tbody.innerHTML = Object.entries(prices).map(([key, p]) => {
+          const price = p.pricePerRun || p.pricePerSecond || p.pricePerSecondNoAudio || 0;
+          const unit = p.pricePerSecond ? '/сек' : p.pricePerSecondAudio ? '/сек' : '/run';
+          const isOk = !data.data.discrepancies.find(d => d.model === p.model);
+          return \`
+            <tr>
+              <td><strong>\${p.model}</strong></td>
+              <td>—</td>
+              <td>$\${price.toFixed(2)}\${unit}</td>
+              <td><span class="badge badge-\${isOk ? 'success' : 'danger'}">\${isOk ? '✅ OK' : '❌'}</span></td>
+              <td><a href="\${p.source}" target="_blank" class="price-link">Replicate ↗</a></td>
+            </tr>
+          \`;
+        }).join('');
+
+        // Discrepancies
+        if (data.data.discrepancies.length > 0) {
+          document.getElementById('discrepancies-section').style.display = 'block';
+          const dBody = document.getElementById('discrepancies-body');
+          dBody.innerHTML = data.data.discrepancies.map(d => \`
+            <tr>
+              <td><strong>\${d.modelName}</strong><br><small>\${d.model}</small></td>
+              <td class="danger">$\${d.ourPrice || d.ourPricePerSec}</td>
+              <td class="success">$\${d.officialPrice || d.officialPricePerSec}</td>
+              <td><span class="badge badge-danger">\${d.differencePercent}</span></td>
+              <td><a href="\${d.source}" target="_blank" class="price-link">Перевірити ↗</a></td>
+            </tr>
+          \`).join('');
+        } else {
+          document.getElementById('discrepancies-section').style.display = 'none';
+        }
+
+      } catch (err) {
+        document.getElementById('pricing-status').className = 'price-status warning';
+        document.getElementById('pricing-status').textContent = 'Помилка: ' + err.message;
+      }
     }
     
     async function loadDashboard() {
