@@ -4303,6 +4303,9 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       });
     }
 
+    // 🛑 Завершуємо генерацію (успіх)
+    gracefulShutdown.completeGeneration(requestId, true);
+
   } catch (error) {
     console.error(`${modelKey} generation failed:`, error);
     await adminNotifier.notifyAdmin(bot, error, { userId, username, action: `${modelKey}_generation`, model: model.name, prompt });
@@ -4319,6 +4322,9 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       // Якщо не можемо редагувати - надіслати нове повідомлення
       await ctx.reply('❌ Помилка генерації. Спробуйте іншу модель.', keyboard.createBackButton('design_menu'));
     }
+
+    // 🛑 Завершуємо генерацію (помилка)
+    gracefulShutdown.completeGeneration(requestId, false);
   }
 }
 
