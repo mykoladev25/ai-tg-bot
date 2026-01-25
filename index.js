@@ -1382,14 +1382,14 @@ async function handleCreativePhoto(ctx, imageUrl) {
   const creativeType = state.creative;
 
   // Промпти (АНГЛІЙСЬКА + збереження рис обличчя)
-  const prompts = {
-    love_is: (() => {
-      const data = state.loveIsData || {
-        scenario: 'holding hands',
-        detail: 'with floating hearts around',
-        quote: 'бути разом у будь-яку погоду'
-      };
-      return `GOAL: Transform the uploaded photo of a real couple into a cute vintage bubblegum-wrapper "Love Is"-style sticker panel (romantic mini-comic). Keep the couple recognizable (hair, face proportions, key features), but simplify into classic chibi cartoon characters.
+  let prompt = null;
+  if (creativeType === 'love_is') {
+    const data = state?.loveIsData || {
+      scenario: 'holding hands',
+      detail: 'with floating hearts around',
+      quote: 'бути разом у будь-яку погоду'
+    };
+    prompt = `GOAL: Transform the uploaded photo of a real couple into a cute vintage bubblegum-wrapper "Love Is"-style sticker panel (romantic mini-comic). Keep the couple recognizable (hair, face proportions, key features), but simplify into classic chibi cartoon characters.
 
 STYLE (match the classic "Love Is" sticker vibe):
 - 1990s romantic sticker/comic illustration
@@ -1429,9 +1429,8 @@ NEGATIVE / AVOID:
 - no blurry lines, no messy typography, no distorted faces, no extra fingers/limbs
 
 OUTPUT: Single sticker-style panel with "Love is…" at top-left and Ukrainian caption at bottom.`;
-    })(),
-
-    hearts: `Dramatic overhead professional lighting with depth and sculpted shadows. Keep the EXACT selfie expression, mood, and gaze — do not change emotion or add any “sultry” look. Preserve the original head turn/tilt and camera angle from the uploaded selfie (if the head is slightly turned, keep it slightly turned; keep the same gaze direction). Preserve facial identity and all facial proportions strictly as in the selfie — do not alter facial features; keep her highly recognizable. Realistic skin texture with visible pores and natural highlights (no beauty blur, no plastic smoothing). IMPORTANT: keep all natural moles/beauty marks/freckles exactly as in the selfie — do not remove, do not smooth them out, do not retouch them away.
+  } else if (creativeType === 'hearts') {
+    prompt = `Dramatic overhead professional lighting with depth and sculpted shadows. Keep the EXACT selfie expression, mood, and gaze — do not change emotion or add any “sultry” look. Preserve the original head turn/tilt and camera angle from the uploaded selfie (if the head is slightly turned, keep it slightly turned; keep the same gaze direction). Preserve facial identity and all facial proportions strictly as in the selfie — do not alter facial features; keep her highly recognizable. Realistic skin texture with visible pores and natural highlights (no beauty blur, no plastic smoothing). IMPORTANT: keep all natural moles/beauty marks/freckles exactly as in the selfie — do not remove, do not smooth them out, do not retouch them away.
 
 Hair styled into two relaxed top buns on the crown (not side buns), with light volume and a few loose strands framing the face. Makeup: natural clean makeup only, soft neutral eyeshadow, subtle mascara, no graphic eyeliner, no exaggerated eye shapes, no face paint, no decals, no fantasy elements, keep eyebrows clean and natural. Matte rich red lipstick with a slightly darker contoured edge.
 
@@ -1446,9 +1445,7 @@ Remove lipstick kiss marks. Add a small amount of glossy heart stickers: cluster
 Framing: chest-up portrait (from upper chest to top of head), centered, no full-body. 9:16 8K
 
 NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any fantasy makeup, any face markings, any graphic eyeliner, any mole removal, any skin-smoothing that erases pores or beauty marks.`
-  };
-
-  const prompt = prompts[creativeType];
+  }
   
   if (!prompt) {
     console.error(`Unknown creative type: ${creativeType}`);
@@ -4565,136 +4562,163 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
     modelKey
   });
 
-  try {
-    const replicateFunctions = {
-      flux: () => replicate.generateWithFlux(prompt),
-      stable_diffusion: () => replicate.generateWithStableDiffusion(prompt, imageInput, 0.8, aspectRatio),
-      nano_banana_2k: () => replicate.generateWithNanoBanana(prompt, imageInput, '2K', aspectRatio),
-      nano_banana_4k: () => replicate.generateWithNanoBanana(prompt, imageInput, '4K', aspectRatio),
-      seedream_2k: () => replicate.generateWithSeedream(prompt, imageInput, '2K', aspectRatio),
-      seedream_4k: () => replicate.generateWithSeedream(prompt, imageInput, '4K', aspectRatio),
-      ideogram: () => replicate.generateWithIdeogram(prompt, imageInput, 0.5, aspectRatio)
-    };
+  const chatId = ctx.chat.id;
+  const generationData = {
+    userId,
+    username,
+    chatId,
+    prompt,
+    modelKey,
+    modelName: model.name,
+    modelCost: model.cost,
+    modelApiCost: model.apiCost,
+    imageInput,
+    aspectRatio,
+    mode,
+    statusMsgId: statusMsg.message_id
+  };
 
-    const result = await replicateFunctions[modelKey]();
+  (async () => {
+    let finished = false;
+    try {
+      const replicateFunctions = {
+        flux: () => replicate.generateWithFlux(generationData.prompt),
+        stable_diffusion: () => replicate.generateWithStableDiffusion(generationData.prompt, generationData.imageInput, 0.8, generationData.aspectRatio),
+        nano_banana_2k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
+        nano_banana_4k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
+        seedream_2k: () => replicate.generateWithSeedream(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
+        seedream_4k: () => replicate.generateWithSeedream(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
+        ideogram: () => replicate.generateWithIdeogram(generationData.prompt, generationData.imageInput, 0.5, generationData.aspectRatio)
+      };
 
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_generation`, model: model.name, prompt, hasImage: !!imageInput });
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка генерації.\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`);
+      const result = await replicateFunctions[generationData.modelKey]();
 
-      // 📊 Логуємо невдалу генерацію
-      const isTrial = await isTrialUser(userId);
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_generation`, model: model.name, prompt, hasImage: !!imageInput });
+        await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, `❌ Помилка генерації.\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`);
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey,
+          success: false,
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100)
+        });
+
+        finished = true;
+        gracefulShutdown.completeGeneration(requestId, false);
+        return;
+      }
+
+      await userBalance.deductTokens(userId, generationData.modelCost, `${generationData.modelName} generation`, {
+        modelKey,
+        modelName: generationData.modelName,
+        apiCost: generationData.modelApiCost,
+        prompt: generationData.prompt,
+        hasImage: !!generationData.imageInput
+      });
+
+      const isTrialImg = await isTrialUser(userId);
       await monitoringLoggers.logUsageEvent({
         userId,
         modelKey,
-        success: false,
-        isTrial,
-        isFree: isTrial,
-        errorCode: result.error?.substring(0, 100)
+        success: true,
+        isTrial: isTrialImg,
+        isFree: isTrialImg
       });
 
-      return;
-    }
-
-    await userBalance.deductTokens(userId, model.cost, `${model.name} generation`, { modelKey, modelName: model.name, apiCost: model.apiCost, prompt, hasImage: !!imageInput });
-
-    // 📊 Логуємо успішну генерацію
-    const isTrialImg = await isTrialUser(userId);
-    await monitoringLoggers.logUsageEvent({
-      userId,
-      modelKey,
-      success: true,
-      isTrial: isTrialImg,
-      isFree: isTrialImg
-    });
-
-    // ✅ Записуємо Trial usage для лімітованих моделей
-    if (TRIAL_RESTRICTIONS.limitedModels[modelKey]) {
-      recordTrialUsage(userId, modelKey);
-    }
-
-    // ✅ Перевірити розмір файлу ПЕРЕД видаленням statusMsg
-    const fileSize = await getFileSize(result.imageUrl);
-    const maxPhotoSize = 10 * 1024 * 1024; // 10MB
-
-    if (fileSize > maxPhotoSize) {
-      // 🔗 Файл завеликий - надіслати посилання
-      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
-      
-      // ✅ Видалити statusMsg
-      try {
-        await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      } catch (e) {
-        console.warn('Could not delete status message:', e.message);
+      if (TRIAL_RESTRICTIONS.limitedModels[modelKey]) {
+        recordTrialUsage(userId, modelKey);
       }
-      
-      // ✅ Надіслати нове повідомлення з посиланням
-      await ctx.reply(
-        `✅ <b>${model.name}</b> (${mode})\n\n` +
-        `📝 <b>Промпт:</b> ${prompt}\n\n` +
-        `📊 <b>Розмір:</b> ${fileSizeMB} MB\n` +
-        `⚠️ Файл завеликий для відправки в Telegram\n\n` +
-        `🔗 <a href="${result.imageUrl}">📥 Натисніть тут щоб завантажити PNG файл</a>\n\n` +
-        `💡 <b>⚠️ ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
-        `Посилання активне тільки <b>1 ГОДИНУ</b>!\n` +
-        `Після цього файл буде видалений.\n\n` +
-        `📥 <b>Як завантажити:</b>\n` +
-        `1️⃣ Натисніть на посилання вище\n` +
-        `2️⃣ Файл завантажиться\n` +
-        `3️⃣ Збережіть на телефон/комп'ютер\n\n` +
-        `💾 <b>Порада:</b> Завжди зберігайте генерації одразу, щоб не втратити!\n\n` +
-        `💰 Витрачено: ${model.cost}⚡`,
-        {
-          parse_mode: 'HTML',
-          disable_web_page_preview: true,
-          ...keyboard.createBackButton('design_menu')
+
+      const fileSize = await getFileSize(result.imageUrl);
+      const maxPhotoSize = 10 * 1024 * 1024; // 10MB
+
+      if (fileSize > maxPhotoSize) {
+        const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+        try {
+          await bot.telegram.deleteMessage(chatId, generationData.statusMsgId);
+        } catch (e) {
+          console.warn('Could not delete status message:', e.message);
         }
-      );
-      
-    } else {
-      // 📷 Надіслати як фото (<10MB) - Telegram збереже на своїх серверах
-      try {
-        await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      } catch (e) {
-        console.warn('Could not delete status message:', e.message);
+
+        await bot.telegram.sendMessage(
+          chatId,
+          `✅ <b>${generationData.modelName}</b> (${generationData.mode})\n\n` +
+          `📝 <b>Промпт:</b> ${generationData.prompt}\n\n` +
+          `📊 <b>Розмір:</b> ${fileSizeMB} MB\n` +
+          `⚠️ Файл завеликий для відправки в Telegram\n\n` +
+          `🔗 <a href="${result.imageUrl}">📥 Натисніть тут щоб завантажити PNG файл</a>\n\n` +
+          `💡 <b>⚠️ ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
+          `Посилання активне тільки <b>1 ГОДИНУ</b>!\n` +
+          `Після цього файл буде видалений.\n\n` +
+          `📥 <b>Як завантажити:</b>\n` +
+          `1️⃣ Натисніть на посилання вище\n` +
+          `2️⃣ Файл завантажиться\n` +
+          `3️⃣ Збережіть на телефон/комп'ютер\n\n` +
+          `💾 <b>Порада:</b> Завжди зберігайте генерації одразу, щоб не втратити!\n\n` +
+          `💰 Витрачено: ${generationData.modelCost}⚡`,
+          {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
+            ...keyboard.createBackButton('design_menu')
+          }
+        );
+      } else {
+        try {
+          await bot.telegram.deleteMessage(chatId, generationData.statusMsgId);
+        } catch (e) {
+          console.warn('Could not delete status message:', e.message);
+        }
+
+        await bot.telegram.sendPhoto(
+          chatId,
+          { url: result.imageUrl },
+          {
+            caption: `${generationData.modelName} (${generationData.mode})\n\n📝 Промпт: ${generationData.prompt.substring(0, 800)}${generationData.prompt.length > 800 ? '...' : ''}\n\n💰 Витрачено: ${generationData.modelCost}⚡`,
+            parse_mode: 'HTML',
+            ...keyboard.createBackButton('design_menu')
+          }
+        );
       }
 
-      await ctx.replyWithPhoto({ url: result.imageUrl }, {
-        caption: `${model.name} (${mode})\n\n📝 Промпт: ${prompt.substring(0, 800)}${prompt.length > 800 ? '...' : ''}\n\n💰 Витрачено: ${model.cost}⚡`,
-        parse_mode: 'HTML',
-        ...keyboard.createBackButton('design_menu')
-      });
+      finished = true;
+      gracefulShutdown.completeGeneration(requestId, true);
+
+    } catch (error) {
+      console.error(`${modelKey} generation failed:`, error);
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: `${modelKey}_generation`, model: model.name, prompt });
+
+      try {
+        await bot.telegram.editMessageText(
+          chatId,
+          generationData.statusMsgId,
+          null,
+          '❌ Помилка генерації. Спробуйте іншу модель.'
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації. Спробуйте іншу модель.', keyboard.createBackButton('design_menu'));
+      }
+
+      if (!finished) {
+        gracefulShutdown.completeGeneration(requestId, false);
+      }
     }
-
-    // 🛑 Завершуємо генерацію (успіх)
-    gracefulShutdown.completeGeneration(requestId, true);
-
-  } catch (error) {
-    console.error(`${modelKey} generation failed:`, error);
-    await adminNotifier.notifyAdmin(bot, error, { userId, username, action: `${modelKey}_generation`, model: model.name, prompt });
-    
-    // ✅ НЕ видаляти statusMsg, а редагувати його
-    try {
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        '❌ Помилка генерації. Спробуйте іншу модель.'
-      );
-    } catch (e) {
-      // Якщо не можемо редагувати - надіслати нове повідомлення
-      await ctx.reply('❌ Помилка генерації. Спробуйте іншу модель.', keyboard.createBackButton('design_menu'));
-    }
-
-    // 🛑 Завершуємо генерацію (помилка)
-    gracefulShutdown.completeGeneration(requestId, false);
-  }
+  })();
 }
 
 async function handleVideoGeneration(ctx, prompt, modelKey) {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
   const model = models.video.models.find(m => m.key === modelKey);
+
+  // 🛑 Перевіряємо чи не йде shutdown
+  if (gracefulShutdown.isInShutdown()) {
+    await ctx.reply('⚠️ Бот оновлюється. Спробуйте через 1-2 хвилини.');
+    return;
+  }
 
   if (!(await userBalance.hasTokens(userId, model.cost))) {
     await showInsufficientTokens(ctx, model.cost);
@@ -4719,48 +4743,88 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
 
   const statusMsg = await ctx.reply(`🎬 Генерую відео через ${model.name}...\n⏱️ Це може зайняти 2-5 хвилин\n\nПромпт: "${prompt}"`);
 
-  try {
-    const videoFunctions = {
-      kling: replicate.generateVideoWithKling,
-      runway_gen4: replicate.generateVideoWithRunway,
-      runway_turbo: replicate.generateVideoWithRunwayTurbo
-    };
+  const chatId = ctx.chat.id;
 
-    const result = await videoFunctions[modelKey](prompt, imageUrl);
+  const requestId = gracefulShutdown.generateRequestId();
+  gracefulShutdown.registerGeneration(requestId, {
+    userId,
+    chatId,
+    model: model.name,
+    modelKey
+  });
 
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_video_generation`, model: model.name, prompt, hasImage: !!imageUrl });
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка генерації відео.\n\nСпробуйте іншу модель або повторіть пізніше.`);
-      return;
+  const generationData = {
+    userId,
+    username,
+    chatId,
+    prompt,
+    modelKey,
+    modelName: model.name,
+    modelCost: model.cost,
+    modelApiCost: model.apiCost,
+    imageUrl,
+    statusMsgId: statusMsg.message_id
+  };
+
+  (async () => {
+    let finished = false;
+    try {
+      const videoFunctions = {
+        kling: replicate.generateVideoWithKling,
+        runway_gen4: replicate.generateVideoWithRunway,
+        runway_turbo: replicate.generateVideoWithRunwayTurbo
+      };
+
+      const result = await videoFunctions[modelKey](prompt, imageUrl);
+
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_video_generation`, model: model.name, prompt, hasImage: !!imageUrl });
+        await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, `❌ Помилка генерації відео.\n\nСпробуйте іншу модель або повторіть пізніше.`);
+
+        finished = true;
+        gracefulShutdown.completeGeneration(requestId, false);
+        return;
+      }
+
+      await userBalance.deductTokens(userId, model.cost, `${model.name} generation`, { modelKey, modelName: model.name, apiCost: model.apiCost, prompt, hasImage: !!imageUrl });
+      await bot.telegram.deleteMessage(chatId, generationData.statusMsgId);
+
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>${model.name} готово!</b>\n\n` +
+        `⚠️ <b>ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
+        `Посилання на відео активне тільки <b>1 ГОДИНУ</b>!\n\n` +
+        `📝 Промпт: ${prompt}\n\n` +
+        `💾 <b>ЗБЕРЕЖІТЬ на пристрій перед закриттям:</b>\n` +
+        `1️⃣ Натисніть на відео (☝️ див. нижче)\n` +
+        `2️⃣ Натисніть меню ⋮\n` +
+        `3️⃣ Оберіть "Зберегти" або "Завантажити"\n\n` +
+        `💰 Витрачено: ${model.cost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await bot.telegram.sendVideo(
+        chatId,
+        result.videoUrl,
+        {
+          caption: `${model.name}\n\n📝 Промпт: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
+          ...keyboard.createBackButton('video_menu')
+        }
+      );
+
+      finished = true;
+      gracefulShutdown.completeGeneration(requestId, true);
+
+    } catch (error) {
+      console.error(`${modelKey} video generation failed:`, error);
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: `${modelKey}_video_generation`, model: model.name, prompt, hasImage: !!imageUrl });
+      await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, '❌ Помилка генерації відео. Спробуйте іншу модель.');
+
+      if (!finished) {
+        gracefulShutdown.completeGeneration(requestId, false);
+      }
     }
-
-    await userBalance.deductTokens(userId, model.cost, `${model.name} generation`, { modelKey, modelName: model.name, apiCost: model.apiCost, prompt, hasImage: !!imageUrl });
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-
-    // ✅ Надіслати попередження ПЕРЕД видео
-    await ctx.reply(
-      `✅ <b>${model.name} готово!</b>\n\n` +
-      `⚠️ <b>ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
-      `Посилання на відео активне тільки <b>1 ГОДИНУ</b>!\n\n` +
-      `📝 Промпт: ${prompt}\n\n` +
-      `💾 <b>ЗБЕРЕЖІТЬ на пристрій перед закриттям:</b>\n` +
-      `1️⃣ Натисніть на відео (☝️ див. нижче)\n` +
-      `2️⃣ Натисніть меню ⋮\n` +
-      `3️⃣ Оберіть "Зберегти" або "Завантажити"\n\n` +
-      `💰 Витрачено: ${model.cost}⚡`,
-      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
-    );
-
-    await ctx.replyWithVideo({ url: result.videoUrl }, {
-      caption: `${model.name}\n\n📝 Промпт: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
-      ...keyboard.createBackButton('video_menu')
-    });
-
-  } catch (error) {
-    console.error(`${modelKey} video generation failed:`, error);
-    await adminNotifier.notifyAdmin(bot, error, { userId, username, action: `${modelKey}_video_generation`, model: model.name, prompt, hasImage: !!imageUrl });
-    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Помилка генерації відео. Спробуйте іншу модель.');
-  }
+  })();
 }
 
 // ==================== SPECIFIC HANDLERS ====================
