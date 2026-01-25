@@ -133,7 +133,8 @@ async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
     user.tokens += amount;
     const balanceAfter = user.tokens;
     
-    if (reason === 'purchase' || reason === 'subscription_purchase' || reason === 'stripe_payment') {
+    const isPaidPurchase = /purchase|payment|liqpay|wayforpay/i.test(reason);
+    if (isPaidPurchase) {
       user.totalTokensPurchased += amount;
     }
     user.totalTokensEarned += amount;

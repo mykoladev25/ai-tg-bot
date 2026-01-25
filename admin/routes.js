@@ -7,6 +7,8 @@ const express = require('express');
 const router = express.Router();
 const aggregations = require('../monitoring/aggregations');
 const DailySummary = require('../database/models/DailySummary');
+const UsageEvent = require('../database/models/UsageEvent');
+const PaymentEvent = require('../database/models/PaymentEvent');
 const replicatePricing = require('../services/replicatePricing');
 const gracefulShutdown = require('../utils/gracefulShutdown');
 
@@ -131,6 +133,43 @@ router.get('/metrics/top-models', async (req, res) => {
     res.json({ success: true, data });
   } catch (error) {
     console.error('Admin top-models error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /admin/metrics/reset
+ * Reset analytics collections (UsageEvent, PaymentEvent, DailySummary)
+ * Body: { scope: 'all'|'usage'|'payments'|'daily', confirm: 'RESET' }
+ */
+router.post('/metrics/reset', async (req, res) => {
+  try {
+    const { scope = 'all', confirm } = req.body || {};
+
+    if (confirm !== 'RESET') {
+      return res.status(400).json({ success: false, error: 'Confirmation required' });
+    }
+
+    const result = {};
+
+    if (scope === 'all' || scope === 'usage') {
+      const r = await UsageEvent.deleteMany({});
+      result.usageEventsDeleted = r.deletedCount || 0;
+    }
+
+    if (scope === 'all' || scope === 'payments') {
+      const r = await PaymentEvent.deleteMany({});
+      result.paymentEventsDeleted = r.deletedCount || 0;
+    }
+
+    if (scope === 'all' || scope === 'daily') {
+      const r = await DailySummary.deleteMany({});
+      result.dailySummariesDeleted = r.deletedCount || 0;
+    }
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Admin reset error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -289,6 +328,20 @@ router.get('/dashboard', (req, res) => {
       background: var(--accent);
       color: var(--bg);
       border-color: var(--accent);
+    }
+    .danger-btn {
+      padding: 10px 16px;
+      background: var(--danger);
+      border: 1px solid var(--danger);
+      color: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .danger-btn:hover {
+      filter: brightness(0.95);
     }
     .cards {
       display: grid;
@@ -518,6 +571,12 @@ router.get('/dashboard', (req, res) => {
     </div>
 
     <div class="section">
+      <h2 class="section-title">🧹 Управління статистикою</h2>
+      <p class="section-hint">Обнулити аналітику (usage_events, payment_events, daily_summaries). Баланси користувачів не чіпає.</p>
+      <button id="reset-stats-btn" class="danger-btn">Обнулити статистику</button>
+    </div>
+
+    <div class="section">
       <h2 class="section-title">💳 Покупки по тарифах</h2>
       <p class="section-hint">Скільки разів купили кожен пакет токенів</p>
       <table id="purchases-table">
@@ -619,6 +678,17 @@ router.get('/dashboard', (req, res) => {
     async function fetchAPI(endpoint) {
       const url = API_BASE + endpoint + (endpoint.includes('?') ? '&' : '?') + 'token=' + TOKEN;
       const res = await fetch(url);
+      if (!res.ok) throw new Error('Помилка API: ' + res.status);
+      return res.json();
+    }
+
+    async function postAPI(endpoint, body) {
+      const url = API_BASE + endpoint + (endpoint.includes('?') ? '&' : '?') + 'token=' + TOKEN;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {})
+      });
       if (!res.ok) throw new Error('Помилка API: ' + res.status);
       return res.json();
     }
@@ -823,6 +893,24 @@ router.get('/dashboard', (req, res) => {
     
     // Initial load
     loadDashboard();
+
+    // Reset stats button
+    const resetBtn = document.getElementById('reset-stats-btn');
+    resetBtn.addEventListener('click', async () => {
+      const confirmed = window.confirm('Це видалить аналітику (usage/payment/daily). Баланси користувачів не чіпає. Продовжити?');
+      if (!confirmed) return;
+      const phrase = window.prompt('Введіть RESET для підтвердження:');
+      if (phrase !== 'RESET') return;
+
+      try {
+        const resp = await postAPI('/metrics/reset', { scope: 'all', confirm: 'RESET' });
+        if (!resp.success) throw new Error(resp.error || 'Помилка');
+        await loadDashboard();
+        alert('Статистику обнулено.');
+      } catch (err) {
+        alert('Помилка: ' + err.message);
+      }
+    });
     
     // Auto-refresh every 5 minutes
     setInterval(loadDashboard, 5 * 60 * 1000);
@@ -833,4 +921,3 @@ router.get('/dashboard', (req, res) => {
 });
 
 module.exports = router;
-
