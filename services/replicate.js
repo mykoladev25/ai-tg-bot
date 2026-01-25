@@ -446,13 +446,14 @@ async function generateVideoWithRunway(prompt, imageUrl = null) {
 /**
  * Генерація відео через Runway Gen-4 Turbo
  */
-async function generateVideoWithRunwayTurbo(prompt, imageUrl = null) {
+async function generateVideoWithRunwayTurbo(prompt, imageUrl = null, duration = 5, aspectRatio = '16:9') {
   try {
     console.log('Starting Runway Gen-4 Turbo video generation:', prompt);
 
     const input = {
       prompt: prompt,
-      seconds: 5
+      seconds: duration,
+      aspect_ratio: aspectRatio
     };
 
     if (imageUrl) {

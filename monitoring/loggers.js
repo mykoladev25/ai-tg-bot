@@ -74,6 +74,12 @@ function calculateApiCost(modelConfig, options = {}) {
     return (modelConfig.apiCostPerSecond || 0.07) * secs;
   }
 
+  // Runway Turbo - seconds-based
+  if (modelConfig.key === 'runway_turbo') {
+    const secs = seconds || duration || 5;
+    return (modelConfig.apiCostPerSecond || modelConfig.apiCost || 0.25) * secs;
+  }
+
   // Kling Motion - mode-based
   if (modelConfig.key === 'kling_motion') {
     const costKey = `${mode || 'std'}_${orientation || 'image'}`;
@@ -105,6 +111,12 @@ function calculateTokenCost(modelConfig, options = {}) {
   if (modelConfig.key === 'kling') {
     const secs = seconds || duration || 5;
     return (modelConfig.costPerSecond || 6) * secs;
+  }
+
+  // Runway Turbo
+  if (modelConfig.key === 'runway_turbo') {
+    const secs = seconds || duration || 5;
+    return (modelConfig.costPerSecond || modelConfig.cost || 22) * secs;
   }
 
   // Kling Motion
@@ -328,4 +340,3 @@ module.exports = {
   isTrialUser,
   TOKEN_PRICE_USD
 };
-

@@ -82,10 +82,14 @@ module.exports = {
             {
                 name: '🎬 RunWay: Gen-4 Turbo ⚡',
                 key: 'runway_turbo',
+                costPerSecond: 4.4,
+                apiCostPerSecond: 0.05,
                 cost: 22,
                 apiCost: 0.25,
                 available: true,
-                requiresImage: true
+                requiresImage: true,
+                durations: [5, 10],
+                aspectRatios: ['16:9', '9:16']
             },
 
             /**

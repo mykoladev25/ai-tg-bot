@@ -1851,8 +1851,15 @@ bot.action(/^(kling|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ct
     await ctx.reply(trialCheck.warning, { parse_mode: 'HTML' });
   }
 
-  if (!(await userBalance.hasTokens(ctx.from.id, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
+  let requiredCost = model.cost;
+  if (modelKey === 'runway_turbo' && model.costPerSecond) {
+    const durations = model.durations || [5];
+    const minDuration = Math.min(...durations);
+    requiredCost = minDuration * model.costPerSecond;
+  }
+
+  if (!(await userBalance.hasTokens(ctx.from.id, requiredCost))) {
+    await showInsufficientTokens(ctx, requiredCost);
     return;
   }
 
@@ -1902,6 +1909,49 @@ bot.action(/^(kling|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ct
             Markup.button.callback(`5 сек (${minCost}⚡)`, 'kling_duration_5'),
             Markup.button.callback(`10 сек (${maxCost}⚡)`, 'kling_duration_10')
           ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // Для Runway Turbo показуємо флоу: промпт -> image + параметри
+  if (modelKey === 'runway_turbo') {
+    const durations = model.durations || [5];
+    const minDuration = Math.min(...durations);
+    const maxDuration = Math.max(...durations);
+    const costPerSec = model.costPerSecond || (model.cost / minDuration);
+    const minCost = minDuration * costPerSec;
+    const maxCost = maxDuration * costPerSec;
+    const aspectRatios = model.aspectRatios || ['16:9'];
+    const defaultAspect = aspectRatios[0];
+
+    userState.set(ctx.from.id, {
+      action: 'runway_turbo_generation',
+      step: 'waiting_prompt',
+      duration: minDuration,
+      aspectRatio: defaultAspect
+    });
+
+    const durationButtons = durations.map(d => Markup.button.callback(`${d} сек (${(d * costPerSec).toFixed(1)}⚡)`, `runway_turbo_duration_${d}`));
+    const aspectButtons = aspectRatios.map(r => Markup.button.callback(`${r}`, `runway_turbo_aspect_${r}`));
+
+    await ctx.reply(
+      `🎬 <b>Runway Gen-4 Turbo</b>\n\n` +
+      `📝 <b>Крок 1: Введіть промпт</b>\n\n` +
+      `Опишіть рух/анімацію для відео.\n\n` +
+      `⏱️ Тривалість: ${minDuration}-${maxDuration} сек\n` +
+      `💰 Вартість: ${minCost.toFixed(1)}—${maxCost.toFixed(1)}⚡\n\n` +
+      `📐 Поточні налаштування:\n` +
+      `• Тривалість: ${minDuration} сек\n` +
+      `• Aspect ratio: ${defaultAspect}\n\n` +
+      `✍️ Надішліть текстовий промпт:`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          durationButtons,
+          aspectButtons,
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
       }
@@ -2080,6 +2130,50 @@ bot.action(/^veo_audio_(on|off)$/, async (ctx) => {
     `✍️ <b>Надішліть текстовий промпт:</b>`,
     { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
   );
+});
+
+// ==================== RUNWAY TURBO CALLBACKS ====================
+
+bot.action(/^runway_turbo_duration_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const duration = parseInt(ctx.match[1], 10);
+  const state = userState.get(userId);
+  const model = models.video.models.find(m => m.key === 'runway_turbo');
+
+  if (!state || state.action !== 'runway_turbo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново, оберіть Runway Turbo');
+    return;
+  }
+
+  const costPerSec = model?.costPerSecond || (model?.cost || 22) / 5;
+  const cost = duration * costPerSec;
+
+  userState.set(userId, {
+    ...state,
+    duration: duration
+  });
+
+  await ctx.answerCbQuery(`Тривалість: ${duration}с (${cost.toFixed(1)}⚡)`);
+});
+
+bot.action(/^runway_turbo_aspect_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const aspectRatio = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'runway_turbo_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново, оберіть Runway Turbo');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    aspectRatio: aspectRatio
+  });
+
+  await ctx.answerCbQuery(`Aspect ratio: ${aspectRatio}`);
 });
 
 // ==================== VEO START IMAGE CALLBACKS ====================
@@ -3051,6 +3145,140 @@ async function generateKlingVideo(ctx, state) {
   })();
 }
 
+// ==================== RUNWAY TURBO GENERATION FUNCTION ====================
+
+async function generateRunwayTurboVideo(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
+  const model = models.video.models.find(m => m.key === 'runway_turbo');
+
+  if (!model) {
+    await ctx.reply('❌ Модель Runway Turbo не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  const duration = state.duration || 5;
+  const aspectRatio = state.aspectRatio || '16:9';
+  const costPerSec = model.costPerSecond || (model.cost / 5);
+  const runwayCost = duration * costPerSec;
+  const apiCostPerSec = model.apiCostPerSecond || (model.apiCost / 5);
+  const apiCost = duration * apiCostPerSec;
+
+  if (!(await userBalance.hasTokens(userId, runwayCost))) {
+    await showInsufficientTokens(ctx, runwayCost);
+    userState.delete(userId);
+    return;
+  }
+
+  const statusMsg = await ctx.reply(
+    `🎬 <b>Runway Gen-4 Turbo - Генерація</b>\n\n` +
+    `⏱️ Тривалість: ${duration} сек\n` +
+    `📐 Пропорції: ${aspectRatio}\n` +
+    `🖼️ Initial image: Так\n\n` +
+    `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
+    `⏱️ Це може зайняти 1-3 хвилини...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  // ✅ ОЧИЩУЄМО СТАН ОДРАЗУ - щоб користувач міг працювати з ботом далі
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  const generationData = { ...state };
+
+  (async () => {
+    try {
+      const result = await replicate.generateVideoWithRunwayTurbo(
+        generationData.prompt,
+        generationData.startImage,
+        duration,
+        aspectRatio
+      );
+
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId, username, action: 'runway_turbo_generation', model: model.name,
+          prompt: generationData.prompt, duration: duration
+        });
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації Runway Turbo.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+        );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'runway_turbo',
+          success: false,
+          options: { duration, aspectRatio },
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100)
+        });
+
+        return;
+      }
+
+      await userBalance.deductTokens(userId, runwayCost, `${model.name} generation`, {
+        modelKey: 'runway_turbo',
+        modelName: model.name,
+        apiCost: apiCost,
+        prompt: generationData.prompt,
+        duration: duration,
+        aspectRatio: aspectRatio,
+        hasStartImage: true
+      });
+
+      const isTrialRunway = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey: 'runway_turbo',
+        success: true,
+        options: { duration, aspectRatio },
+        isTrial: isTrialRunway,
+        isFree: isTrialRunway
+      });
+
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>Runway Gen-4 Turbo готово!</b>\n\n` +
+        `⏱️ ${duration} сек | 📐 ${aspectRatio}\n` +
+        `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
+        `💰 Витрачено: ${runwayCost.toFixed(1)}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await bot.telegram.sendVideo(
+        chatId,
+        result.videoUrl,
+        {
+          caption: `🎬 Runway Turbo\n\n⏱️ ${duration}сек | 📐 ${aspectRatio}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${runwayCost.toFixed(1)}⚡`,
+          ...keyboard.createBackButton('video_menu')
+        }
+      );
+
+      recordTrialUsage(userId, 'runway_turbo');
+
+    } catch (error) {
+      console.error('Runway Turbo generation failed:', error);
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'runway_turbo_generation', model: model.name });
+      try {
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          '❌ Помилка генерації Runway Turbo. Спробуйте ще раз.'
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації Runway Turbo. Спробуйте ще раз.');
+      }
+    }
+  })();
+}
+
 // ==================== VEO GENERATION FUNCTION ====================
 
 async function generateVeoVideo(ctx, state) {
@@ -3418,6 +3646,57 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  // ✅ RUNWAY TURBO: Обробка промпту
+  if (state?.action === 'runway_turbo_generation' && state?.step === 'waiting_prompt') {
+    if (!text || text.length < 5) {
+      await ctx.reply(
+        '⚠️ Промпт занадто короткий!\n\n' +
+        'Напишіть детальніше що хочете бачити у відео (мінімум 5 символів).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const model = models.video.models.find(m => m.key === 'runway_turbo');
+    const duration = state.duration || 5;
+    const aspectRatio = state.aspectRatio || '16:9';
+    const costPerSec = model?.costPerSecond || (model?.cost || 22) / 5;
+    const totalCost = duration * costPerSec;
+
+    userState.set(userId, {
+      ...state,
+      prompt: text,
+      step: 'waiting_image'
+    });
+
+    const durationButtons = (model?.durations || [5]).map(d =>
+      Markup.button.callback(`${d} сек (${(d * costPerSec).toFixed(1)}⚡)`, `runway_turbo_duration_${d}`)
+    );
+    const aspectButtons = (model?.aspectRatios || ['16:9']).map(r =>
+      Markup.button.callback(`${r}`, `runway_turbo_aspect_${r}`)
+    );
+
+    await ctx.reply(
+      `✅ <b>Промпт збережено!</b>\n\n` +
+      `📝 "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n\n` +
+      `🖼️ <b>Крок 2: Додайте Initial image</b>\n` +
+      `Це перший кадр відео.\n\n` +
+      `📐 Aspect ratio: <b>${aspectRatio}</b>\n` +
+      `⏱️ Тривалість: <b>${duration} сек</b>\n` +
+      `💰 Вартість: <b>${totalCost.toFixed(1)}⚡</b>\n\n` +
+      `📤 Надішліть зображення без підпису (або можете додати, але не обов'язково).`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          durationButtons,
+          aspectButtons,
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
   // ✅ KLING: Обробка промпту
   if (state?.action === 'kling_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
@@ -3511,6 +3790,17 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  // ✅ RUNWAY TURBO: якщо модель runway_turbo але немає стану
+  if (currentModel === 'runway_turbo' && !state?.action) {
+    await ctx.reply(
+      '🎬 <b>Runway Gen-4 Turbo</b>\n\n' +
+      '⚠️ Спочатку натисніть Runway Turbo в меню відео.\n' +
+      'Потім: промпт → image.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
   // ✅ НОВИЙ ФЛОУ ДЛЯ ГРАФІЧНИХ МОДЕЛЕЙ
   // Якщо це графічна модель і ми чекаємо на промпт
   const imgState = imageGenState.get(userId);
@@ -3573,7 +3863,6 @@ bot.on('text', async (ctx) => {
     ideogram: () => handleImageGeneration(ctx, text, 'ideogram'),
     kling: () => handleVideoGeneration(ctx, text, 'kling'),
     runway_gen4: () => handleVideoGeneration(ctx, text, 'runway_gen4'),
-    runway_turbo: () => handleVideoGeneration(ctx, text, 'runway_turbo'),
     suno: () => handleSunoGeneration(ctx, text)
   };
   
@@ -3720,6 +4009,27 @@ bot.on('photo', async (ctx) => {
 
     await ctx.reply('🚀 Last frame отримано! Починаємо генерацію...');
     await generateVeoVideo(ctx, { ...state, lastFrame: imageUrl });
+    return;
+  }
+
+  // ✅ RUNWAY TURBO: Обробка initial image
+  if (state?.action === 'runway_turbo_generation' && state?.step === 'waiting_image') {
+    const imageUrl = await getImageUrl(ctx);
+
+    if (!state.prompt) {
+      await ctx.reply('❌ Немає промпту. Почніть заново, оберіть Runway Turbo.');
+      userState.delete(userId);
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      startImage: imageUrl,
+      step: 'ready_to_generate'
+    });
+
+    await ctx.reply('🚀 Initial image отримано! Починаємо генерацію...');
+    await generateRunwayTurboVideo(ctx, { ...state, startImage: imageUrl });
     return;
   }
 
@@ -3932,7 +4242,7 @@ bot.on('photo', async (ctx) => {
   }
 
   // Обробка одного фото
-  const videoModels = ['kling', 'runway_gen4', 'runway_turbo'];
+  const videoModels = ['kling', 'runway_gen4'];
   const imageModels = ['nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_2k', 'seedream_4k', 'ideogram'];
 
   // Отримуємо caption як промпт
@@ -4023,6 +4333,13 @@ bot.on('photo', async (ctx) => {
     }
   } else if (videoModels.includes(currentModel)) {
     await handleVideoGeneration(ctx, prompt, currentModel);
+  } else if (currentModel === 'runway_turbo') {
+    await ctx.reply(
+      '🎬 <b>Runway Gen-4 Turbo</b>\n\n' +
+      'Спочатку введіть промпт, потім додайте image.\n' +
+      'Натисніть Runway Turbo в меню відео.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
   } else {
     await ctx.reply('Для аналізу зображень виберіть режим "💡 Claude" → "🖼️ Завантажте зображення"', keyboard.createGPTActionsMenu(models.gpt.actions));
   }
@@ -6166,4 +6483,3 @@ bot.catch((err, ctx) => {
   console.error('Bot error:', err);
   ctx.reply(`❌ Сталася помилка. Спробуйте ще раз або зверніться до підтримки. ${SUPPORT_USERNAME}`);
 });
-
