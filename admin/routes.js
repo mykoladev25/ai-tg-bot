@@ -8,6 +8,7 @@ const router = express.Router();
 const aggregations = require('../monitoring/aggregations');
 const DailySummary = require('../database/models/DailySummary');
 const replicatePricing = require('../services/replicatePricing');
+const gracefulShutdown = require('../utils/gracefulShutdown');
 
 // Auth middleware
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || process.env.ADMIN_TELEGRAM_ID;
@@ -196,6 +197,33 @@ router.get('/pricing/check', (req, res) => {
     });
   } catch (error) {
     console.error('Admin pricing check error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /admin/generations/active
+ * Перегляд активних генерацій (для моніторингу перед рестартом)
+ */
+router.get('/generations/active', (req, res) => {
+  try {
+    const activeCount = gracefulShutdown.getActiveCount();
+    const generations = gracefulShutdown.getActiveGenerations();
+    const isShuttingDown = gracefulShutdown.isInShutdown();
+
+    res.json({
+      success: true,
+      data: {
+        activeCount,
+        isShuttingDown,
+        generations,
+        message: activeCount === 0
+          ? '✅ Немає активних генерацій. Можна робити restart.'
+          : `⚠️ ${activeCount} активних генерацій. Зачекайте або вони будуть перервані.`
+      }
+    });
+  } catch (error) {
+    console.error('Admin active generations error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

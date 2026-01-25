@@ -21,9 +21,15 @@ module.exports = {
     min_uptime: '10s',
     merge_logs: true,
 
-    // Graceful shutdown
+    // ⚠️ Graceful shutdown - ВАЖЛИВО для генерацій!
+    // Час очікування перед SIGKILL (30 секунд для завершення генерацій)
+    kill_timeout: 35000,
+    // Час очікування на listen (бот стартує)
     listen_timeout: 10000,
-    kill_timeout: 5000,
+    // Не перезапускати одразу, дати час на shutdown
+    restart_delay: 3000,
+    // Надсилати SIGINT замість SIGTERM (коректніший для Node.js)
+    shutdown_with_message: true,
 
     // Environment
     env_production: {
