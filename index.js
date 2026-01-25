@@ -1811,47 +1811,15 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
 
   await ctx.reply(
     `📷 <b>Завантажте референс-зображення</b>\n\n` +
-    `💡 Можна завантажити до ${maxPhotos} фото\n` +
-    `📤 Надсилайте фото по одному або альбомом\n\n` +
-    `✅ Коли завантажите всі фото — натисніть "🚀 Генерувати"`,
+    `💡 Можна до ${maxPhotos} фото\n` +
+    `🚀 Генерація почнеться автоматично`,
     {
       parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🚀 Генерувати з референсами', `img_gen_with_refs_${modelKey}`)],
-        [Markup.button.callback('← Назад', 'design_menu')]
-      ])
+      ...keyboard.createBackButton('design_menu')
     }
   );
 });
 
-// ✅ НОВИЙ ФЛОУ: Кнопка "Генерувати з референсами"
-bot.action(/^img_gen_with_refs_(.+)$/, async (ctx) => {
-  const modelKey = ctx.match[1];
-  const userId = ctx.from.id;
-  const imgState = imageGenState.get(userId);
-
-  await ctx.answerCbQuery();
-
-  if (!imgState || !imgState.prompt) {
-    await ctx.reply('❌ Помилка: промпт не знайдено. Почніть заново.', keyboard.createBackButton('design_menu'));
-    imageGenState.delete(userId);
-    return;
-  }
-
-  const prompt = imgState.prompt;
-  const photos = imgState.photos || [];
-  imageGenState.delete(userId);
-
-  if (photos.length === 0) {
-    await ctx.reply('⚠️ Ви не завантажили жодного фото. Генеруємо без референсів...', { parse_mode: 'HTML' });
-  } else {
-    await ctx.reply(`🚀 Починаємо генерацію з ${photos.length} референс${photos.length === 1 ? 'ом' : 'ами'}...`, { parse_mode: 'HTML' });
-  }
-
-  // Передаємо фото як imageInput
-  const imageInput = photos.length > 0 ? (photos.length === 1 ? photos[0] : photos) : null;
-  await handleImageGeneration(ctx, prompt, modelKey, imageInput);
-});
 
 // Video Models
 bot.action(/^(kling|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ctx) => {
@@ -3839,38 +3807,28 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
+  // ✅ НОВИЙ ФЛОУ: Обробка референс-фото - ОДРАЗУ ГЕНЕРУЄМО
+  const imgState = imageGenState.get(userId);
+  if (imgState && imgState.step === 'waiting_photos') {
+    const imageUrl = await getImageUrl(ctx);
+
+    // Зберігаємо prompt та очищуємо стан
+    const prompt = imgState.prompt;
+    const modelKey = imgState.model;
+    imageGenState.delete(userId);
+
+    // Одразу починаємо генерацію з референсом
+    await ctx.reply('🚀 Починаємо генерацію з референсом...', { parse_mode: 'HTML' });
+    await handleImageGeneration(ctx, prompt, modelKey, imageUrl);
+    return;
+  }
+
   // ✅ Перевірити чи користувач вибрав модель
   if (!currentModel) {
     await ctx.reply(
       '❌ Спочатку виберіть модель для обробки фото.\n\n' +
       '🎨 Оберіть один з розділів:',
       keyboard.createInlineMenu(models.design.models, 1)
-    );
-    return;
-  }
-
-  // ✅ НОВИЙ ФЛОУ: Обробка референс-фото
-  const imgState = imageGenState.get(userId);
-  if (imgState && imgState.step === 'waiting_photos') {
-    const imageUrl = await getImageUrl(ctx);
-
-    if (!imgState.photos) imgState.photos = [];
-    imgState.photos.push(imageUrl);
-    imageGenState.set(userId, imgState);
-
-    const model = models.design.models.find(m => m.key === imgState.model);
-    const maxPhotos = (imgState.model.includes('nano_banana') || imgState.model.includes('seedream')) ? 14 : 1;
-
-    await ctx.reply(
-      `✅ Фото ${imgState.photos.length}/${maxPhotos} завантажено!\n\n` +
-      `${imgState.photos.length < maxPhotos ? '📤 Надішліть ще фото або натисніть "🚀 Генерувати"' : '📸 Досягнуто максимум фото. Натисніть "🚀 Генерувати"'}`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🚀 Генерувати з референсами', `img_gen_with_refs_${imgState.model}`)],
-          [Markup.button.callback('← Назад', 'design_menu')]
-        ])
-      }
     );
     return;
   }
