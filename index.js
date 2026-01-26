@@ -3922,11 +3922,6 @@ bot.on('text', async (ctx) => {
     await ctx.reply('Будь ласка, спочатку виберіть модель з меню 👇', keyboard.createMainMenu());
     return;
   }
-  
-  if (currentModel === 'clarity') {
-    await ctx.reply('🔮 Clarity Upscaler чекає на зображення.\n\nНадішліть фото для покращення якості.', keyboard.createGPTActionsMenu(models.design.models));
-    return;
-  }
 
   // ✅ KLING MOTION: якщо модель обрана але флоу не розпочато
   if (currentModel === 'kling_motion') {
@@ -4025,6 +4020,11 @@ bot.on('text', async (ctx) => {
       );
       return;
     }
+  }
+
+  if (currentModel === 'clarity') {
+    await ctx.reply('🔮 Clarity Upscaler чекає на зображення.\n\nНадішліть фото для покращення якості.', keyboard.createGPTActionsMenu(models.design.models));
+    return;
   }
 
 
