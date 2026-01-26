@@ -25,15 +25,6 @@ const TRIAL_RESTRICTIONS = {
     kling_v2_6: { durations: [10] }
   },
 
-  limitedModels: {
-    seedream_4k: 3,
-    nano_banana_2k: 3,
-    nano_banana_4k: 3,
-    kling: 2,
-    kling_v2_6: 2,
-    runway_turbo: 1
-  },
-
   messages: {
     blocked:
       '🔒 Ця модель доступна тільки для платних користувачів.\n\n💡 Поповніть баланс щоб отримати доступ до всіх можливостей!',
@@ -241,7 +232,7 @@ module.exports = {
   },
 
   subscriptions: {
-    trial: { name: 'TRIAL', tokens: 75, price: 0, features: ['🎁 75⚡ безкоштовних токенів', '✨ Спробуйте всі моделі', '⚡ Токени НЕ згорають!'] },
+    trial: { name: 'TRIAL', tokens: 35, price: 0, features: ['🎁 35 безкоштовних токенів', '✨ Спробуйте всі моделі', '⚡ Токени НЕ згорають!'] },
     starter: { name: 'STARTER', tokens: 186, tokensLiqPay: Math.floor(260 * LIQPAY_FACTOR), price: 299, priceUSD: 7, features: ['🚀 186⚡ токенів (Telegram Stars)', '🚀 260⚡ токенів (LiqPay)', '💎 Доступ до всіх моделей', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!', '📉 Чим більший план — тим дешевший ⚡'] },
     basic: { name: 'BASIC', tokens: 620, tokensLiqPay: Math.floor(870 * LIQPAY_FACTOR), price: 899, priceUSD: 20, features: ['💎 620⚡ токенів (Telegram Stars)', '💎 870⚡ токенів (LiqPay)', '🎨 Для активних користувачів', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!', '📉 Чим більший план — тим дешевший ⚡'] },
     pro: { name: 'PRO', tokens: 1500, tokensLiqPay: Math.floor(2100 * LIQPAY_FACTOR), price: 1999, priceUSD: 45, features: ['🔥 1500⚡ токенів (Telegram Stars)', '🔥 2100⚡ токенів (LiqPay)', '🚀 Для професіоналів', '⏰ Токени НЕ згорають', '⚡ Найкраще співвідношення', '📉 Чим більший план — тим дешевший ⚡'] },

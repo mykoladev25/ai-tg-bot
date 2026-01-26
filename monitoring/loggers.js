@@ -315,7 +315,7 @@ function determinePlan(user) {
     return user.subscription.plan.toLowerCase();
   }
 
-  // If user has ever purchased (tokens > 75 initial trial)
+  // If user has ever purchased (tokens > 35 initial trial)
   if (user.totalPurchased && user.totalPurchased > 0) {
     return 'paid'; // Generic paid status
   }

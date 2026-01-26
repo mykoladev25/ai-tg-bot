@@ -74,22 +74,10 @@ async function isTrialUser(userId) {
   try {
     const user = await userBalance.getUser(userId);
     // Trial = користувач НЕ має жодної покупки (totalTokensPurchased = 0)
-    // Тобто має тільки початковий бонус 75⚡
+    // Тобто має тільки початковий бонус 35⚡
     return user.totalTokensPurchased === 0;
   } catch (e) {
     return true; // За замовчуванням вважаємо Trial
-  }
-}
-
-/**
- * Отримує Trial usage з бази даних
- */
-async function getTrialUsage(userId, modelKey) {
-  try {
-    const user = await userBalance.getUser(userId);
-    return user.trialUsage?.[modelKey] || 0;
-  } catch (e) {
-    return 0;
   }
 }
 
@@ -138,28 +126,6 @@ async function checkTrialRestrictions(userId, modelKey, options = {}) {
           message: TRIAL_RESTRICTIONS.messages.durationBlocked
         };
       }
-    }
-  }
-
-  // 3. Перевірка лімітованих моделей (читаємо з бази)
-  const limit = TRIAL_RESTRICTIONS.limitedModels[modelKey];
-  if (limit) {
-    const currentUsage = await getTrialUsage(userId, modelKey);
-
-    if (currentUsage >= limit) {
-      return {
-        allowed: false,
-        message: TRIAL_RESTRICTIONS.messages.blocked
-      };
-    }
-
-    // Повертаємо warning якщо це остання безкоштовна генерація
-    const remaining = limit - currentUsage;
-    if (remaining <= 1) {
-      return {
-        allowed: true,
-        warning: TRIAL_RESTRICTIONS.messages.limited(remaining)
-      };
     }
   }
 
@@ -490,7 +456,7 @@ const INSTRUCTION_HTML = `
 
 💰 <b>Токени ⚡</b>
 - <b>Кожна генерація списує токени</b>
-- 🎁 <b>Безкоштовно:</b> 75⚡ при реєстрації
+- 🎁 <b>Безкоштовно:</b> 35⚡ при реєстрації
 - 💎 Поповніть баланс для необмеженого доступу
 - 📉 <b>Чим більший пакет — тим вигідніше!</b>
 
@@ -4965,10 +4931,6 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         isFree: isTrialImg
       });
 
-      if (TRIAL_RESTRICTIONS.limitedModels[modelKey]) {
-        recordTrialUsage(userId, modelKey);
-      }
-
       const fileSize = await getFileSize(result.imageUrl);
       const maxPhotoSize = 10 * 1024 * 1024; // 10MB
 
@@ -6453,7 +6415,7 @@ async function startBot() {
         // ============================================================
         // TRIAL PLAN with explicit usage (snake_case keys matching model keys)
         // ============================================================
-        const trialTokens = models.subscriptions.trial?.tokens || 75;
+        const trialTokens = models.subscriptions.trial?.tokens || 35;
 
         // Helper: safe division avoiding 0
         const safeDiv = (tokens, cost) => cost > 0 ? Math.floor(tokens / cost) : 0;
@@ -6490,14 +6452,12 @@ async function startBot() {
 
         const isBlockedModel = (key) => models.TRIAL_RESTRICTIONS.blockedModels.includes(key);
         const blockedModes = models.TRIAL_RESTRICTIONS.blockedModes || {};
-        const limitedModels = models.TRIAL_RESTRICTIONS.limitedModels || {};
 
-        const buildUsageEntry = (key, cost, { blocked = false, limited = null } = {}) => {
+        const buildUsageEntry = (key, cost, { blocked = false } = {}) => {
           const entry = {
             count: blocked ? 0 : safeDiv(trialTokens, cost),
             cost: cost
           };
-          if (limited) entry.limited = limited;
           if (blocked) entry.blocked = true;
           return entry;
         };
@@ -6510,8 +6470,7 @@ async function startBot() {
           .filter(m => m.available)
           .forEach((m) => {
             const blocked = isBlockedModel(m.key);
-            const limited = limitedModels[m.key] || null;
-            trialUsage[m.key] = buildUsageEntry(m.key, m.cost || 0, { blocked, limited });
+            trialUsage[m.key] = buildUsageEntry(m.key, m.cost || 0, { blocked });
           });
 
         // Video models (available OR explicitly blocked)
@@ -6523,8 +6482,6 @@ async function startBot() {
         models.video.models
           .filter(m => allowedVideoKeys.has(m.key))
           .forEach((m) => {
-            const limited = limitedModels[m.key] || null;
-
             // Kling variants (duration-specific keys)
             if (m.key.startsWith('kling') && m.costPerSecond && Array.isArray(m.durations)) {
               m.durations.forEach((duration) => {
@@ -6532,7 +6489,7 @@ async function startBot() {
                 const modeBlocked = blockedModes[m.key]?.durations?.includes(duration) || false;
                 const blocked = isBlockedModel(m.key) || modeBlocked;
                 const key = `${m.key}_${duration}s`;
-                trialUsage[key] = buildUsageEntry(key, cost, { blocked, limited });
+                trialUsage[key] = buildUsageEntry(key, cost, { blocked });
               });
               return;
             }
@@ -6544,7 +6501,7 @@ async function startBot() {
               const perSec = m.costPerSecond ?? (m.cost ? m.cost / minDuration : 0);
               const cost = minDuration * perSec;
               const blocked = isBlockedModel(m.key);
-              trialUsage[m.key] = buildUsageEntry(m.key, cost, { blocked, limited });
+              trialUsage[m.key] = buildUsageEntry(m.key, cost, { blocked });
               return;
             }
 
@@ -6554,7 +6511,7 @@ async function startBot() {
               const perSec = m.costPerSecondAudio ?? m.costPerSecondNoAudio ?? 0;
               const cost = minDuration * perSec;
               const blocked = isBlockedModel(m.key);
-              trialUsage[m.key] = buildUsageEntry(m.key, cost, { blocked, limited });
+              trialUsage[m.key] = buildUsageEntry(m.key, cost, { blocked });
               return;
             }
 
@@ -6562,14 +6519,14 @@ async function startBot() {
             if (m.key === 'kling_motion') {
               const minCost = m.cost ?? (m.costs ? Math.min(...Object.values(m.costs)) : 0);
               const blocked = isBlockedModel(m.key);
-              trialUsage[m.key] = buildUsageEntry(m.key, minCost, { blocked, limited });
+              trialUsage[m.key] = buildUsageEntry(m.key, minCost, { blocked });
               return;
             }
 
             // Default fixed-cost models
             if (m.cost) {
               const blocked = isBlockedModel(m.key);
-              trialUsage[m.key] = buildUsageEntry(m.key, m.cost, { blocked, limited });
+              trialUsage[m.key] = buildUsageEntry(m.key, m.cost, { blocked });
             }
           });
 
@@ -6590,12 +6547,7 @@ async function startBot() {
         // Trial restrictions для фронтенду
         const trialRestrictions = {
           blockedModels: models.TRIAL_RESTRICTIONS.blockedModels,
-          limitedModels: models.TRIAL_RESTRICTIONS.limitedModels,
-          blockedModes: models.TRIAL_RESTRICTIONS.blockedModes,
-          freeGenerations: {
-            total: trialTokens,
-            perModel: models.TRIAL_RESTRICTIONS.limitedModels
-          }
+          blockedModes: models.TRIAL_RESTRICTIONS.blockedModes
         };
 
         res.json({
@@ -6818,9 +6770,8 @@ async function startBot() {
 
           // Trial/FREE restrictions
           trialRestrictions: {
-            freeTokens: models.subscriptions.trial?.tokens || 75,
+            freeTokens: models.subscriptions.trial?.tokens || 35,
             blockedModels: models.TRIAL_RESTRICTIONS.blockedModels,
-            limitedModels: models.TRIAL_RESTRICTIONS.limitedModels,
             blockedModes: models.TRIAL_RESTRICTIONS.blockedModes,
             description: 'Free users have limited access to expensive models'
           },
