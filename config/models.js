@@ -1,12 +1,14 @@
 /**
- * $-ціни нижче рахуються так:
- * 1 токен = WORST_CASE_TOKEN_USD = 110 / 4760 ≈ $0.02311
- * USD_for_user = costTokens * WORST_CASE_TOKEN_USD
+ * Нові припущення під нашу токеноміку:
+ * 1 токен = $0.01 (для юзера)
+ * Ціноутворення: tokens = ceil(apiCostUSD * PRICING_MULTIPLIER / TOKEN_USD)
+ * де PRICING_MULTIPLIER = 1.65 (≈30% profit після fees + буфер)
  */
 
-const WORST_CASE_TOKEN_USD = 110 / 4760; // ≈ 0.02311...
+const TOKEN_USD = 0.01;
+const PRICING_MULTIPLIER = 1.65;
 
-// Target: 30% profit AFTER fees (payment + tax)
+// Target: ~30% profit AFTER fees (payment + tax) + buffer
 const TARGET_PROFIT_AFTER_FEES = 0.30;
 
 // WayForPay 2% + FOP 5% = 7%
@@ -15,19 +17,16 @@ const WAYFORPAY_OVERHEAD = 0.07;
 // Net revenue factor after overhead
 const NET_REVENUE_FACTOR = 1 - WAYFORPAY_OVERHEAD; // 0.93
 
-// API budget factor to keep 30% profit after fees
-const API_BUDGET_FACTOR = 1 - TARGET_PROFIT_AFTER_FEES; // 0.70
-
-// Effective USD per token available for API costs
-const EFFECTIVE_TOKEN_USD = WORST_CASE_TOKEN_USD * NET_REVENUE_FACTOR * API_BUDGET_FACTOR;
-
 const TRIAL_RESTRICTIONS = {
   blockedModels: ['veo', 'kling_motion', 'runway_gen4'],
   blockedModes: { kling: { durations: [10] }, kling_v2_6: { durations: [10] } },
   messages: {
-    blocked: '🔒 Ця модель доступна тільки для платних користувачів.\n\n💡 Поповніть баланс щоб отримати доступ до всіх можливостей!',
-    limited: (remaining) => `⚠️ На Trial залишилось ${remaining} безкоштовних генерацій цієї моделі.\n\n💡 Поповніть баланс для необмеженого доступу!`,
-    durationBlocked: '🔒 Тривалість 10+ секунд доступна тільки для платних користувачів.\n\n💡 На Trial доступно тільки 5 секунд.'
+    blocked:
+      '🔒 Ця модель доступна тільки для платних користувачів.\n\n💡 Поповніть баланс щоб отримати доступ до всіх можливостей!',
+    limited: (remaining) =>
+      `⚠️ На Trial залишилось ${remaining} безкоштовних генерацій цієї моделі.\n\n💡 Поповніть баланс для необмеженого доступу!`,
+    durationBlocked:
+      '🔒 Тривалість 10+ секунд доступна тільки для платних користувачів.\n\n💡 На Trial доступно тільки 5 секунд.'
   }
 };
 
@@ -46,27 +45,27 @@ module.exports = {
     actions: [
       { name: '🎙️ Говоріть', key: 'voice', cost: 0, apiCost: 0 },
 
-      // cost=1 токен ≈ $0.023 (для юзера, worst-case). Ти платиш API: $0.008
-      { name: '✍️ Пишіть', key: 'text', cost: 1, apiCost: 0.008 },
+      // Claude text: $0.008 -> ceil(0.008*1.65/0.01)=2 токени
+      { name: '✍️ Пишіть', key: 'text', cost: 2, apiCost: 0.008 },
 
-      // cost=4 токени ≈ $0.092 (worst-case). Ти платиш API: $0.048
-      { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 4, apiCost: 0.048 }
+      // Claude image analysis: $0.048 -> ceil(0.048*1.65/0.01)=8 токенів
+      { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 8, apiCost: 0.048 }
     ]
   },
 
   video: {
     models: [
       /**
-       * Runway Turbo
-       * costPerSecond=4 ток/сек ≈ $0.092/сек (worst-case). Ти платиш API: $0.050/сек
-       * cost=20 ток (5 сек) ≈ $0.462 за 5с. Ти платиш API: $0.25 за 5с
+       * Runway Turbo — $0.25/run
+       * tokens = ceil(0.25*1.65/0.01)=42
+       * (фіксована ціна за run незалежно від duration)
        */
       {
         name: '🎬 RunWay: Gen-4 Turbo ⚡',
         key: 'runway_turbo',
-        costPerSecond: 4,
+        costPerSecond: 9,
         apiCostPerSecond: 0.05,
-        cost: 20,
+        cost: 45,
         apiCost: 0.25,
         available: true,
         requiresImage: true,
@@ -75,15 +74,15 @@ module.exports = {
       },
 
       /**
-       * Kling v2.5
-       * costPerSecond=5 ток/сек ≈ $0.116/сек. API: $0.070/сек
-       * cost=25 ток (5 сек) ≈ $0.578 за 5с. API: $0.35 за 5с
+       * Kling v2.5 — $0.07/сек
+       * tokens/sec = ceil(0.07*1.65/0.01)=12
+       * 5s=60, 10s=120
        */
       {
         name: '🎭 Kling v2.5 Turbo',
         key: 'kling',
-        costPerSecond: 5,
-        cost: 25,
+        costPerSecond: 12,
+        cost: 60,
         apiCostPerSecond: 0.07,
         available: true,
         requiresImage: false,
@@ -92,17 +91,17 @@ module.exports = {
       },
 
       /**
-       * Kling v2.6
-       * no-audio: costPerSecond=5 ток/сек ≈ $0.116/сек. API: $0.070/сек
-       * audio:    costPerSecondAudio=10 ток/сек ≈ $0.231/сек. API: $0.140/сек
-       * 5 сек audio: 50 ток ≈ $1.155 за 5с. API: $0.70 за 5с
+       * Kling v2.6 — $0.07/сек video, $0.14/сек audio
+       * no-audio tokens/sec = 12
+       * audio tokens/sec = ceil(0.21*1.65/0.01)=35
+       * 5s audio=175
        */
       {
         name: '🎭 Kling v2.6',
         key: 'kling_v2_6',
-        costPerSecond: 5,
-        costPerSecondAudio: 10,
-        cost: 25,
+        costPerSecond: 12,
+        costPerSecondAudio: 35,
+        cost: 60,
         apiCostPerSecond: 0.07,
         apiCostPerSecondAudio: 0.14,
         audioParam: 'generate_audio',
@@ -113,37 +112,37 @@ module.exports = {
       },
 
       /**
-       * Kling Motion Control
-       * std_image: 34 ток ≈ $0.785. API: $0.50
-       * std_video: 67 ток ≈ $1.548. API: $1.00
-       * pro_video: 133 ток ≈ $3.073. API: $2.00
+       * Kling Motion Control (fixed)
+       * std_image $0.50 -> 83
+       * std_video $1.00 -> 165
+       * pro_image $1.00 -> 165
+       * pro_video $2.00 -> 330
        */
       {
         name: '🔥 Kling Motion Control',
         key: 'kling_motion',
-        costs: { std_image: 34, std_video: 67, pro_image: 67, pro_video: 133 },
+        costs: { std_image: 83, std_video: 165, pro_image: 165, pro_video: 330 },
         apiCosts: { std_image: 0.50, std_video: 1.00, pro_image: 1.00, pro_video: 2.00 },
-        cost: 34,
-        maxCost: 133,
+        cost: 83,
+        maxCost: 330,
         available: true,
         requiresImage: true,
         requiresVideo: true
       },
 
       /**
-       * Veo 3.1
-       * audio: costPerSecondAudio=27 ток/сек ≈ $0.624/сек. API: $0.40/сек
-       * no-audio: costPerSecondNoAudio=14 ток/сек ≈ $0.324/сек. API: $0.20/сек
-       * default 8 сек audio: 216 ток ≈ $4.994. API: $3.20
+       * Veo — audio $0.40/сек, no-audio $0.20/сек
+       * tokens/sec audio = ceil(0.40*1.65/0.01)=66
+       * tokens/sec no-audio = ceil(0.20*1.65/0.01)=33
        */
       {
         name: '🌟 Google Veo 3.1 💎',
         key: 'veo',
-        costPerSecondAudio: 27,
-        costPerSecondNoAudio: 14,
+        costPerSecondAudio: 66,
+        costPerSecondNoAudio: 33,
         minSeconds: 4,
-        durations: [4, 8, 12],
-        cost: 216,
+        durations: [4, 8],
+        cost: 528, // default 8s audio = 66*8
         apiCostPerSecondAudio: 0.40,
         apiCostPerSecondNoAudio: 0.20,
         available: true,
@@ -151,87 +150,122 @@ module.exports = {
         supportsReferences: true
       },
 
-      { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 60, apiCost: 0.9, available: false, requiresImage: true },
-      { name: '🌊 MidJourney Video', key: 'midjourney_video', cost: 15, apiCost: 0, available: false },
-      { name: '💜 HeyGen', key: 'heygen', cost: 12, apiCost: 0, available: false }
+      { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 0, apiCost: 0, available: false, requiresImage: true },
+      { name: '🌊 MidJourney Video', key: 'midjourney_video', cost: 0, apiCost: 0, available: false },
+      { name: '💜 HeyGen', key: 'heygen', cost: 0, apiCost: 0, available: false }
     ]
   },
 
   design: {
     models: [
       /**
-       * Design (30% gross target)
+       * Image models (pricing by multiplier 1.65 and $0.01/token)
        */
 
-      // cost=5 ток ≈ $0.116. API: $0.065
-      { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 5, apiCost: 0.065, available: true },
+      // stable_diffusion $0.07 -> 12
+      { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 12, apiCost: 0.07, available: true },
 
-      // cost=10 ток ≈ $0.231. API: $0.150
+      // nano_banana_2k $0.15 -> 25
       {
         name: '🍌 Nano Banana PRO 2K',
         key: 'nano_banana_2k',
-        cost: 10,
+        cost: 25,
         apiCost: 0.15,
         resolution: '2K',
         maxImages: 14,
         available: true
       },
 
-      // cost=20 ток ≈ $0.462. API: $0.300
+      // nano_banana_4k $0.30 -> 50
       {
         name: '🍌🍌 Nano Banana PRO 4K',
         key: 'nano_banana_4k',
-        cost: 20,
+        cost: 50,
         apiCost: 0.30,
         resolution: '4K',
         maxImages: 14,
         available: true
       },
 
-      // cost=3 ток ≈ $0.069. API: $0.040
-      { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 3, apiCost: 0.04, size: '2K', maxImages: 14, available: true },
+      // seedream $0.04 -> 7
+      { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 7, apiCost: 0.04, size: '2K', maxImages: 14, available: true },
 
-      // cost=6 ток ≈ $0.139. API: $0.080
-      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 6, apiCost: 0.08, size: '4K', maxImages: 14, available: true },
+      // seedream $0.04 -> 7
+      { name: '🌊 Seedream 4K', key: 'seedream_4k', cost: 7, apiCost: 0.04, size: '4K', maxImages: 14, available: true },
 
-      // cost=2 ток ≈ $0.046. API: $0.020
-      { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 2, apiCost: 0.02, maxImages: 1, available: true },
+      // clarity $0.02 -> 4
+      { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 4, apiCost: 0.02, maxImages: 1, available: true },
 
-      // cost=2 ток ≈ $0.046. API: $0.030
-      { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 2, apiCost: 0.03, maxImages: 1, available: true },
+      // ideogram $0.03 -> 5
+      { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 5, apiCost: 0.03, maxImages: 1, available: true },
 
-      { name: '🖼️ MidJourney', key: 'midjourney', cost: 3, apiCost: 0, available: false }
+      { name: '🖼️ MidJourney', key: 'midjourney', cost: 0, apiCost: 0, available: false }
     ]
   },
 
   audio: {
     models: [
-      { name: '🎵 Suno AI Bark', key: 'suno', cost: 1, apiCost: 0.0023, available: false },
-      { name: '🎼 Udio AI', key: 'udio', cost: 6, apiCost: 0, available: false },
-      { name: '🎤 ElevenLabs', key: 'elevenlabs', cost: 2, apiCost: 0.03, available: false }
+      { name: '🎵 Suno AI Bark', key: 'suno', cost: 0, apiCost: 0, available: false },
+      { name: '🎼 Udio AI', key: 'udio', cost: 0, apiCost: 0, available: false },
+      { name: '🎤 ElevenLabs', key: 'elevenlabs', cost: 0, apiCost: 0, available: false }
     ]
   },
 
   subscriptions: {
     trial: {
       name: 'TRIAL',
-      tokens: 11,
+      tokens: 7,
       price: 0,
-      features: ['🎁 11 безкоштовних токенів', '✨ Спробуйте базові моделі', '⚡ Токени НЕ згорають!']
+      priceUSD: 0,
+      features: ['🎁 7 безкоштовних токенів (1 генерація Seedream)', '✨ Спробуйте базові моделі', '⚡ Токени НЕ згорають!']
     },
-    starter: { name: 'STARTER', tokens: 302, tokensLiqPay: 302, price: 299, priceUSD: 7, features: ['🚀 302⚡ токенів (Telegram Stars)', '🚀 302⚡ токенів (WayForPay)', '💎 Доступ до всіх моделей', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!', '📉 Чим більший план — тим дешевший ⚡'] },
-    basic: { name: 'BASIC', tokens: 865, tokensLiqPay: 865, price: 899, priceUSD: 20, features: ['💎 865⚡ токенів (Telegram Stars)', '💎 865⚡ токенів (WayForPay)', '🎨 Для активних користувачів', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!', '📉 Чим більший план — тим дешевший ⚡'] },
-    pro: { name: 'PRO', tokens: 1947, tokensLiqPay: 1947, price: 1999, priceUSD: 45, features: ['🔥 1947⚡ токенів (Telegram Stars)', '🔥 1947⚡ токенів (WayForPay)', '🚀 Для професіоналів', '⏰ Токени НЕ згорають', '⚡ Найкраще співвідношення', '📉 Чим більший план — тим дешевший ⚡'] },
-    premium: { name: 'PREMIUM', tokens: 4760, tokensLiqPay: 4760, price: 4999, priceUSD: 110, features: ['👑 4760⚡ токенів (Telegram Stars)', '👑 4760⚡ токенів (WayForPay)', '💫 Максимум можливостей', '⏰ Токени НЕ згорають', '👑 VIP підтримка 24/7', '📉 Найнижча ціна за ⚡'] }
+
+    // STARTER must be $7 -> 700 tokens
+    starter: {
+      name: 'STARTER',
+      tokens: 700,
+      tokensLiqPay: 700,
+      priceUSD: 7,
+      price: 7,
+      features: ['🚀 700⚡ токенів', '💎 Доступ до всіх моделей', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!']
+    },
+
+    // Suggested competitive line (can be adjusted later by analytics)
+    basic: {
+      name: 'BASIC',
+      tokens: 1500,
+      tokensLiqPay: 1500,
+      priceUSD: 15,
+      price: 15,
+      features: ['💎 1500⚡ токенів', '🎨 Для активних користувачів', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!']
+    },
+
+    pro: {
+      name: 'PRO',
+      tokens: 2900,
+      tokensLiqPay: 2900,
+      priceUSD: 29,
+      price: 29,
+      features: ['🔥 2900⚡ токенів', '🚀 Для професіоналів', '⏰ Токени НЕ згорають', '⚡ Найкраще співвідношення']
+    },
+
+    premium: {
+      name: 'PREMIUM',
+      tokens: 5900,
+      tokensLiqPay: 5900,
+      priceUSD: 59,
+      price: 59,
+      features: ['👑 5900⚡ токенів', '💫 Максимум можливостей', '⏰ Токени НЕ згорають', '👑 VIP підтримка']
+    }
   },
 
   _pricingAssumptions: {
-    worstCaseTokenUSD: WORST_CASE_TOKEN_USD,
+    tokenUSD: TOKEN_USD,
+    pricingMultiplier: PRICING_MULTIPLIER,
+    wayforpayOverhead: WAYFORPAY_OVERHEAD,
+    targetProfitAfterFees: TARGET_PROFIT_AFTER_FEES,
     netRevenueFactor: NET_REVENUE_FACTOR,
-    apiBudgetFactor: API_BUDGET_FACTOR,
-    effectiveTokenUSD: EFFECTIVE_TOKEN_USD,
-    targetGross: '≈30% after fees',
-    pricingRule: 'tokens = ceil(apiCost / (worstCaseTokenUSD * 0.93 * 0.70))',
-    note: 'wayforpay fees/taxes included (WAYFORPAY_OVERHEAD = 7%)'
+    pricingRule: 'tokens = ceil(apiCostUSD * PRICING_MULTIPLIER / TOKEN_USD)',
+    note: 'прибутковість закладена через PRICING_MULTIPLIER=1.65 (≈30% після fees + буфер)'
   }
 };
