@@ -4883,7 +4883,13 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         nano_banana_4k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
         seedream_2k: () => replicate.generateWithSeedream(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
         seedream_4k: () => replicate.generateWithSeedream(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
-        ideogram: () => replicate.generateWithIdeogram(generationData.prompt, generationData.imageInput, 0.5, generationData.aspectRatio)
+        ideogram: () => replicate.generateWithIdeogram(generationData.prompt, generationData.imageInput, 0.5, generationData.aspectRatio),
+        clarity: () => {
+          const clarityImage = Array.isArray(generationData.imageInput)
+            ? generationData.imageInput[0]
+            : generationData.imageInput;
+          return replicate.generateWithClarityUpscaler(clarityImage, generationData.prompt);
+        }
       };
 
       const result = await replicateFunctions[generationData.modelKey]();
