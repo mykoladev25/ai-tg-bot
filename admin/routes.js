@@ -547,7 +547,7 @@ router.get('/dashboard', (req, res) => {
       <h3>📖 Словник термінів</h3>
       <div class="legend-item">
         <span class="legend-term">💰 Дохід</span>
-        <span class="legend-desc">— скільки грошей отримали від клієнтів</span>
+        <span class="legend-desc">— скільки грошей отримали від клієнтів (до fees)</span>
       </div>
       <div class="legend-item">
         <span class="legend-term">💸 Собівартість</span>
@@ -559,7 +559,7 @@ router.get('/dashboard', (req, res) => {
       </div>
       <div class="legend-item">
         <span class="legend-term">📈 Прибуток</span>
-        <span class="legend-desc">— Дохід мінус Собівартість мінус бонуси новим (15⚡)</span>
+        <span class="legend-desc">— (Дохід після fees) мінус Собівартість мінус бонуси новим (${TRIAL_TOKENS}⚡)</span>
       </div>
       <div class="legend-item">
         <span class="legend-term">🔥 Trial витрати</span>
@@ -836,9 +836,9 @@ router.get('/dashboard', (req, res) => {
             </div>
             <div class="card">
               <div class="card-title">📈 Прибуток</div>
-              <div class="card-hint">Дохід - Собівартість - бонуси новим (\${trialTokensPerUser}⚡)</div>
+              <div class="card-hint">Дохід після fees - Собівартість - бонуси новим (\${trialTokensPerUser}⚡)</div>
               <div class="card-value">\${formatUSD(d.gross.estimated)}</div>
-              <div class="card-subtitle">\${d.gross.marginPercent}% маржа • -\${formatUSD(trialBonusUSD)} бонуси (\${trialBonusUsers} юз.)</div>
+              <div class="card-subtitle">\${d.gross.marginPercent}% маржа (після fees) • -\${formatUSD(trialBonusUSD)} бонуси (\${trialBonusUsers} юз.)</div>
             </div>
             <div class="card">
               <div class="card-title">🔥 Trial витрати</div>

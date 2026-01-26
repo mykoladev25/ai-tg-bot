@@ -7,7 +7,7 @@ const PaymentEvent = require('../database/models/PaymentEvent');
 const DailySummary = require('../database/models/DailySummary');
 const User = require('../database/models/User');
 const replicateBalanceConfig = require('../config/replicateBalance');
-const { TRIAL_TOKENS, WORST_CASE_TOKEN_USD } = require('../config/constants');
+const { TRIAL_TOKENS, WORST_CASE_TOKEN_USD, EFFECTIVE_TOKEN_USD, NET_REVENUE_FACTOR } = require('../config/constants');
 
 /**
  * Parse date range from query params
@@ -149,9 +149,11 @@ async function getSummary(from, to) {
   const cogs = cogsAgg[0] || {};
   const trial = trialAgg[0] || {};
   const trialTokensPerUser = TRIAL_TOKENS;
-  const tokenPriceUSD = WORST_CASE_TOKEN_USD ?? (110 / 4760);
-  const trialTokenLiabilityUSD = newUsersTotal * trialTokensPerUser * tokenPriceUSD;
-  const grossEstimated = (revenue.totalUSD || 0) - (cogs.totalCogs || 0) - trialTokenLiabilityUSD;
+  const effectiveTokenUSD = EFFECTIVE_TOKEN_USD ?? ((WORST_CASE_TOKEN_USD ?? (110 / 4760)) * 0.93 * 0.70);
+  const trialTokenLiabilityUSD = (freeUsersNew || 0) * trialTokensPerUser * effectiveTokenUSD;
+  const revenueUSD = revenue.totalUSD || 0;
+  const netRevenueUSD = revenueUSD * (NET_REVENUE_FACTOR ?? 0.93);
+  const grossEstimated = netRevenueUSD - (cogs.totalCogs || 0) - trialTokenLiabilityUSD;
 
   return {
     period: {
@@ -189,13 +191,14 @@ async function getSummary(from, to) {
     replicateBalance,
     trialBonus: {
       tokensPerUser: trialTokensPerUser,
-      newUsers: newUsersTotal || 0,
-      liabilityUSD: trialTokenLiabilityUSD
+      newUsers: freeUsersNew || 0,
+      liabilityUSD: trialTokenLiabilityUSD,
+      effectiveTokenUSD: effectiveTokenUSD
     },
     gross: {
       estimated: grossEstimated,
-      marginPercent: revenue.totalUSD > 0
-        ? (((grossEstimated) / revenue.totalUSD) * 100).toFixed(1)
+      marginPercent: netRevenueUSD > 0
+        ? (((grossEstimated) / netRevenueUSD) * 100).toFixed(1)
         : 0
     }
   };

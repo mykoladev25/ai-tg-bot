@@ -227,6 +227,9 @@ module.exports = {
 
   _pricingAssumptions: {
     worstCaseTokenUSD: WORST_CASE_TOKEN_USD,
+    netRevenueFactor: NET_REVENUE_FACTOR,
+    apiBudgetFactor: API_BUDGET_FACTOR,
+    effectiveTokenUSD: EFFECTIVE_TOKEN_USD,
     targetGross: '≈30% after fees',
     pricingRule: 'tokens = ceil(apiCost / (worstCaseTokenUSD * 0.93 * 0.70))',
     note: 'wayforpay fees/taxes included (WAYFORPAY_OVERHEAD = 7%)'
