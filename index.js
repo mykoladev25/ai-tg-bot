@@ -191,8 +191,8 @@ async function recordTrialUsage(userId, modelKey) {
  * @returns {object} { allowed: boolean, message?: string }
  */
 async function checkTrialRestrictions(userId, modelKey, options = {}) {
-  // Trial = без покупок. Але якщо баланс >= початкового (35⚡), дозволяємо доступ.
-  const trialTokens = models.subscriptions?.trial?.tokens || 35;
+  // Trial = без покупок. Але якщо баланс >= початкового (15⚡), дозволяємо доступ.
+  const trialTokens = models.subscriptions?.trial?.tokens || 15;
   let user;
   try {
     user = await userBalance.getUser(userId);
@@ -555,7 +555,7 @@ const INSTRUCTION_HTML = `
 
 💰 <b>Токени ⚡</b>
 - <b>Кожна генерація списує токени</b>
-- 🎁 <b>Безкоштовно:</b> 35⚡ при реєстрації
+- 🎁 <b>Безкоштовно:</b> 15⚡ при реєстрації
 - 💎 Далі — можна поповнити баланс
 - 📉 <b>Чим більший пакет — тим вигідніше!</b>
 
@@ -6308,7 +6308,7 @@ async function startBot() {
         // ============================================================
         // TRIAL PLAN with explicit usage (snake_case keys matching model keys)
         // ============================================================
-        const trialTokens = models.subscriptions.trial?.tokens || 35;
+        const trialTokens = models.subscriptions.trial?.tokens || 15;
 
         // Helper: safe division avoiding 0
         const safeDiv = (tokens, cost) => cost > 0 ? Math.floor(tokens / cost) : 0;
@@ -6670,7 +6670,7 @@ async function startBot() {
 
           // Trial/FREE restrictions
           trialRestrictions: {
-            freeTokens: models.subscriptions.trial?.tokens || 35,
+            freeTokens: models.subscriptions.trial?.tokens || 15,
             blockedModels: models.TRIAL_RESTRICTIONS.blockedModels,
             blockedModes: models.TRIAL_RESTRICTIONS.blockedModes,
             description: 'Free users have limited access to expensive models'

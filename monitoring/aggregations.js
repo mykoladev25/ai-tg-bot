@@ -7,6 +7,7 @@ const PaymentEvent = require('../database/models/PaymentEvent');
 const DailySummary = require('../database/models/DailySummary');
 const User = require('../database/models/User');
 const replicateBalanceConfig = require('../config/replicateBalance');
+const models = require('../config/models');
 
 /**
  * Parse date range from query params
@@ -137,6 +138,9 @@ async function getSummary(from, to) {
     totalTokensPurchased: 0,
     createdAt: { $gte: startDate, $lte: endDate }
   });
+  const newUsersTotal = await User.countDocuments({
+    createdAt: { $gte: startDate, $lte: endDate }
+  });
   const totalUsers = await User.countDocuments();
   const paidUsersTotal = await User.countDocuments({ totalTokensPurchased: { $gt: 0 } });
   const replicateBalance = await getReplicateBalance();
@@ -144,6 +148,10 @@ async function getSummary(from, to) {
   const revenue = revenueAgg[0] || {};
   const cogs = cogsAgg[0] || {};
   const trial = trialAgg[0] || {};
+  const trialTokensPerUser = models.subscriptions?.trial?.tokens ?? 15;
+  const tokenPriceUSD = models._pricingAssumptions?.worstCaseTokenUSD ?? (110 / 4760);
+  const trialTokenLiabilityUSD = newUsersTotal * trialTokensPerUser * tokenPriceUSD;
+  const grossEstimated = (revenue.totalUSD || 0) - (cogs.totalCogs || 0) - trialTokenLiabilityUSD;
 
   return {
     period: {
@@ -175,13 +183,19 @@ async function getSummary(from, to) {
       total: totalUsers || 0,
       paidTotal: paidUsersTotal || 0,
       freeTotal: freeUsersTotal || 0,
-      freeNew: freeUsersNew || 0
+      freeNew: freeUsersNew || 0,
+      newTotal: newUsersTotal || 0
     },
     replicateBalance,
+    trialBonus: {
+      tokensPerUser: trialTokensPerUser,
+      newUsers: newUsersTotal || 0,
+      liabilityUSD: trialTokenLiabilityUSD
+    },
     gross: {
-      estimated: (revenue.totalUSD || 0) - (cogs.totalCogs || 0),
+      estimated: grossEstimated,
       marginPercent: revenue.totalUSD > 0
-        ? (((revenue.totalUSD - (cogs.totalCogs || 0)) / revenue.totalUSD) * 100).toFixed(1)
+        ? (((grossEstimated) / revenue.totalUSD) * 100).toFixed(1)
         : 0
     }
   };

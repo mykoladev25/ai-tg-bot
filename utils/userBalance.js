@@ -16,8 +16,8 @@ async function getUser(userId, userInfo = {}) {
         firstName: userInfo.first_name,
         lastName: userInfo.last_name,
         languageCode: userInfo.language_code || 'uk',
-        tokens: 35,  // Початковий баланс
-        totalTokensEarned: 35
+        tokens: 15,  // Початковий баланс
+        totalTokensEarned: 15
       });
 
       await user.save();

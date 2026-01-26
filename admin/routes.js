@@ -558,7 +558,7 @@ router.get('/dashboard', (req, res) => {
       </div>
       <div class="legend-item">
         <span class="legend-term">📈 Прибуток</span>
-        <span class="legend-desc">— Дохід мінус Собівартість = наш заробіток</span>
+        <span class="legend-desc">— Дохід мінус Собівартість мінус бонуси новим (15⚡)</span>
       </div>
       <div class="legend-item">
         <span class="legend-term">🔥 Trial витрати</span>
@@ -801,6 +801,10 @@ router.get('/dashboard', (req, res) => {
           const d = summary.data;
           const freeUsersTotal = d.users?.freeTotal ?? 0;
           const freeUsersNew = d.users?.freeNew ?? 0;
+          const trialBonus = d.trialBonus || {};
+          const trialBonusUSD = trialBonus.liabilityUSD || 0;
+          const trialBonusUsers = trialBonus.newUsers || 0;
+          const trialTokensPerUser = trialBonus.tokensPerUser || 15;
           const rb = d.replicateBalance || {};
           const remainingUSD = Number(rb.remainingUSD) || 0;
           const remainingClass = remainingUSD < 0 ? 'danger' : remainingUSD < 20 ? 'warning' : 'success';
@@ -829,9 +833,9 @@ router.get('/dashboard', (req, res) => {
             </div>
             <div class="card">
               <div class="card-title">📈 Прибуток</div>
-              <div class="card-hint">Дохід - Собівартість</div>
+              <div class="card-hint">Дохід - Собівартість - бонуси новим (\${trialTokensPerUser}⚡)</div>
               <div class="card-value">\${formatUSD(d.gross.estimated)}</div>
-              <div class="card-subtitle">\${d.gross.marginPercent}% маржа</div>
+              <div class="card-subtitle">\${d.gross.marginPercent}% маржа • -\${formatUSD(trialBonusUSD)} бонуси (\${trialBonusUsers} юз.)</div>
             </div>
             <div class="card">
               <div class="card-title">🔥 Trial витрати</div>
