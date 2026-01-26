@@ -152,7 +152,8 @@ async function getSummary(from, to) {
   const revenueUSD = revenue.totalUSD || 0;
   const netRevenueUSD = revenueUSD * (NET_REVENUE_FACTOR ?? 0.93);
   const trialTokenLiabilityUSD = trial.trialBurn || 0;
-  const grossEstimated = netRevenueUSD - (cogs.totalCogs || 0) - trialTokenLiabilityUSD;
+  const totalCogsUSD = cogs.totalCogs || 0;
+  const grossEstimated = netRevenueUSD - totalCogsUSD;
 
   return {
     period: {
@@ -168,7 +169,7 @@ async function getSummary(from, to) {
       paidUsers: revenue.uniqueUsers?.length || 0
     },
     cogs: {
-      estimated: cogs.totalCogs || 0,
+      estimated: totalCogsUSD,
       generations: cogs.generationCount || 0,
       successRate: cogs.generationCount > 0
         ? ((cogs.successCount || 0) / cogs.generationCount * 100).toFixed(1)
