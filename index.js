@@ -1859,7 +1859,7 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|4:5|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_in
 });
 
 // Design Models
-bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_2k|seedream_4k|clarity|ideogram)$/, async (ctx) => {
+bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_2k|seedream_4k|clarity|recraft_upscale|ideogram)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
 
