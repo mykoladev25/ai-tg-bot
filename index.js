@@ -6454,6 +6454,7 @@ async function startBot() {
         const blockedModes = models.TRIAL_RESTRICTIONS.blockedModes || {};
 
         const buildUsageEntry = (key, cost, { blocked = false } = {}) => {
+          if (!cost || cost > trialTokens) return null;
           const entry = {
             count: blocked ? 0 : safeDiv(trialTokens, cost),
             cost: cost
@@ -6470,7 +6471,8 @@ async function startBot() {
           .filter(m => m.available)
           .forEach((m) => {
             const blocked = isBlockedModel(m.key);
-            trialUsage[m.key] = buildUsageEntry(m.key, m.cost || 0, { blocked });
+            const entry = buildUsageEntry(m.key, m.cost || 0, { blocked });
+            if (entry) trialUsage[m.key] = entry;
           });
 
         // Video models (available OR explicitly blocked)
@@ -6489,7 +6491,8 @@ async function startBot() {
                 const modeBlocked = blockedModes[m.key]?.durations?.includes(duration) || false;
                 const blocked = isBlockedModel(m.key) || modeBlocked;
                 const key = `${m.key}_${duration}s`;
-                trialUsage[key] = buildUsageEntry(key, cost, { blocked });
+                const entry = buildUsageEntry(key, cost, { blocked });
+                if (entry) trialUsage[key] = entry;
               });
               return;
             }
@@ -6501,7 +6504,8 @@ async function startBot() {
               const perSec = m.costPerSecond ?? (m.cost ? m.cost / minDuration : 0);
               const cost = minDuration * perSec;
               const blocked = isBlockedModel(m.key);
-              trialUsage[m.key] = buildUsageEntry(m.key, cost, { blocked });
+              const entry = buildUsageEntry(m.key, cost, { blocked });
+              if (entry) trialUsage[m.key] = entry;
               return;
             }
 
@@ -6511,7 +6515,8 @@ async function startBot() {
               const perSec = m.costPerSecondAudio ?? m.costPerSecondNoAudio ?? 0;
               const cost = minDuration * perSec;
               const blocked = isBlockedModel(m.key);
-              trialUsage[m.key] = buildUsageEntry(m.key, cost, { blocked });
+              const entry = buildUsageEntry(m.key, cost, { blocked });
+              if (entry) trialUsage[m.key] = entry;
               return;
             }
 
@@ -6519,14 +6524,16 @@ async function startBot() {
             if (m.key === 'kling_motion') {
               const minCost = m.cost ?? (m.costs ? Math.min(...Object.values(m.costs)) : 0);
               const blocked = isBlockedModel(m.key);
-              trialUsage[m.key] = buildUsageEntry(m.key, minCost, { blocked });
+              const entry = buildUsageEntry(m.key, minCost, { blocked });
+              if (entry) trialUsage[m.key] = entry;
               return;
             }
 
             // Default fixed-cost models
             if (m.cost) {
               const blocked = isBlockedModel(m.key);
-              trialUsage[m.key] = buildUsageEntry(m.key, m.cost, { blocked });
+              const entry = buildUsageEntry(m.key, m.cost, { blocked });
+              if (entry) trialUsage[m.key] = entry;
             }
           });
 
