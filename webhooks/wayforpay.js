@@ -79,7 +79,7 @@ module.exports = function(bot) {
                 return res.status(400).json({ error: 'Invalid plan' });
             }
 
-            const tokens = sub.tokensLiqPay || sub.tokens;
+            const tokens = sub.tokensWayForPay || sub.tokens;
 
             // ✅ WayForPay може надсилати 'Approved' або 'Completed' як статус успішного платежу
             // (Підтримуємо обидва для максимальної надійності)

@@ -181,8 +181,8 @@ function createSubscriptionsMenu() {
   const paidPlans = ['starter', 'basic', 'pro', 'premium'];
   const emojis = { starter: '🚀', basic: '💎', pro: '🔥', premium: '👑' };
 
-  // Показуємо tokensLiqPay (більше токенів за картку) на кнопках
-  const getTokens = (plan) => subscriptions[plan].tokensLiqPay || subscriptions[plan].tokens;
+  // Показуємо tokensWayForPay (більше токенів за картку) на кнопках
+  const getTokens = (plan) => subscriptions[plan].tokensWayForPay || subscriptions[plan].tokens;
 
   // По 2 кнопки в ряд
   const buttons = [

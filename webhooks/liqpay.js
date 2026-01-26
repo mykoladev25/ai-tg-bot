@@ -81,8 +81,8 @@ function createLiqPayRouter(bot) {
         // Обробляємо платіж
         console.log(`✅ LiqPay: Processing payment for user ${userIdNum}, plan: ${planKey}`);
 
-        // Використовуємо tokensLiqPay (бонус) або звичайні tokens
-        const tokenCount = sub.tokensLiqPay || sub.tokens;
+        // Використовуємо tokensWayForPay (бонус) або звичайні tokens
+        const tokenCount = sub.tokensWayForPay || sub.tokens;
 
         await userBalance.addTokens(
           userIdNum,
@@ -91,7 +91,7 @@ function createLiqPayRouter(bot) {
           {
             plan: sub.name,
             tokens: tokenCount,
-            bonusTokens: sub.tokensLiqPay ? (sub.tokensLiqPay - sub.tokens) : 0,
+            bonusTokens: sub.tokensWayForPay ? (sub.tokensWayForPay - sub.tokens) : 0,
             amount: paymentData.amount,
             orderId: paymentData.order_id,
             transactionId: paymentData.transaction_id,
@@ -99,7 +99,7 @@ function createLiqPayRouter(bot) {
           }
         );
 
-        console.log(`✅ Tokens added: ${tokenCount}⚡ (${sub.tokensLiqPay ? 'с бонусом' : 'без бонусу'}) for user ${userIdNum}`);
+        console.log(`✅ Tokens added: ${tokenCount}⚡ (${sub.tokensWayForPay ? 'с бонусом' : 'без бонусу'}) for user ${userIdNum}`);
 
         // Отримуємо користувача для відправки повідомлення
         const user = await userBalance.getUser(userIdNum, { id: userIdNum });
@@ -107,7 +107,7 @@ function createLiqPayRouter(bot) {
         // Відправляємо повідомлення користувачу в Telegram
         if (bot) {
           try {
-            const bonusText = sub.tokensLiqPay ? `\n🎁 <b>+${sub.tokensLiqPay - sub.tokens}⚡ бонус</b> (економія на комісіях LiqPay)` : '';
+            const bonusText = sub.tokensWayForPay ? `\n🎁 <b>+${sub.tokensWayForPay - sub.tokens}⚡ бонус</b> (економія на комісіях LiqPay)` : '';
 
             await bot.telegram.sendMessage(
               userIdNum,

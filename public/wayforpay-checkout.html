@@ -201,7 +201,7 @@
             document.getElementById('planName').textContent = `💎 ${selectedPlan.name}`;
             const priceUAH = selectedPlan.priceUAHDynamic || Math.round(selectedPlan.priceUSD * 43);
             document.getElementById('priceDisplay').textContent = `${priceUAH} ₴`;
-            const tokenCount = selectedPlan.tokensLiqPay || selectedPlan.tokens;
+            const tokenCount = selectedPlan.tokensWayForPay || selectedPlan.tokens;
             document.getElementById('tokensDisplay').textContent = `${tokenCount}⚡ токенів`;
 
             const featuresList = document.getElementById('featuresList');

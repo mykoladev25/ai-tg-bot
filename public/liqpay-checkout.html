@@ -507,9 +507,9 @@
                         name: planData.name,
                         // Використовуємо динамічну ціну на основі реального курсу
                         price: dynamicPrice,
-                        tokens: planData.tokensLiqPay || planData.tokens,
+                        tokens: planData.tokensWayForPay || planData.tokens,
                         originalTokens: planData.tokens,
-                        bonusTokens: planData.tokensLiqPay ? (planData.tokensLiqPay - planData.tokens) : 0,
+                        bonusTokens: planData.tokensWayForPay ? (planData.tokensWayForPay - planData.tokens) : 0,
                         exchangeRate: data.exchangeRate,
                         features: planData.features.length > 0 ? planData.features : ['Доступ до всіх моделей', 'Токени не мають терміну дії']
                     };

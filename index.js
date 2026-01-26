@@ -3760,9 +3760,9 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
 
   // Розраховуємо ціну за токен та економію (базуємось на актуальному STARTER)
   const starterSub = models.subscriptions.starter;
-  const starterTokens = starterSub?.tokensLiqPay ?? starterSub?.tokens;
+  const starterTokens = starterSub?.tokensWayForPay ?? starterSub?.tokens;
   const starterPricePerToken = starterTokens ? (starterSub.priceUSD / starterTokens) : 0;
-  const planTokens = sub.tokensLiqPay ?? sub.tokens;
+  const planTokens = sub.tokensWayForPay ?? sub.tokens;
   const pricePerToken = planTokens ? (sub.priceUSD / planTokens) : 0;
   const savingsPercent = starterPricePerToken && pricePerToken
     ? Math.round((1 - pricePerToken / starterPricePerToken) * 100)
@@ -3779,7 +3779,7 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
     message += `🔥 <b>Економія ${savingsPercent}%</b> порівняно зі STARTER!\n\n`;
   }
 
-  message += `💰 <b>Вартість:</b> $${sub.priceUSD} — ${sub.tokensLiqPay || sub.tokens}⚡ токенів\n`;
+  message += `💰 <b>Вартість:</b> $${sub.priceUSD} — ${sub.tokensWayForPay || sub.tokens}⚡ токенів\n`;
   message += `<i>Також можна розрахуватись Telegram Stars:</i>\n`;
   message += `⭐ ${sub.price}⭐ — ${sub.tokens}⚡ токенів\n\n`;
   message += `💡 <i>Чим більший пакет — тим вигідніше!</i>\n\n`;
@@ -5698,9 +5698,9 @@ async function startBot() {
         // Розраховуємо суму в UAH на основі priceUSD та поточного курсу
         const amountUAH = Math.round(sub.priceUSD * rate);
 
-        // Використовуємо tokensLiqPay (бонус для LiqPay платежу) або звичайні tokens
+        // Використовуємо tokensWayForPay (бонус для LiqPay платежу) або звичайні tokens
         // ✅ Отримуємо з плану, НЕ з клієнтського payload!
-        const tokenCount = sub.tokensLiqPay || sub.tokens;
+        const tokenCount = sub.tokensWayForPay || sub.tokens;
 
         console.log(`📊 LiqPay pricing: priceUSD=${sub.priceUSD}, rate=${rate.toFixed(2)}, amountUAH=${amountUAH}, tokens=${tokenCount}`);
 
@@ -5790,7 +5790,7 @@ async function startBot() {
         }
 
         // Отримуємо кількість токенів з плану (не з клієнтського payload!)
-        const tokens = sub.tokensLiqPay || sub.tokens;
+        const tokens = sub.tokensWayForPay || sub.tokens;
 
         // Отримуємо реальну ціну в UAH
         const rate = await exchangeRate.getRate();
@@ -5937,7 +5937,7 @@ async function startBot() {
           if (paymentStatus && (paymentStatus.transactionStatus === 'Approved' || paymentStatus.transactionStatus === 'Completed')) {
             console.log(`✅ Payment is COMPLETED! Processing immediately...`);
 
-            const tokens = sub.tokensLiqPay || sub.tokens;
+            const tokens = sub.tokensWayForPay || sub.tokens;
 
             // Нараховуємо токени
             await userBalance.addTokens(
@@ -6242,13 +6242,13 @@ async function startBot() {
 
         // ============================================================
         // TOKEN PRICE CALCULATION PER PLAN
-        // Formula: tokenPriceUSD = priceUSD / tokensLiqPay (LiqPay дає більше токенів)
+        // Formula: tokenPriceUSD = priceUSD / tokensWayForPay (LiqPay дає більше токенів)
         // ============================================================
         const tokenPriceUSDByPlan = {
-          starter: subscriptions.starter ? +(subscriptions.starter.priceUSD / subscriptions.starter.tokensLiqPay).toFixed(5) : 0,
-          basic: subscriptions.basic ? +(subscriptions.basic.priceUSD / subscriptions.basic.tokensLiqPay).toFixed(5) : 0,
-          pro: subscriptions.pro ? +(subscriptions.pro.priceUSD / subscriptions.pro.tokensLiqPay).toFixed(5) : 0,
-          premium: subscriptions.premium ? +(subscriptions.premium.priceUSD / subscriptions.premium.tokensLiqPay).toFixed(5) : 0
+          starter: subscriptions.starter ? +(subscriptions.starter.priceUSD / subscriptions.starter.tokensWayForPay).toFixed(5) : 0,
+          basic: subscriptions.basic ? +(subscriptions.basic.priceUSD / subscriptions.basic.tokensWayForPay).toFixed(5) : 0,
+          pro: subscriptions.pro ? +(subscriptions.pro.priceUSD / subscriptions.pro.tokensWayForPay).toFixed(5) : 0,
+          premium: subscriptions.premium ? +(subscriptions.premium.priceUSD / subscriptions.premium.tokensWayForPay).toFixed(5) : 0
         };
 
         // Default tokenPriceUSD = premium plan (найкращий для клієнта, найгірший для нас)
@@ -6277,7 +6277,7 @@ async function startBot() {
             plans[planKey] = {
               name: sub.name,
               tokens: sub.tokens,
-              tokensLiqPay: sub.tokensLiqPay,
+              tokensWayForPay: sub.tokensWayForPay,
               price: sub.price, // Telegram Stars (оригінальна)
               priceUSD: sub.priceUSD, // Базова ціна в USD
               priceStarsDynamic: priceStarsDynamic, // TG Stars динамічна ціна
@@ -6604,13 +6604,13 @@ async function startBot() {
 
         // ============================================================
         // TOKEN PRICE CALCULATION PER PLAN
-        // Formula: tokenPriceUSD = priceUSD / tokensLiqPay
+        // Formula: tokenPriceUSD = priceUSD / tokensWayForPay
         // ============================================================
         const tokenPriceUSDByPlan = {
-          starter: subscriptions.starter ? +(subscriptions.starter.priceUSD / subscriptions.starter.tokensLiqPay).toFixed(5) : 0,
-          basic: subscriptions.basic ? +(subscriptions.basic.priceUSD / subscriptions.basic.tokensLiqPay).toFixed(5) : 0,
-          pro: subscriptions.pro ? +(subscriptions.pro.priceUSD / subscriptions.pro.tokensLiqPay).toFixed(5) : 0,
-          premium: subscriptions.premium ? +(subscriptions.premium.priceUSD / subscriptions.premium.tokensLiqPay).toFixed(5) : 0
+          starter: subscriptions.starter ? +(subscriptions.starter.priceUSD / subscriptions.starter.tokensWayForPay).toFixed(5) : 0,
+          basic: subscriptions.basic ? +(subscriptions.basic.priceUSD / subscriptions.basic.tokensWayForPay).toFixed(5) : 0,
+          pro: subscriptions.pro ? +(subscriptions.pro.priceUSD / subscriptions.pro.tokensWayForPay).toFixed(5) : 0,
+          premium: subscriptions.premium ? +(subscriptions.premium.priceUSD / subscriptions.premium.tokensWayForPay).toFixed(5) : 0
         };
 
         // Default = premium (worst-case for us, best for customer)
@@ -6644,7 +6644,7 @@ async function startBot() {
               acc[key] = {
                 name: sub.name,
                 tokens: sub.tokens,
-                tokensLiqPay: sub.tokensLiqPay,
+                tokensWayForPay: sub.tokensWayForPay,
                 price: sub.price,
                 priceUSD: sub.priceUSD,
                 tokenPriceUSD: tokenPriceUSDByPlan[key]

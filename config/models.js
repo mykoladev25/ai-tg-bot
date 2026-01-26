@@ -233,7 +233,7 @@ module.exports = {
     starter: {
       name: 'STARTER',
       tokens: 700,
-      tokensLiqPay: 700,
+      tokensWayForPay: 700,
       priceUSD: 7,
       price: 552,
       features: ['🚀 700⚡ токенів', '💎 Доступ до всіх моделей', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!']
@@ -242,7 +242,7 @@ module.exports = {
     basic: {
       name: 'BASIC',
       tokens: 1500,
-      tokensLiqPay: 1500,
+      tokensWayForPay: 1500,
       priceUSD: 15,
       price: 1182,
       features: ['💎 1500⚡ токенів', '🎨 Для активних користувачів', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!']
@@ -251,7 +251,7 @@ module.exports = {
     pro: {
       name: 'PRO',
       tokens: 2900,
-      tokensLiqPay: 2900,
+      tokensWayForPay: 2900,
       priceUSD: 29,
       price: 2284,
       features: ['🔥 2900⚡ токенів', '🚀 Для професіоналів', '⏰ Токени НЕ згорають', '⚡ Найкраще співвідношення']
@@ -260,7 +260,7 @@ module.exports = {
     premium: {
       name: 'PREMIUM',
       tokens: 5900,
-      tokensLiqPay: 5900,
+      tokensWayForPay: 5900,
       priceUSD: 59,
       price: 4646,
       features: ['👑 5900⚡ токенів', '💫 Максимум можливостей', '⏰ Токени НЕ згорають', '👑 VIP підтримка']
