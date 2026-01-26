@@ -6349,12 +6349,11 @@ async function startBot() {
         const blockedModes = models.TRIAL_RESTRICTIONS.blockedModes || {};
 
         const buildUsageEntry = (key, cost, { blocked = false } = {}) => {
-          if (!cost || cost > trialTokens) return null;
+          if (!cost || cost > trialTokens || blocked) return null;
           const entry = {
-            count: blocked ? 0 : safeDiv(trialTokens, cost),
+            count: safeDiv(trialTokens, cost),
             cost: cost
           };
-          if (blocked) entry.blocked = true;
           return entry;
         };
 
