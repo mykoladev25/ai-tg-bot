@@ -3610,6 +3610,10 @@ bot.action('audio_menu', async (ctx) => {
 
 bot.action('main_menu', async (ctx) => {
   await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+  imageGenState.delete(userId);
   await ctx.reply('🏠 Головне меню', keyboard.createMainMenu());
 });
 
