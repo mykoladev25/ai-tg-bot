@@ -165,7 +165,6 @@ async function isTrialUser(userId) {
   try {
     const user = await userBalance.getUser(userId);
     // Trial = користувач НЕ має жодної покупки (totalTokensPurchased = 0)
-    // Тобто має тільки початковий бонус 35⚡
     return user.totalTokensPurchased === 0;
   } catch (e) {
     return true; // За замовчуванням вважаємо Trial
@@ -192,10 +191,20 @@ async function recordTrialUsage(userId, modelKey) {
  * @returns {object} { allowed: boolean, message?: string }
  */
 async function checkTrialRestrictions(userId, modelKey, options = {}) {
-  // Перевіряємо чи користувач на Trial
-  const isTrial = await isTrialUser(userId);
-  if (!isTrial) {
-    return { allowed: true }; // Платний користувач - без обмежень
+  // Trial = без покупок. Але якщо баланс >= початкового (35⚡), дозволяємо доступ.
+  const trialTokens = models.subscriptions?.trial?.tokens || 35;
+  let user;
+  try {
+    user = await userBalance.getUser(userId);
+  } catch (e) {
+    return { allowed: true };
+  }
+
+  const isTrial = (user?.totalTokensPurchased || 0) === 0;
+  const hasMinTrialBalance = (user?.tokens || 0) >= trialTokens;
+
+  if (!isTrial || hasMinTrialBalance) {
+    return { allowed: true }; // Платний або має >= початкового балансу
   }
 
   // 1. Перевірка повністю заблокованих моделей
@@ -2057,13 +2066,13 @@ bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|luma)$/
 
     await ctx.reply(
       `🎬 <b>Runway Gen-4 Turbo</b>\n\n` +
-      `🖼️ <b>Крок 1: Додайте Initial image</b>\n\n` +
+      `🖼️ <b>Крок 1: Додайте початкове зображення</b>\n\n` +
       `Це перший кадр відео.\n\n` +
       `⏱️ Тривалість: ${minDuration}-${maxDuration} сек\n` +
       `💰 Вартість: ${minCost.toFixed(1)}—${maxCost.toFixed(1)}⚡\n\n` +
       `📐 Поточні налаштування:\n` +
       `• Тривалість: ${minDuration} сек\n` +
-      `• Aspect ratio: ${defaultAspect}\n\n` +
+      `• Пропорції: ${defaultAspect}\n\n` +
       `📤 Надішліть одне зображення:`,
       {
         parse_mode: 'HTML',
@@ -2318,7 +2327,7 @@ bot.action(/^runway_turbo_aspect_(.+)$/, async (ctx) => {
   await ctx.reply(
     `🎬 <b>Runway Gen-4 Turbo</b>\n\n` +
     `⏱️ Тривалість: <b>${duration} сек</b>\n` +
-    `📐 Aspect ratio: <b>${aspectRatio}</b>\n` +
+    `📐 Пропорції: <b>${aspectRatio}</b>\n` +
     `💰 Вартість: <b>${cost.toFixed(1)}⚡</b>\n\n` +
     `✍️ <b>Крок 4: Введіть промпт</b>\n\n` +
     `Опишіть рух/анімацію для відео.`,
@@ -2534,7 +2543,7 @@ bot.action('veo_references_done', async (ctx) => {
 
     await ctx.reply(
       `✅ <b>Референсів завантажено: ${refCount}</b>\n\n` +
-      `⚠️ <i>Last frame ігнорується при використанні референсів</i>\n\n` +
+    `⚠️ <i>Останній кадр ігнорується при використанні референсів</i>\n\n` +
       `✍️ <b>Крок 6: Введіть промпт</b>\n\n` +
       `Опишіть детально що хочете бачити у відео.`,
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
@@ -2903,7 +2912,7 @@ bot.action('kling_skip_start_image', async (ctx) => {
       `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
       `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
       `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
-      `🖼️ Start image: <b>Ні</b>\n` +
+    `🖼️ Початкове зображення: <b>Ні</b>\n` +
       `${audioLine}` +
       `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
       `📝 <b>Напишіть промпт</b>\n\n` +
@@ -3024,7 +3033,7 @@ bot.action('kling_skip_end_image', async (ctx) => {
     `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
     `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
     `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
-    `🖼️ Start image: <b>${state.startImage ? 'Так' : 'Ні'}</b>\n` +
+    `🖼️ Початкове зображення: <b>${state.startImage ? 'Так' : 'Ні'}</b>\n` +
     `${audioLine}` +
     `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
     `📝 <b>Напишіть промпт</b>\n\n` +
@@ -3346,14 +3355,14 @@ async function generateKlingVideo(ctx, state) {
 
   const hasStartImage = !!state.startImage;
   const hasEndImage = supportsEndImage && !!state.endImage;
-  const endImageLine = supportsEndImage ? `🎬 End image: ${hasEndImage ? 'Так' : 'Ні'}\n` : '';
+  const endImageLine = supportsEndImage ? `🎬 Кінцеве зображення: ${hasEndImage ? 'Так' : 'Ні'}\n` : '';
   const audioLine = state.generateAudio !== undefined ? `🔊 Аудіо: ${useAudio ? 'Так' : 'Ні'}\n` : '';
 
   const statusMsg = await ctx.reply(
     `<b>${model.name} - Генерація</b>\n\n` +
     `⏱️ Тривалість: ${duration} сек\n` +
     `📐 Пропорції: ${state.aspectRatio || '16:9'}\n` +
-    `🖼️ Start image: ${hasStartImage ? 'Так' : 'Ні'}\n` +
+    `🖼️ Початкове зображення: ${hasStartImage ? 'Так' : 'Ні'}\n` +
     `${endImageLine}` +
     `${audioLine}` +
     `\n📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
@@ -3503,7 +3512,7 @@ async function generateRunwayTurboVideo(ctx, state) {
     `🎬 <b>Runway Gen-4 Turbo - Генерація</b>\n\n` +
     `⏱️ Тривалість: ${duration} сек\n` +
     `📐 Пропорції: ${aspectRatio}\n` +
-    `🖼️ Initial image: Так\n\n` +
+    `🖼️ Початкове зображення: Так\n\n` +
     `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
     `⏱️ Це може зайняти 1-3 хвилини...\n` +
     `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
@@ -3641,7 +3650,7 @@ async function generateVeoVideo(ctx, state) {
     `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
     `🖼️ Стартове зображення: ${hasStartImage ? 'Так' : 'Ні'}\n` +
     `📸 Референсів: ${state.references?.length || 0}\n` +
-    `🎬 Last frame: ${hasLastFrame ? 'Так' : 'Ні'}\n\n` +
+    `🎬 Останній кадр: ${hasLastFrame ? 'Так' : 'Ні'}\n\n` +
     `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
     `⏱️ Це може зайняти 2-5 хвилин...\n` +
     `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
@@ -3965,7 +3974,7 @@ bot.on('text', async (ctx) => {
     }
 
     if (!state.startImage) {
-      await ctx.reply('❌ Немає Initial image. Почніть заново, оберіть Runway Turbo.');
+      await ctx.reply('❌ Немає початкового зображення. Почніть заново, оберіть Runway Turbo.');
       userState.delete(userId);
       return;
     }
@@ -4289,7 +4298,7 @@ bot.on('photo', async (ctx) => {
     });
 
     await ctx.reply(
-      `✅ <b>Last frame отримано!</b>\n\n` +
+      `✅ <b>Останній кадр отримано!</b>\n\n` +
       `✍️ <b>Крок 6: Введіть промпт</b>\n\n` +
       `Опишіть детально що хочете бачити у відео.`,
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
@@ -4313,7 +4322,7 @@ bot.on('photo', async (ctx) => {
     const durationButtons = durations.map(d => Markup.button.callback(`${d} сек (${(d * costPerSec).toFixed(1)}⚡)`, `runway_turbo_duration_${d}`));
 
     await ctx.reply(
-      `✅ <b>Initial image отримано!</b>\n\n` +
+      `✅ <b>Початкове зображення отримано!</b>\n\n` +
       `⏱️ <b>Крок 2: Оберіть тривалість</b>`,
       {
         parse_mode: 'HTML',
@@ -4347,7 +4356,7 @@ bot.on('photo', async (ctx) => {
         `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
         `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
         `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
-        `🖼️ Start image: <b>Так</b>\n` +
+        `🖼️ Початкове зображення: <b>Так</b>\n` +
         `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
         `📝 <b>Напишіть промпт</b>\n\n` +
         `Опишіть рух/анімацію для відео.\n\n` +
@@ -4400,12 +4409,12 @@ bot.on('photo', async (ctx) => {
     });
 
     await ctx.reply(
-      `✅ <b>End image завантажено!</b>\n\n` +
+      `✅ <b>Кінцеве зображення завантажено!</b>\n\n` +
       `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
       `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
       `📐 Пропорції: <b>${state.aspectRatio}</b>\n` +
-      `🖼️ Start image: <b>Так</b>\n` +
-      `🎬 End image: <b>Так</b>\n` +
+      `🖼️ Початкове зображення: <b>Так</b>\n` +
+      `🎬 Кінцеве зображення: <b>Так</b>\n` +
       `${audioLine}` +
       `💰 Вартість: <b>${state.klingCost}⚡</b>\n\n` +
       `📝 <b>Напишіть промпт</b>\n\n` +
