@@ -1676,6 +1676,16 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
           null,
           `❌ Помилка генерації.\n\nСпробуйте ще раз або оберіть іншу модель.`
         );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey,
+          success: false,
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100)
+        });
         return;
       }
 
@@ -1685,6 +1695,15 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
         `${creativeLabel} generation`,
         { modelKey: modelKey, modelName: model.name, apiCost: model.apiCost }
       );
+
+      const isTrialCreative = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey,
+        success: true,
+        isTrial: isTrialCreative,
+        isFree: isTrialCreative
+      });
 
       // Перевірити розмір файлу
       const fileSize = await getFileSize(result.imageUrl);
