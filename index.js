@@ -1625,7 +1625,9 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
     return true;
   }
 
-  const creativeCost = CREATIVE_COST;
+  const creativeCost = creativeType === 'love_is'
+    ? CREATIVE_COST_2K
+    : (creativeType === 'hearts' ? CREATIVE_COST_SEEDREAM_4K : CREATIVE_COST);
 
   const statusMsg = await ctx.reply(
       `🎨 <b>Генерую ${creativeNames[creativeType]}...</b>\n\n` +
