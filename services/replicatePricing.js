@@ -81,6 +81,12 @@ const OFFICIAL_PRICING = {
     lastChecked: '2026-01-25',
     source: 'https://replicate.com/philz1337x/clarity-upscaler'
   },
+  'recraft-ai/recraft-crisp-upscale': {
+    pricePerRun: 0.006,
+    model: 'recraft_upscale',
+    lastChecked: '2026-01-26',
+    source: 'https://replicate.com/recraft-ai/recraft-crisp-upscale'
+  },
 
   // === ВІДЕО ===
   'kwaivgi/kling-v2.5-turbo-pro': {
@@ -126,6 +132,7 @@ const MODEL_MAPPING = {
   'seedream_4k': 'bytedance/seedream-4.5-4k',
   'ideogram': 'ideogram-ai/ideogram-v3',
   'clarity': 'philz1337x/clarity-upscaler',
+  'recraft_upscale': 'recraft-ai/recraft-crisp-upscale',
   'kling': 'kwaivgi/kling-v2.5-turbo-pro',
   'kling_v2_6': 'kwaivgi/kling-v2.6',
   'kling_motion': 'kwaivgi/kling-v2.5-turbo-pro',

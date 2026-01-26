@@ -206,6 +206,9 @@ module.exports = {
       // clarity $0.02 -> 4
       { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 4, apiCost: 0.02, maxImages: 1, available: true },
 
+      // recraft crisp upscale $0.006 -> 1
+      { name: '✨ Recraft Crisp Upscale', key: 'recraft_upscale', cost: 1, apiCost: 0.006, maxImages: 1, available: true },
+
       // ideogram $0.03 -> 5
       { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 5, apiCost: 0.03, maxImages: 1, available: true },
 

@@ -387,6 +387,36 @@ async function generateWithClarityUpscaler(imageUrl, prompt = '') {
   }
 }
 
+/**
+ * Upscale image via Recraft Crisp Upscale
+ */
+async function generateWithRecraftCrispUpscale(imageUrl) {
+  try {
+    console.log('Upscaling with Recraft Crisp:', imageUrl);
+
+    const input = {
+      image: imageUrl
+    };
+
+    const output = await replicate.run(
+      'recraft-ai/recraft-crisp-upscale',
+      { input }
+    );
+
+    return {
+      success: true,
+      imageUrl: Array.isArray(output) ? output[0] : output
+    };
+
+  } catch (error) {
+    console.error('Recraft Crisp Upscale Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 // ==================== VIDEO GENERATION ====================
 
 /**
@@ -757,6 +787,7 @@ module.exports = {
   generateWithNanoBananaBase,
   generateWithSeedream, 
   generateWithClarityUpscaler,
+  generateWithRecraftCrispUpscale,
   generateWithIdeogram,
   generateWithSuno,
   generateVideoWithRunwayTurbo,

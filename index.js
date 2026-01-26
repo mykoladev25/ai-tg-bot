@@ -298,7 +298,8 @@ const IMAGE_MODELS = [
   'seedream_2k',
   'seedream_4k',
   'ideogram',
-  'clarity'
+  'clarity',
+  'recraft_upscale'
 ];
 
 // ✅ МОДЕЛІ КОТРІ ПІДТРИМУЮТЬ ВИБІР ASPECT RATIO
@@ -1918,6 +1919,13 @@ bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_d
       `💬 Можете додати опис для кращого результату\n\n` +
       `💰 Вартість: ${model.cost}⚡\n` +
       `⏱️ Час: ~30-60 секунд`,
+    recraft_upscale: `✨ <b>${model.name}</b>\n\n` +
+      `🔎 Розроблений для підвищення чіткості та чистоти зображень, Crisp Upscale покращує загальну якість, роблячи візуальні елементи придатними для використання в Інтернеті або друку.\n\n` +
+      `📝 <b>Крок 1:</b> Надішліть зображення\n` +
+      `✍️ <b>Крок 2:</b> (опціонально) короткий опис\n\n` +
+      `Натисніть <b>"Далі до промпту"</b> після фото.\n\n` +
+      `💰 Вартість: ${model.cost}⚡\n` +
+      `⏱️ Час: ~20-40 секунд`,
 
     stable_diffusion: `🌀 <b>${model.name}</b>\n\n` +
       refsStep +
@@ -1982,12 +1990,24 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
     return;
   }
 
-  if (modelKey === 'clarity' && (!imgState.photos || imgState.photos.length === 0)) {
+  if ((modelKey === 'clarity' || modelKey === 'recraft_upscale') && (!imgState.photos || imgState.photos.length === 0)) {
     imageGenState.set(userId, { ...imgState, step: 'waiting_photos' });
     await ctx.reply(
-      '🔮 <b>Clarity Upscaler</b> потребує зображення.\n\n' +
+      '🔮 <b>Upscaler</b> потребує зображення.\n\n' +
       '📷 Надішліть фото для покращення якості.',
       { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
+
+  if (modelKey === 'recraft_upscale' && imgState.photos && imgState.photos.length > 0 && !imgState.prompt) {
+    const prompt = imgState.prompt || 'upscale image';
+    const references = normalizeReferenceOrder(imgState.photos || []);
+    imageGenState.delete(userId);
+    await ctx.reply('🚀 Починаємо upscale...', { parse_mode: 'HTML' });
+    runBackgroundTask(
+      () => handleImageGeneration(ctx, prompt, modelKey, references.length ? references : null),
+      'image_generation_upscale_start'
     );
     return;
   }
@@ -3993,10 +4013,10 @@ bot.on('text', async (ctx) => {
   // ✅ НОВИЙ ФЛОУ ДЛЯ ГРАФІЧНИХ МОДЕЛЕЙ
   const imgState = imageGenState.get(userId);
   if (imgState && IMAGE_MODELS.includes(currentModel)) {
-    if (currentModel === 'clarity' && (!imgState.photos || imgState.photos.length === 0)) {
+    if ((currentModel === 'clarity' || currentModel === 'recraft_upscale') && (!imgState.photos || imgState.photos.length === 0)) {
       imageGenState.set(userId, { ...imgState, step: 'waiting_photos' });
       await ctx.reply(
-        '🔮 <b>Clarity Upscaler</b> потребує зображення.\n\n' +
+        '🔮 <b>Upscaler</b> потребує зображення.\n\n' +
         '📷 Надішліть фото для покращення якості.',
         { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
       );
@@ -4363,6 +4383,16 @@ bot.on('photo', async (ctx) => {
         });
 
         console.log(`📸 Album for new flow: ${sortedAlbumPhotos.length} photos`);
+        if (finalGroup.model === 'recraft_upscale') {
+          imageGenState.delete(userId);
+          await ctx.reply('🚀 Починаємо upscale...', { parse_mode: 'HTML' });
+          runBackgroundTask(
+            () => handleImageGeneration(ctx, 'upscale image', finalGroup.model, limited),
+            'image_generation_upscale_album'
+          );
+          return;
+        }
+
         await ctx.reply(
           `✅ <b>Референси отримано</b> (${limited.length}/${maxPhotos})\n\n` +
           `✍️ <b>Крок 2: Введіть промпт</b>`,
@@ -4397,6 +4427,17 @@ bot.on('photo', async (ctx) => {
 
     const count = imgState.photos.length;
     const reachedLimit = count >= maxPhotos;
+
+    if (modelKey === 'recraft_upscale') {
+      const references = normalizeReferenceOrder(imgState.photos || []);
+      imageGenState.delete(userId);
+      await ctx.reply('🚀 Починаємо upscale...', { parse_mode: 'HTML' });
+      runBackgroundTask(
+        () => handleImageGeneration(ctx, 'upscale image', modelKey, references.length ? references : null),
+        'image_generation_upscale_photo'
+      );
+      return;
+    }
 
     if (reachedLimit) {
       imageGenState.set(userId, { ...imgState, step: 'prompt' });
@@ -4488,7 +4529,7 @@ bot.on('photo', async (ctx) => {
 
   // Обробка одного фото
   const videoModels = ['kling', 'kling_v2_6', 'runway_gen4'];
-  const imageModels = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_2k', 'seedream_4k', 'ideogram'];
+  const imageModels = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_2k', 'seedream_4k', 'ideogram', 'recraft_upscale'];
 
   // Отримуємо caption як промпт
   let prompt = ctx.message.caption || '';
@@ -4842,9 +4883,9 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   if (!imageInput && ctx.message?.photo) {
     imageInput = await getImageUrl(ctx);
   }
-  if (modelKey === 'clarity' && !imageInput) {
+  if ((modelKey === 'clarity' || modelKey === 'recraft_upscale') && !imageInput) {
     await ctx.reply(
-      '🔮 <b>Clarity Upscaler</b> потребує зображення.\n\n' +
+      '🔮 <b>Upscaler</b> потребує зображення.\n\n' +
       '📷 Надішліть фото для покращення якості.',
       { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
     );
@@ -4917,6 +4958,12 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
             ? generationData.imageInput[0]
             : generationData.imageInput;
           return replicate.generateWithClarityUpscaler(clarityImage, generationData.prompt);
+        },
+        recraft_upscale: () => {
+          const upscaleImage = Array.isArray(generationData.imageInput)
+            ? generationData.imageInput[0]
+            : generationData.imageInput;
+          return replicate.generateWithRecraftCrispUpscale(upscaleImage);
         }
       };
 
