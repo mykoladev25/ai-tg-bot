@@ -1210,7 +1210,7 @@ bot.hears('💰 Поповнити баланс', async (ctx) => {
 const nanoBanana2kModel = models.design.models.find(m => m.key === 'nano_banana_2k');
 const seedream4kModel = models.design.models.find(m => m.key === 'seedream_4k');
 const CREATIVE_COST = 7;
-const CREATIVE_COST_2K = CREATIVE_COST;
+const CREATIVE_COST_2K = 25;
 const CREATIVE_COST_SEEDREAM_4K = CREATIVE_COST;
 
 // ==================== UKRAINIAN ROMANTIC QUOTES FOR LOVE IS... ====================
@@ -1461,7 +1461,7 @@ bot.action('creative_love_is', async (ctx) => {
   userState.set(userId, {
     creative: 'love_is',
     step: 'waiting_photo',
-    model: 'nano_banana',
+    model: 'nano_banana_2k',
     loveIsData: {
       quote: randomQuote,
       scenario: randomScenario,
@@ -1605,7 +1605,7 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
   // Вибираємо правильну модель для кожного креативу
   let modelKey;
   if (creativeType === 'love_is') {
-    modelKey = 'nano_banana';
+    modelKey = 'nano_banana_2k';
   } else if (creativeType === 'hearts') {
     modelKey = 'seedream_4k';
   } else {
@@ -1654,8 +1654,8 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
         // Hearts використовує Seedream 4K з aspect ratio 9:16
         result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
       } else if (creativeType === 'love_is') {
-        // Love is... використовує NanoBanana (base) з aspect ratio 9:16
-        result = await replicate.generateWithNanoBananaBase(prompt, imageUrl, '9:16');
+        // Love is... використовує NanoBanana 2K з aspect ratio 9:16
+        result = await replicate.generateWithNanoBanana(prompt, imageUrl, '2K', '9:16');
       } else {
         // Fallback для інших креативів - теж 9:16
         const resolution = modelKey === 'nano_banana_2k' ? '2K' : '4K';
