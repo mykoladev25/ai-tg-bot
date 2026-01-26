@@ -1461,7 +1461,7 @@ bot.action('creative_love_is', async (ctx) => {
   userState.set(userId, {
     creative: 'love_is',
     step: 'waiting_photo',
-    model: 'nano_banana_2k',
+    model: 'nano_banana',
     loveIsData: {
       quote: randomQuote,
       scenario: randomScenario,
