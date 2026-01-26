@@ -1898,6 +1898,7 @@ bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_d
   userCurrentModel.set(ctx.from.id, modelKey);
 
   if (modelKey === 'recraft_upscale') {
+    imageGenState.delete(ctx.from.id);
     await ctx.reply(
       `✨ <b>${model.name}</b>\n\n` +
       `🔎 Розумне підвищення якості (upscale)\n\n` +
