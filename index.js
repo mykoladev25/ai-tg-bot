@@ -334,6 +334,11 @@ bot.on('callback_query', async (ctx, next) => {
     return next();
   }
 
+  // ✅ ДОЗВОЛЯЄМО IMG GENERATION CALLBACKS (референси/промпт)
+  if (callbackData.startsWith('img_gen_')) {
+    return next();
+  }
+
   // ✅ ДОЗВОЛЯЄМО VEO CALLBACKS
   if (callbackData.startsWith('veo_')) {
     return next();
