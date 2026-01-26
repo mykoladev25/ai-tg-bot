@@ -1,10 +1,73 @@
 const axios = require('axios');
+const crypto = require('crypto');
 
 class ExchangeRateService {
   constructor() {
     this.cacheExpirationMs = 3600000; // Кешуємо на 1 годину
     this.lastUpdateTime = 0;
     this.cachedRate = null;
+    this.cachedSource = null;
+    this.merchantAccount = process.env.WAYFORPAY_MERCHANT_ACCOUNT;
+    this.merchantSecretKey = process.env.WAYFORPAY_MERCHANT_KEY;
+  }
+
+  /**
+   * Отримати курс USD/UAH від WayForPay (курс для платежів)
+   * @returns {Promise<number>} курс гривні до долара
+   */
+  async getUSDtoUAHFromWayForPay() {
+    try {
+      if (!this.merchantAccount || !this.merchantSecretKey) {
+        throw new Error('WAYFORPAY credentials not set');
+      }
+
+      const orderDate = Math.floor(Date.now() / 1000);
+      const signatureString = [this.merchantAccount, orderDate].join(';');
+      const merchantSignature = crypto
+        .createHmac('md5', this.merchantSecretKey)
+        .update(signatureString, 'utf8')
+        .digest('hex');
+
+      const response = await axios.post(
+        'https://api.wayforpay.com/api',
+        {
+          apiVersion: 1,
+          transactionType: 'CURRENCY_RATES',
+          merchantAccount: this.merchantAccount,
+          orderDate,
+          merchantSignature,
+          currency: 'USD'
+        },
+        {
+          timeout: 5000,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+
+      const data = response.data || {};
+      const reasonCode = data.reasonCode || data.REASONCODE;
+      if (reasonCode !== 1100) {
+        throw new Error(`WayForPay response error: ${data.reason || data.REASON || 'Unknown'}`);
+      }
+
+      const rates = data.rates || data.RATES;
+      if (rates && typeof rates === 'object' && Number(rates.USD)) {
+        const rate = Number(rates.USD);
+        console.log(`💱 WayForPay курс USD/UAH: ${rate.toFixed(2)}`);
+        return rate;
+      }
+
+      if (Number(rates)) {
+        const rate = Number(rates);
+        console.log(`💱 WayForPay курс USD/UAH: ${rate.toFixed(2)}`);
+        return rate;
+      }
+
+      throw new Error('Could not parse WayForPay rates response');
+    } catch (error) {
+      console.error('❌ Error fetching from WayForPay:', error.message);
+      throw error;
+    }
   }
 
   /**
@@ -74,7 +137,7 @@ class ExchangeRateService {
 
     // Якщо кеш ще свіжий (менше 1 години), повертаємо його одразу
     if (this.cachedRate && (now - this.lastUpdateTime) < this.cacheExpirationMs) {
-      console.log(`💰 Using cached rate: ${this.cachedRate.toFixed(2)}`);
+      console.log(`💰 Using cached rate: ${this.cachedRate.toFixed(2)} (${this.cachedSource || 'unknown'})`);
       return this.cachedRate;
     }
 
@@ -89,21 +152,33 @@ class ExchangeRateService {
       }
 
       // Якщо кешу немає, чекаємо оновлення
-      // Спробуємо ПриватБанк спочатку (швидше)
+      // Спробуємо WayForPay спочатку (курс для платежів)
       try {
-        this.cachedRate = await this.getUSDtoUAHFromPrivatBank();
+        this.cachedRate = await this.getUSDtoUAHFromWayForPay();
+        this.cachedSource = 'WayForPay';
         this.lastUpdateTime = now;
         return this.cachedRate;
-      } catch (privatBankError) {
-        console.warn('⚠️ PrivatBank API failed, trying NBU...');
+      } catch (wayforpayError) {
+        console.warn('⚠️ WayForPay API failed, trying PrivatBank...');
 
-        // Якщо ПриватБанк не працює, спробуємо НБУ
-        this.cachedRate = await this.getUSDtoUAHFromNBU();
-        this.lastUpdateTime = now;
-        return this.cachedRate;
+        // Якщо WayForPay не працює, спробуємо ПриватБанк
+        try {
+          this.cachedRate = await this.getUSDtoUAHFromPrivatBank();
+          this.cachedSource = 'PrivatBank';
+          this.lastUpdateTime = now;
+          return this.cachedRate;
+        } catch (privatBankError) {
+          console.warn('⚠️ PrivatBank API failed, trying NBU...');
+
+          // Якщо ПриватБанк не працює, спробуємо НБУ
+          this.cachedRate = await this.getUSDtoUAHFromNBU();
+          this.cachedSource = 'NBU';
+          this.lastUpdateTime = now;
+          return this.cachedRate;
+        }
       }
     } catch (error) {
-      console.error('❌ Both exchange rate APIs failed:', error.message);
+      console.error('❌ All exchange rate APIs failed:', error.message);
 
       // Якщо обидва API не працюють, використовуємо дефолтний курс
       const defaultRate = 45;
@@ -119,17 +194,30 @@ class ExchangeRateService {
     try {
       console.log('🔄 Updating exchange rate in background...');
       try {
-        this.cachedRate = await this.getUSDtoUAHFromPrivatBank();
+        this.cachedRate = await this.getUSDtoUAHFromWayForPay();
+        this.cachedSource = 'WayForPay';
         this.lastUpdateTime = Date.now();
-        console.log(`✅ Background update complete: ${this.cachedRate.toFixed(2)}`);
-      } catch (error) {
-        this.cachedRate = await this.getUSDtoUAHFromNBU();
-        this.lastUpdateTime = Date.now();
-        console.log(`✅ Background update complete (from NBU): ${this.cachedRate.toFixed(2)}`);
+        console.log(`✅ Background update complete (WayForPay): ${this.cachedRate.toFixed(2)}`);
+      } catch (wayforpayError) {
+        try {
+          this.cachedRate = await this.getUSDtoUAHFromPrivatBank();
+          this.cachedSource = 'PrivatBank';
+          this.lastUpdateTime = Date.now();
+          console.log(`✅ Background update complete (PrivatBank): ${this.cachedRate.toFixed(2)}`);
+        } catch (error) {
+          this.cachedRate = await this.getUSDtoUAHFromNBU();
+          this.cachedSource = 'NBU';
+          this.lastUpdateTime = Date.now();
+          console.log(`✅ Background update complete (NBU): ${this.cachedRate.toFixed(2)}`);
+        }
       }
     } catch (error) {
       console.warn('⚠️ Background update failed:', error.message);
     }
+  }
+
+  getSource() {
+    return this.cachedSource || 'unknown';
   }
 
   /**
@@ -161,4 +249,3 @@ class ExchangeRateService {
 }
 
 module.exports = new ExchangeRateService();
-

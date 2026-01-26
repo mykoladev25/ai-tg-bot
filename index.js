@@ -3696,7 +3696,6 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
   }
 
   message += `💰 <b>Вартість:</b> $${sub.priceUSD} — ${sub.tokensLiqPay || sub.tokens}⚡ токенів\n`;
-  message += `📊 <b>Ціна за токен:</b> $${pricePerToken.toFixed(4)}\n\n`;
   message += `<i>Також можна розрахуватись Telegram Stars:</i>\n`;
   message += `⭐ ${sub.price}⭐ — ${sub.tokens}⚡ токенів\n\n`;
   message += `💡 <i>Чим більший пакет — тим вигідніше!</i>\n\n`;
@@ -6494,7 +6493,7 @@ async function startBot() {
           success: true,
           rate: rate,
           pair: 'USD/UAH',
-          source: 'PrivatBank/NBU',
+          source: exchangeRate.getSource(),
           timestamp: new Date().toISOString()
         });
       } catch (error) {
