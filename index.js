@@ -490,7 +490,7 @@ bot.on('text', async (ctx, next) => {
     '👤 Профіль',
     '❓ Допомога',
     '📝 Feedback',
-    '📄 Інструкція'
+    '💰 Поповнити баланс'
   ];
   
   // Якщо натиснута кнопка меню - обнуляємо
@@ -636,6 +636,7 @@ bot.command('help', async (ctx) => {
 /history - Історія використання
 /clear - Очистити історію розмови
 /feedback - Форма зворотнього зв'язку
+/instruction - Інструкція
 /info - Юридична інформація та угода користувача
 /help - Ця довідка
 
@@ -1099,18 +1100,15 @@ bot.hears('👤 Профіль', async (ctx) => {
 bot.hears('❓ Допомога', async (ctx) => {
   await ctx.reply(
     '❓ Використовуйте /help для перегляду команд\n' +
-    '📄 Інструкція доступна у головному меню',
+    '📄 Інструкція: /instruction',
     keyboard.createBackButton()
   );
 });
 
-bot.hears('📄 Інструкція', async (ctx) => {
+bot.command('instruction', async (ctx) => {
   await ctx.reply(INSTRUCTION_HTML, {
     parse_mode: 'HTML',
-    ...Markup.inlineKeyboard([
-      [Markup.button.callback('📝 Feedback', 'feedback_menu')],
-      [Markup.button.callback('← Назад', 'main_menu')]
-    ])
+    ...keyboard.createBackButton()
   });
 });
 
@@ -1126,24 +1124,6 @@ bot.hears('🎨 Креативи', async (ctx) => {
   ]);
 
   await ctx.reply(creativesMenu, { parse_mode: 'HTML', ...creativesKeyboard });
-});
-
-bot.action('feedback_menu', async (ctx) => {
-  await ctx.answerCbQuery();
-  const feedbackMenu = `📝 <b>Форма зворотнього зв'язку</b>
-
-Яка причина вашого звернення?
-
-Оберіть категорію 👇`;
-
-  const feedbackKeyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('💡 Побажання', 'feedback_suggestion')],
-    [Markup.button.callback('🐛 Проблема', 'feedback_problem')],
-    [Markup.button.callback('⭐ Відгук', 'feedback_review')],
-    [Markup.button.callback('🔙 Назад', 'main_menu')]
-  ]);
-
-  await ctx.reply(feedbackMenu, { parse_mode: 'HTML', ...feedbackKeyboard });
 });
 
 bot.hears('📝 Feedback', async (ctx) => {
