@@ -27,6 +27,7 @@ const userBalance = require('./utils/userBalance');
 const blockedUsersUtil = require('./utils/blockedUsers');
 const gracefulShutdown = require('./utils/gracefulShutdown');
 const db = require('./database/connection');
+const User = require('./database/models/User');
 
 // Імпортуємо конфігурацію
 const models = require('./config/models');
@@ -49,6 +50,17 @@ const imageGenState = new Map();
 const blockedUserLastNotified = new Map(); // userId -> timestamp
 const BLOCKED_USER_COOLDOWN = 5 * 60 * 1000; // 5 хвилин між повідомленнями
 
+const WELCOME_MODAL_TEXT = [
+  'Всі топові нейромережі в одному місці!',
+  'Стань АІ-креатором разом з нами.',
+  'Курс по АІ: https://neurolab.fun/'
+].join('\n');
+
+const WELCOME_START_BUTTON_TEXT = '✨ Start ✨';
+
+let cachedBotAvatarFileId = null;
+let cachedBotId = null;
+
 /**
  * Перевіряє чи можна надіслати повідомлення заблокованому користувачу
  * Повертає true якщо можна, false якщо ще рано (cooldown)
@@ -62,6 +74,77 @@ function canNotifyBlockedUser(userId) {
     return true;
   }
   return false;
+}
+
+async function getBotAvatarFileId() {
+  if (cachedBotAvatarFileId) return cachedBotAvatarFileId;
+
+  try {
+    if (!cachedBotId) {
+      const botInfo = await bot.telegram.getMe();
+      cachedBotId = botInfo?.id || null;
+    }
+
+    if (!cachedBotId) return null;
+
+    const photos = await bot.telegram.getUserProfilePhotos(cachedBotId, 0, 1);
+    const avatar = photos?.photos?.[0]?.[0];
+    if (!avatar?.file_id) return null;
+
+    cachedBotAvatarFileId = avatar.file_id;
+    return cachedBotAvatarFileId;
+  } catch (error) {
+    console.warn('⚠️ Could not fetch bot avatar:', error.message);
+    return null;
+  }
+}
+
+function buildWelcomeStartKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback(WELCOME_START_BUTTON_TEXT, 'welcome_start')]
+  ]);
+}
+
+async function sendWelcomeModal(ctx) {
+  const keyboardMarkup = buildWelcomeStartKeyboard();
+  const caption = WELCOME_MODAL_TEXT;
+
+  try {
+    const avatarFileId = await getBotAvatarFileId();
+    if (avatarFileId) {
+      await ctx.replyWithPhoto(avatarFileId, {
+        caption,
+        ...keyboardMarkup
+      });
+      return;
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to send welcome photo:', error.message);
+  }
+
+  await ctx.reply(caption, {
+    ...keyboardMarkup,
+    disable_web_page_preview: true
+  });
+}
+
+function buildMainMenuMessage(ctx, user) {
+  const firstName = ctx.from?.first_name || 'друг';
+  const balance = Number.isFinite(user?.tokens) ? user.tokens.toFixed(2) : '0.00';
+
+  return `🏠 Головне меню
+
+Привіт, ${firstName}!
+
+Я neuro\u200B.lab\u200B.ai - ваш помічник з AI генерації.
+
+💰 Ваш баланс: ${balance}⚡ FREE
+
+Виберіть бажаний розділ 👇`;
+}
+
+async function sendMainMenu(ctx, user) {
+  await ctx.reply(buildMainMenuMessage(ctx, user), keyboard.createMainMenu());
 }
 
 // ==================== TRIAL RESTRICTIONS ====================
@@ -509,19 +592,22 @@ bot.start(async (ctx) => {
     return;
   }
 
+  let isNewUser = false;
+  try {
+    const existingUser = await User.findById(userId);
+    isNewUser = !existingUser;
+  } catch (error) {
+    console.warn('⚠️ Could not check user existence:', error.message);
+  }
+
   const user = await userBalance.getUser(userId, ctx.from);
 
-  const welcomeMessage = `🏠 Головне меню
+  if (isNewUser) {
+    await sendWelcomeModal(ctx);
+    return;
+  }
 
-Привіт, ${ctx.from.first_name}!
-
-Я neuro\u200B.lab\u200B.ai - ваш помічник з AI генерації.
-
-💰 Ваш баланс: ${user.tokens.toFixed(2)}⚡ FREE
-
-Виберіть бажаний розділ 👇`;
-
-  await ctx.reply(welcomeMessage, keyboard.createMainMenu());
+  await sendMainMenu(ctx, user);
 });
 
 bot.command('help', async (ctx) => {
@@ -3667,6 +3753,17 @@ bot.action(/^(suno|udio|elevenlabs)$/, async (ctx) => {
 });
 
 // Navigation
+bot.action('welcome_start', async (ctx) => {
+  await ctx.answerCbQuery();
+  try {
+    await ctx.editMessageReplyMarkup();
+  } catch (error) {
+    // Ignore if message can't be edited
+  }
+  const user = await userBalance.getUser(ctx.from.id, ctx.from);
+  await sendMainMenu(ctx, user);
+});
+
 bot.action('audio_menu', async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.reply('🎙️ Аудіо з AI\n\nВиберіть розділ для роботи з аудіо 👇', keyboard.createInlineMenu(models.audio.models, 2));
