@@ -31,6 +31,7 @@ const User = require('./database/models/User');
 
 // Імпортуємо конфігурацію
 const models = require('./config/models');
+const { TRIAL_TOKENS, WORST_CASE_TOKEN_USD } = require('./config/constants');
 
 // Ініціалізація бота
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -192,7 +193,7 @@ async function recordTrialUsage(userId, modelKey) {
  */
 async function checkTrialRestrictions(userId, modelKey, options = {}) {
   // Trial = без покупок. Але якщо баланс >= початкового (15⚡), дозволяємо доступ.
-  const trialTokens = models.subscriptions?.trial?.tokens || 15;
+  const trialTokens = TRIAL_TOKENS;
   let user;
   try {
     user = await userBalance.getUser(userId);
@@ -6163,7 +6164,7 @@ async function startBot() {
         // Default tokenPriceUSD = premium plan (найкращий для клієнта, найгірший для нас)
         // Використовується для backwards compatibility та UI calculations
         const tokenPriceUSD = tokenPriceUSDByPlan.premium
-          || models._pricingAssumptions?.worstCaseTokenUSD
+          || WORST_CASE_TOKEN_USD
           || 0.02311; // fallback: 110/4760
 
         // Helper: calculate gross margin for a model
@@ -6310,7 +6311,7 @@ async function startBot() {
         // ============================================================
         // TRIAL PLAN with explicit usage (snake_case keys matching model keys)
         // ============================================================
-        const trialTokens = models.subscriptions.trial?.tokens || 15;
+        const trialTokens = TRIAL_TOKENS;
 
         // Helper: safe division avoiding 0
         const safeDiv = (tokens, cost) => cost > 0 ? Math.floor(tokens / cost) : 0;
@@ -6672,7 +6673,7 @@ async function startBot() {
 
           // Trial/FREE restrictions
           trialRestrictions: {
-            freeTokens: models.subscriptions.trial?.tokens || 15,
+            freeTokens: TRIAL_TOKENS,
             blockedModels: models.TRIAL_RESTRICTIONS.blockedModels,
             blockedModes: models.TRIAL_RESTRICTIONS.blockedModes,
             description: 'Free users have limited access to expensive models'

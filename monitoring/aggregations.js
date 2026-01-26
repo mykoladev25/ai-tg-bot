@@ -7,7 +7,7 @@ const PaymentEvent = require('../database/models/PaymentEvent');
 const DailySummary = require('../database/models/DailySummary');
 const User = require('../database/models/User');
 const replicateBalanceConfig = require('../config/replicateBalance');
-const models = require('../config/models');
+const { TRIAL_TOKENS, WORST_CASE_TOKEN_USD } = require('../config/constants');
 
 /**
  * Parse date range from query params
@@ -148,8 +148,8 @@ async function getSummary(from, to) {
   const revenue = revenueAgg[0] || {};
   const cogs = cogsAgg[0] || {};
   const trial = trialAgg[0] || {};
-  const trialTokensPerUser = models.subscriptions?.trial?.tokens ?? 15;
-  const tokenPriceUSD = models._pricingAssumptions?.worstCaseTokenUSD ?? (110 / 4760);
+  const trialTokensPerUser = TRIAL_TOKENS;
+  const tokenPriceUSD = WORST_CASE_TOKEN_USD ?? (110 / 4760);
   const trialTokenLiabilityUSD = newUsersTotal * trialTokensPerUser * tokenPriceUSD;
   const grossEstimated = (revenue.totalUSD || 0) - (cogs.totalCogs || 0) - trialTokenLiabilityUSD;
 

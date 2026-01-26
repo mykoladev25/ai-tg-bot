@@ -8,11 +8,14 @@
  */
 
 const aggregations = require('./aggregations');
+const { DEFAULT_ALERT_FAIL_RATE_PCT } = require('../config/constants');
 
 // Пороги для алертів (з .env або дефолтні)
 const ALERT_COGS_USD_DAILY = parseFloat(process.env.ALERT_COGS_USD_DAILY) || 50;
 const ALERT_TRIAL_BURN_USD_DAILY = parseFloat(process.env.ALERT_TRIAL_BURN_USD_DAILY) || 20;
-const ALERT_FAIL_RATE_PCT = parseFloat(process.env.ALERT_FAIL_RATE_PCT) || 15;
+const ALERT_FAIL_RATE_PCT = Number.isFinite(parseFloat(process.env.ALERT_FAIL_RATE_PCT))
+  ? parseFloat(process.env.ALERT_FAIL_RATE_PCT)
+  : DEFAULT_ALERT_FAIL_RATE_PCT;
 
 /**
  * Check daily metrics and send alerts if thresholds exceeded
@@ -202,4 +205,3 @@ module.exports = {
   ALERT_TRIAL_BURN_USD_DAILY,
   ALERT_FAIL_RATE_PCT
 };
-

@@ -11,6 +11,7 @@ const UsageEvent = require('../database/models/UsageEvent');
 const PaymentEvent = require('../database/models/PaymentEvent');
 const replicatePricing = require('../services/replicatePricing');
 const gracefulShutdown = require('../utils/gracefulShutdown');
+const { TRIAL_TOKENS } = require('../config/constants');
 
 // Auth middleware
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || process.env.ADMIN_TELEGRAM_ID;
@@ -804,7 +805,9 @@ router.get('/dashboard', (req, res) => {
           const trialBonus = d.trialBonus || {};
           const trialBonusUSD = trialBonus.liabilityUSD || 0;
           const trialBonusUsers = trialBonus.newUsers || 0;
-          const trialTokensPerUser = trialBonus.tokensPerUser || 15;
+          const trialTokensPerUser = Number.isFinite(trialBonus.tokensPerUser)
+            ? trialBonus.tokensPerUser
+            : TRIAL_TOKENS;
           const rb = d.replicateBalance || {};
           const remainingUSD = Number(rb.remainingUSD) || 0;
           const remainingClass = remainingUSD < 0 ? 'danger' : remainingUSD < 20 ? 'warning' : 'success';

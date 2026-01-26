@@ -1,7 +1,5 @@
 const mongoose = require('mongoose');
-const models = require('../../config/models');
-
-const TRIAL_TOKENS = models.subscriptions?.trial?.tokens ?? 15;
+const { TRIAL_TOKENS } = require('../../config/constants');
 
 const userSchema = new mongoose.Schema({
   // Telegram user info
