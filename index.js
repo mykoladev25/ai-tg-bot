@@ -2124,6 +2124,11 @@ bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|sora_2|
     const minDuration = Math.min(...durations);
     requiredCost = minDuration * model.costPerSecond;
   }
+  if (modelKey === 'sora_2' && model.costPerSecond) {
+    const durations = model.durations || [4, 8, 12];
+    const minDuration = Math.min(...durations);
+    requiredCost = minDuration * model.costPerSecond;
+  }
 
   if (!(await userBalance.hasTokens(ctx.from.id, requiredCost))) {
     await showInsufficientTokens(ctx, requiredCost);
