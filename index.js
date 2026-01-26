@@ -258,7 +258,7 @@ const MODELS_WITH_STATE = [
   'kling',                  // duration + aspect + start_image + end_image
   'kling_v2_6',             // duration + aspect + start_image (no end_image)
   'kling_motion',           // mode + orientation + sound + фото + відео
-  'veo',                    // aspect ratio + prompt + references + last_frame
+  'veo',                    // aspect ratio + prompt + last_frame + start_image
   'nano_banana_pro',        // вибір розміру (майбутнє)
   ...MODELS_WITH_ASPECT_RATIO // добавляємо моделі з вибором aspect ratio
 ];
@@ -2101,7 +2101,6 @@ bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|luma)$/
       `📐 <b>Крок 1: Оберіть пропорції відео</b>\n\n` +
       `<b>🎬 16:9</b> — YouTube, кіно, горизонтальне\n` +
       `<b>📱 9:16</b> — TikTok, Reels, Stories\n\n` +
-      `💡 <i>Референс-зображення працюють тільки з 16:9</i>\n\n` +
       `⏱️ Тривалість: 4, 6 або 8 секунд\n` +
       `🔊 Аудіо: опціонально\n` +
       `📊 Якість: 1080p\n` +
@@ -2141,7 +2140,6 @@ bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
     aspectRatio: aspectRatio,
     duration: 8,
     generateAudio: true,
-    references: [],
     lastFrame: null
   });
 
@@ -2366,218 +2364,8 @@ bot.action('veo_add_start_image', async (ctx) => {
   );
 });
 
-// Користувач пропускає стартове зображення - переходимо до референсів/last_frame
+// Користувач пропускає стартове зображення - переходимо до останнього кадру
 bot.action('veo_skip_start_image', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = ctx.from.id;
-  const state = userState.get(userId);
-
-  if (!state || state.action !== 'veo_generation') {
-    await ctx.reply('❌ Помилка. Почніть заново.');
-    return;
-  }
-
-  // Для 16:9 - питаємо про референси
-  if (state.aspectRatio === '16:9') {
-    userState.set(userId, {
-      ...state,
-      step: 'ask_references',
-      startImage: null
-    });
-
-    await ctx.reply(
-      `📸 <b>Референс-зображення (опціонально)</b>\n\n` +
-      `Референси допомагають AI зберегти консистентність персонажів/об'єктів у відео.\n\n` +
-      `<b>🎯 Для чого:</b>\n` +
-      `• Персонаж у відео буде схожий на фото\n` +
-      `• Стиль/кольори збережуться\n` +
-      `• Об'єкти виглядатимуть як на референсі\n\n` +
-      `📌 Можна завантажити до 3 зображень`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('📸 Додати референси (до 3)', 'veo_add_references')],
-          [Markup.button.callback('⏭️ Без референсів', 'veo_skip_references')],
-          [Markup.button.callback('← Назад', 'video_menu')]
-        ])
-      }
-    );
-  } else {
-    // Для 9:16 - референси не працюють, питаємо про last_frame
-    userState.set(userId, {
-      ...state,
-      step: 'ask_last_frame',
-      startImage: null
-    });
-
-    await ctx.reply(
-      `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
-      `<b>Що це:</b> Зображення для кінця відео.\n` +
-      `AI створить плавний перехід від початку до цього кадру.\n\n` +
-      `<b>🎯 Приклад:</b>\n` +
-      `• Початок: людина стоїть\n` +
-      `• Кінець: людина сидить\n` +
-      `• AI згенерує рух присідання`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('📷 Завантажу last frame', 'veo_add_last_frame')],
-          [Markup.button.callback('⏭️ Генерувати без', 'veo_skip_last_frame')],
-          [Markup.button.callback('← Назад', 'video_menu')]
-        ])
-      }
-    );
-  }
-});
-
-// ==================== VEO REFERENCES CALLBACKS ====================
-
-// Крок: Після стартового зображення - питаємо про референси
-bot.action('veo_add_references', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = ctx.from.id;
-  const state = userState.get(userId);
-
-  if (!state || state.action !== 'veo_generation') {
-    await ctx.reply('❌ Помилка. Почніть заново, оберіть Veo 3.1');
-    return;
-  }
-
-  // Референси працюють тільки з 16:9
-  if (state.aspectRatio !== '16:9') {
-    await ctx.reply(
-      `⚠️ <b>Референс-зображення працюють тільки з 16:9!</b>\n\n` +
-      `Ви обрали ${state.aspectRatio}. Референси будуть проігноровані.\n` +
-      `Хочете змінити пропорції на 16:9?`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('✅ Змінити на 16:9', 'veo_change_to_16:9')],
-          [Markup.button.callback('➡️ Продовжити без референсів', 'veo_skip_references')],
-          [Markup.button.callback('← Назад', 'video_menu')]
-        ])
-      }
-    );
-    return;
-  }
-
-  userState.set(userId, {
-    ...state,
-    step: 'waiting_references'
-  });
-
-  await ctx.reply(
-    `📸 <b>Завантажте референс-зображення</b>\n\n` +
-    `📌 <b>Правила:</b>\n` +
-    `• Від 1 до 3 зображень\n` +
-    `• Ідеальний розмір: 1280×720 (16:9)\n` +
-    `• Формат: JPG або PNG\n\n` +
-    `<b>🎯 Для чого референси:</b>\n` +
-    `• Персонаж/обличчя буде схоже на фото\n` +
-    `• Стиль/кольори з референсу\n` +
-    `• Об'єкти/локації з фото\n\n` +
-    `📤 Надішліть від 1 до 3 фото, потім натисніть "✅ Готово"`,
-    {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('✅ Готово (завантажив)', 'veo_references_done')],
-        [Markup.button.callback('⏭️ Пропустити референси', 'veo_skip_references')],
-        [Markup.button.callback('← Назад', 'video_menu')]
-      ])
-    }
-  );
-});
-
-// Змінити на 16:9 для референсів
-bot.action('veo_change_to_16:9', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = ctx.from.id;
-  const state = userState.get(userId);
-
-  if (!state) {
-    await ctx.reply('❌ Помилка. Почніть заново.');
-    return;
-  }
-
-  userState.set(userId, {
-    ...state,
-    aspectRatio: '16:9',
-    step: 'waiting_references'
-  });
-
-  await ctx.reply(
-    `✅ Пропорції змінено на <b>16:9</b>\n\n` +
-    `📸 <b>Завантажте референс-зображення</b>\n\n` +
-    `📤 Надішліть від 1 до 3 фото, потім натисніть "✅ Готово"`,
-    {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('✅ Готово (завантажив)', 'veo_references_done')],
-        [Markup.button.callback('⏭️ Пропустити референси', 'veo_skip_references')],
-        [Markup.button.callback('← Назад', 'video_menu')]
-      ])
-    }
-  );
-});
-
-// Референси завантажені - переходимо до last_frame
-bot.action('veo_references_done', async (ctx) => {
-  await ctx.answerCbQuery();
-  const userId = ctx.from.id;
-  const state = userState.get(userId);
-
-  if (!state || state.action !== 'veo_generation') {
-    await ctx.reply('❌ Помилка. Почніть заново.');
-    return;
-  }
-
-  const refCount = state.references?.length || 0;
-
-  // Якщо є референси - last_frame ігнорується, переходимо до промпту
-  if (refCount > 0) {
-    userState.set(userId, {
-      ...state,
-      step: 'waiting_prompt',
-      lastFrame: null
-    });
-
-    await ctx.reply(
-      `✅ <b>Референсів завантажено: ${refCount}</b>\n\n` +
-    `⚠️ <i>Останній кадр ігнорується при використанні референсів</i>\n\n` +
-      `✍️ <b>Крок 6: Введіть промпт</b>\n\n` +
-      `Опишіть детально що хочете бачити у відео.`,
-      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
-    );
-    return;
-  }
-
-  // Якщо референсів немає - питаємо про last_frame
-  userState.set(userId, {
-    ...state,
-    step: 'ask_last_frame'
-  });
-
-  await ctx.reply(
-    `🎬 <b>Чи є у вас останній кадр (last frame)?</b>\n\n` +
-    `<b>Що це:</b> Зображення для кінця відео.\n` +
-    `AI створить плавний перехід від початку до цього кадру.\n\n` +
-    `<b>🎯 Приклад:</b>\n` +
-    `• Початок: людина стоїть\n` +
-    `• Кінець: людина сидить\n` +
-    `• AI згенерує рух присідання`,
-    {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('📷 Так, завантажу', 'veo_add_last_frame')],
-        [Markup.button.callback('⏭️ Ні, без last frame → далі', 'veo_skip_last_frame')],
-        [Markup.button.callback('← Назад', 'video_menu')]
-      ])
-    }
-  );
-});
-
-// Пропустити референси
-bot.action('veo_skip_references', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
   const state = userState.get(userId);
@@ -2590,11 +2378,11 @@ bot.action('veo_skip_references', async (ctx) => {
   userState.set(userId, {
     ...state,
     step: 'ask_last_frame',
-    references: []
+    startImage: null
   });
 
   await ctx.reply(
-    `🎬 <b>Чи є у вас останній кадр (last frame)?</b>\n\n` +
+    `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
     `<b>Що це:</b> Зображення для кінця відео.\n` +
     `AI створить плавний перехід від початку до цього кадру.\n\n` +
     `<b>🎯 Приклад:</b>\n` +
@@ -2604,15 +2392,15 @@ bot.action('veo_skip_references', async (ctx) => {
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('📷 Так, завантажу', 'veo_add_last_frame')],
-        [Markup.button.callback('⏭️ Ні, без last frame → далі', 'veo_skip_last_frame')],
+        [Markup.button.callback('📷 Завантажу останній кадр', 'veo_add_last_frame')],
+        [Markup.button.callback('⏭️ Генерувати без останнього кадру', 'veo_skip_last_frame')],
         [Markup.button.callback('← Назад', 'video_menu')]
       ])
     }
   );
 });
 
-// Додати last frame
+// Додати останній кадр
 bot.action('veo_add_last_frame', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -2631,12 +2419,12 @@ bot.action('veo_add_last_frame', async (ctx) => {
   await ctx.reply(
     `📷 <b>Завантажте останній кадр</b>\n\n` +
     `Надішліть <b>одне зображення</b>, яке буде кінцем відео.\n\n` +
-    `💡 <b>Порада:</b> Використовуйте зображення того ж розміру що й aspect ratio (${state.aspectRatio === '16:9' ? '1280×720' : '720×1280'})`,
+    `💡 <b>Порада:</b> Використовуйте зображення того ж розміру що й пропорції (${state.aspectRatio === '16:9' ? '1280×720' : '720×1280'})`,
     { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
   );
 });
 
-// Пропустити last frame - переходимо до промпту
+// Пропустити останній кадр - переходимо до промпту
 bot.action('veo_skip_last_frame', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -3640,7 +3428,6 @@ async function generateVeoVideo(ctx, state) {
   }
 
   const hasStartImage = !!state.startImage;
-  const hasReferences = state.references?.length > 0;
   const hasLastFrame = !!state.lastFrame;
 
   const statusMsg = await ctx.reply(
@@ -3649,7 +3436,6 @@ async function generateVeoVideo(ctx, state) {
     `⏱️ Тривалість: ${duration} сек\n` +
     `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
     `🖼️ Стартове зображення: ${hasStartImage ? 'Так' : 'Ні'}\n` +
-    `📸 Референсів: ${state.references?.length || 0}\n` +
     `🎬 Останній кадр: ${hasLastFrame ? 'Так' : 'Ні'}\n\n` +
     `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
     `⏱️ Це може зайняти 2-5 хвилин...\n` +
@@ -4213,76 +3999,21 @@ bot.on('photo', async (ctx) => {
     userState.set(userId, {
       ...state,
       startImage: imageUrl,
-      step: 'ask_references_after_start'
-    });
-
-    // Для 16:9 - питаємо про референси
-    if (state.aspectRatio === '16:9') {
-      await ctx.reply(
-        `✅ <b>Стартове зображення завантажено!</b>\n\n` +
-        `📸 <b>Референс-зображення (опціонально)</b>\n\n` +
-        `Референси допомагають AI зберегти консистентність персонажів.\n\n` +
-        `📌 Можна завантажити до 3 зображень`,
-        {
-          parse_mode: 'HTML',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('📸 Додати референси (до 3)', 'veo_add_references')],
-            [Markup.button.callback('⏭️ Без референсів → далі', 'veo_skip_references')],
-            [Markup.button.callback('← Назад', 'video_menu')]
-          ])
-        }
-      );
-    } else {
-      // Для 9:16 - референси не працюють, питаємо про last_frame
-      await ctx.reply(
-        `✅ <b>Стартове зображення завантажено!</b>\n\n` +
-        `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
-        `Зображення для кінця відео - AI створить плавний перехід.`,
-        {
-          parse_mode: 'HTML',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('📷 Завантажу last frame', 'veo_add_last_frame')],
-            [Markup.button.callback('⏭️ Без last frame → далі', 'veo_skip_last_frame')],
-            [Markup.button.callback('← Назад', 'video_menu')]
-          ])
-        }
-      );
-    }
-    return;
-  }
-
-  // ✅ VEO: Обробка референс-зображень
-  if (state?.action === 'veo_generation' && state?.step === 'waiting_references') {
-    const imageUrl = await getImageUrl(ctx);
-    const currentRefs = state.references || [];
-
-    if (currentRefs.length >= 3) {
-      await ctx.reply(
-        '⚠️ Максимум 3 референс-зображення!\n\n' +
-        'Натисніть "✅ Готово" щоб продовжити.',
-        Markup.inlineKeyboard([
-          [Markup.button.callback('✅ Готово', 'veo_references_done')],
-          [Markup.button.callback('← Назад', 'video_menu')]
-        ])
-      );
-      return;
-    }
-
-    currentRefs.push(imageUrl);
-    userState.set(userId, {
-      ...state,
-      references: currentRefs
+      step: 'ask_last_frame'
     });
 
     await ctx.reply(
-      `✅ Референс ${currentRefs.length}/3 завантажено!\n\n` +
-      (currentRefs.length < 3
-        ? `📤 Надішліть ще ${3 - currentRefs.length} фото або натисніть "✅ Готово"`
-        : `📸 Досягнуто максимум. Натисніть "✅ Готово"`),
-      Markup.inlineKeyboard([
-        [Markup.button.callback('✅ Готово', 'veo_references_done')],
-        [Markup.button.callback('← Назад', 'video_menu')]
-      ])
+      `✅ <b>Стартове зображення завантажено!</b>\n\n` +
+      `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
+      `Зображення для кінця відео - AI створить плавний перехід.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📷 Завантажу останній кадр', 'veo_add_last_frame')],
+          [Markup.button.callback('⏭️ Без останнього кадру → далі', 'veo_skip_last_frame')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
     );
     return;
   }
