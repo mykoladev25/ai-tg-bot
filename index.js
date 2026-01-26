@@ -1647,7 +1647,7 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
       } else {
         // Файл нормальний - відправити як фото
         await safeSendPhoto(chatId, result.imageUrl, {
-          caption: `✅ ${creativeLabel}\n\n⚠️ Посилання активне 1 ГОДИНУ - завантажте одразу! 📥\n\n💰 Витрачено: ${model.cost}⚡`,
+          caption: `✅ ${creativeLabel}\n\n💰 Витрачено: ${model.cost}⚡`,
           ...keyboard.createBackButton('main_menu')
         });
       }
@@ -3065,7 +3065,6 @@ async function generateKlingMotionVideo(ctx, state) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>Kling Motion готово!</b>\n\n` +
-        `⚠️ <b>ЗАВАНТАЖТЕ ОДРАЗУ!</b> Посилання активне 1 ГОДИНУ!\n\n` +
         `⚙️ ${generationData.mode === 'pro' ? '💎 PRO' : '⚡ STD'} | ` +
         `${generationData.orientation === 'image' ? '📷' : '🎥'} | ` +
         `${generationData.keepOriginalSound ? '🔊' : '🔇'}\n\n` +
@@ -3074,7 +3073,7 @@ async function generateKlingMotionVideo(ctx, state) {
       );
 
       await safeSendVideo(chatId, result.videoUrl, {
-        caption: `🔥 Kling Motion\n\n⚙️ ${generationData.mode.toUpperCase()} | ${generationData.orientation} | ${generationData.keepOriginalSound ? '🔊' : '🔇'}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${motionCost}⚡`,
+        caption: `🔥 Kling Motion\n\n⚙️ ${generationData.mode.toUpperCase()} | ${generationData.orientation} | ${generationData.keepOriginalSound ? '🔊' : '🔇'}\n\n💰 Витрачено: ${motionCost}⚡`,
         ...keyboard.createBackButton('video_menu')
       });
 
@@ -3516,8 +3515,6 @@ async function generateVeoVideo(ctx, state) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>Google Veo 3.1 готово!</b>\n\n` +
-        `⚠️ <b>ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
-        `Посилання активне тільки <b>1 ГОДИНУ</b>!\n\n` +
         `📐 Пропорції: ${generationData.aspectRatio}\n` +
         `⏱️ Тривалість: ${duration} сек\n` +
         `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
@@ -3530,7 +3527,7 @@ async function generateVeoVideo(ctx, state) {
       );
 
       await safeSendVideo(chatId, result.videoUrl, {
-        caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${veoCost}⚡`,
+        caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${veoCost}⚡`,
         ...keyboard.createBackButton('video_menu')
       });
 
@@ -4968,8 +4965,6 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>${model.name} готово!</b>\n\n` +
-        `⚠️ <b>ВАЖЛИВО - ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
-        `Посилання на відео активне тільки <b>1 ГОДИНУ</b>!\n\n` +
         `📝 Промпт: ${prompt}\n\n` +
         `💾 <b>ЗБЕРЕЖІТЬ на пристрій перед закриттям:</b>\n` +
         `1️⃣ Натисніть на відео (☝️ див. нижче)\n` +
@@ -4980,7 +4975,7 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
       );
 
       await safeSendVideo(chatId, result.videoUrl, {
-        caption: `${model.name}\n\n📝 Промпт: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
+        caption: `${model.name}\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
         ...keyboard.createBackButton('video_menu')
       });
 
@@ -5081,7 +5076,7 @@ async function handleMidjourneyGeneration(ctx, prompt) {
       const user = await userBalance.getUser(userId, ctx.from);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       await safeSendPhoto(ctx.chat.id, result.imageUrl, {
-        caption: `✅ Готово!\n\nPrompt: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Використано: ${model.cost}⚡\n💰 Залишок: ${user.tokens.toFixed(2)}⚡`,
+        caption: `✅ Готово!\n\nPrompt: ${prompt}\n\n💰 Використано: ${model.cost}⚡\n💰 Залишок: ${user.tokens.toFixed(2)}⚡`,
         ...keyboard.createGenerationActionsMenu(result.taskId)
       });
     } else {
@@ -5118,7 +5113,7 @@ async function handleClarityUpscaler(ctx) {
     await userBalance.deductTokens(userId, model.cost, 'Clarity Upscaler', { modelKey: 'clarity', modelName: model.name, apiCost: model.apiCost, prompt });
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
     await safeSendPhoto(ctx.chat.id, result.imageUrl, {
-      caption: `🔮 Clarity Upscaler\n\n📝 Промпт: ${prompt}\n⏰ Посилання видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
+      caption: `🔮 Clarity Upscaler\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
       ...keyboard.createBackButton('design_menu')
     });
 
@@ -5156,11 +5151,8 @@ async function handleSunoGeneration(ctx, text) {
     await userBalance.deductTokens(userId, model.cost, 'Suno audio generation', { modelKey: 'suno', modelName: model.name, apiCost: model.apiCost, text });
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
 
-    // ✅ Попередження про видалення ПЕРЕД аудіо
     await ctx.reply(
       `✅ <b>Аудіо готово!</b>\n\n` +
-      `⚠️ <b>ЗАВАНТАЖТЕ ОДРАЗУ!</b>\n` +
-      `Посилання активне тільки <b>1 ГОДИНУ</b>!\n\n` +
       `📝 Текст: "${text}"\n\n` +
       `💾 <b>Як зберегти аудіо:</b>\n` +
       `1️⃣ Натисніть на аудіо (☝️ див. нижче)\n` +
@@ -5171,7 +5163,7 @@ async function handleSunoGeneration(ctx, text) {
     );
 
     await ctx.replyWithAudio({ url: result.audioUrl }, {
-      caption: `🎵 Suno AI Bark\n\n📝 Текст: ${text}\n⏰ Видалиться через 1 годину!\n\n💰 Витрачено: ${model.cost}⚡`,
+      caption: `🎵 Suno AI Bark\n\n📝 Текст: ${text}\n\n💰 Витрачено: ${model.cost}⚡`,
       ...keyboard.createBackButton('audio_menu')
     });
 
