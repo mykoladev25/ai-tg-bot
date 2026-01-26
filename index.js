@@ -2276,9 +2276,9 @@ bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|sora_2|
     const maxDuration = Math.max(...durations);
     const minCost = minDuration * model.costPerSecond;
     const maxCost = maxDuration * model.costPerSecond;
-    const durationButtons = durations.map(d =>
+    const durationButtons = durations.map(d => ([
       Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `sora_duration_${d}`)
-    );
+    ]));
 
     userState.set(ctx.from.id, {
       action: 'sora_generation',
@@ -2296,7 +2296,7 @@ bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|sora_2|
       {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-          durationButtons,
+          ...durationButtons,
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
       }
