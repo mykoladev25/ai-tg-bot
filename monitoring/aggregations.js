@@ -6,6 +6,7 @@ const UsageEvent = require('../database/models/UsageEvent');
 const PaymentEvent = require('../database/models/PaymentEvent');
 const DailySummary = require('../database/models/DailySummary');
 const User = require('../database/models/User');
+const replicateBalanceConfig = require('../config/replicateBalance');
 
 /**
  * Parse date range from query params
@@ -20,6 +21,50 @@ function parseDateRange(from, to) {
   if (isNaN(endDate.getTime())) throw new Error('Invalid "to" date');
 
   return { startDate, endDate };
+}
+
+function parseFundingStartDate(value) {
+  if (!value) return new Date(0);
+  const date = new Date(value);
+  return isNaN(date.getTime()) ? new Date(0) : date;
+}
+
+async function getReplicateBalance() {
+  const initialUSD = Number(replicateBalanceConfig?.initialUSD) || 0;
+  const topUps = Array.isArray(replicateBalanceConfig?.topUps)
+    ? replicateBalanceConfig.topUps
+    : [];
+  const totalTopUpsUSD = topUps.reduce((sum, t) => sum + (Number(t.amountUSD) || 0), 0);
+  const fundedUSD = initialUSD + totalTopUpsUSD;
+
+  const startDate = parseFundingStartDate(replicateBalanceConfig?.initialDate);
+  const spendAgg = await UsageEvent.aggregate([
+    {
+      $match: {
+        ts: { $gte: startDate },
+        provider: 'replicate'
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: '$estimatedApiCostUSD' }
+      }
+    }
+  ]);
+
+  const spentUSD = spendAgg[0]?.total || 0;
+  const remainingUSD = fundedUSD - spentUSD;
+  const topUpNeededUSD = remainingUSD < 0 ? Math.abs(remainingUSD) : 0;
+
+  return {
+    fundedUSD,
+    spentUSD,
+    remainingUSD,
+    topUpNeededUSD,
+    startDate: startDate.toISOString().slice(0, 10),
+    topUpsCount: topUps.length
+  };
 }
 
 /**
@@ -94,6 +139,7 @@ async function getSummary(from, to) {
   });
   const totalUsers = await User.countDocuments();
   const paidUsersTotal = await User.countDocuments({ totalTokensPurchased: { $gt: 0 } });
+  const replicateBalance = await getReplicateBalance();
 
   const revenue = revenueAgg[0] || {};
   const cogs = cogsAgg[0] || {};
@@ -131,6 +177,7 @@ async function getSummary(from, to) {
       freeTotal: freeUsersTotal || 0,
       freeNew: freeUsersNew || 0
     },
+    replicateBalance,
     gross: {
       estimated: (revenue.totalUSD || 0) - (cogs.totalCogs || 0),
       marginPercent: revenue.totalUSD > 0
@@ -295,6 +342,7 @@ module.exports = {
   getFailRate,
   getPurchasesByPlan,
   getTopModels,
+  getReplicateBalance,
   computeDailySummary,
   getDailySummaries
 };

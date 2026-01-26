@@ -553,6 +553,10 @@ router.get('/dashboard', (req, res) => {
         <span class="legend-desc">— скільки МИ платимо за API (Replicate, тощо)</span>
       </div>
       <div class="legend-item">
+        <span class="legend-term">💳 Replicate баланс</span>
+        <span class="legend-desc">— залишок коштів на Replicate (з моменту стартового депозита)</span>
+      </div>
+      <div class="legend-item">
         <span class="legend-term">📈 Прибуток</span>
         <span class="legend-desc">— Дохід мінус Собівартість = наш заробіток</span>
       </div>
@@ -797,6 +801,13 @@ router.get('/dashboard', (req, res) => {
           const d = summary.data;
           const freeUsersTotal = d.users?.freeTotal ?? 0;
           const freeUsersNew = d.users?.freeNew ?? 0;
+          const rb = d.replicateBalance || {};
+          const remainingUSD = Number(rb.remainingUSD) || 0;
+          const remainingClass = remainingUSD < 0 ? 'danger' : remainingUSD < 20 ? 'warning' : 'success';
+          const remainingLabel = remainingUSD < 0 ? 'Потрібно поповнити' : 'Залишок на Replicate';
+          const remainingValue = formatUSD(Math.abs(remainingUSD));
+          const fundedValue = formatUSD(rb.fundedUSD || 0);
+          const spentValue = formatUSD(rb.spentUSD || 0);
           document.getElementById('summary').innerHTML = \`
             <div class="card">
               <div class="card-title">💰 Дохід</div>
@@ -809,6 +820,12 @@ router.get('/dashboard', (req, res) => {
               <div class="card-hint">Скільки ми платимо API</div>
               <div class="card-value warning">\${formatUSD(d.cogs.estimated)}</div>
               <div class="card-subtitle">\${d.cogs.generations} генерацій</div>
+            </div>
+            <div class="card">
+              <div class="card-title">💳 Replicate баланс</div>
+              <div class="card-hint">\${remainingLabel}</div>
+              <div class="card-value \${remainingClass}">\${remainingValue}</div>
+              <div class="card-subtitle">Поповнено \${fundedValue} • Витрачено \${spentValue}</div>
             </div>
             <div class="card">
               <div class="card-title">📈 Прибуток</div>

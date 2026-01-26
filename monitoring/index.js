@@ -26,6 +26,7 @@ module.exports = {
   getFailRate: aggregations.getFailRate,
   getPurchasesByPlan: aggregations.getPurchasesByPlan,
   getTopModels: aggregations.getTopModels,
+  getReplicateBalance: aggregations.getReplicateBalance,
   computeDailySummary: aggregations.computeDailySummary,
   getDailySummaries: aggregations.getDailySummaries,
 
@@ -34,4 +35,3 @@ module.exports = {
   generateDailyReport: alerts.generateDailyReport,
   scheduleAlerts: alerts.scheduleAlerts
 };
-
