@@ -5,10 +5,21 @@
  */
 
 const WORST_CASE_TOKEN_USD = 110 / 4760; // ≈ 0.02311...
-const TARGET_GROSS = 0.30;
-const EFFECTIVE_TOKEN_USD = (1 - TARGET_GROSS) * WORST_CASE_TOKEN_USD; // 0.70 * token
-const LIQPAY_OVERHEAD = 0.07;
-const LIQPAY_FACTOR = 1 - LIQPAY_OVERHEAD;
+
+// Target: 30% profit AFTER fees (payment + tax)
+const TARGET_PROFIT_AFTER_FEES = 0.30;
+
+// WayForPay 2% + FOP 5% = 7%
+const WAYFORPAY_OVERHEAD = 0.07;
+
+// Net revenue factor after overhead
+const NET_REVENUE_FACTOR = 1 - WAYFORPAY_OVERHEAD; // 0.93
+
+// API budget factor to keep 30% profit after fees
+const API_BUDGET_FACTOR = 1 - TARGET_PROFIT_AFTER_FEES; // 0.70
+
+// Effective USD per token available for API costs
+const EFFECTIVE_TOKEN_USD = WORST_CASE_TOKEN_USD * NET_REVENUE_FACTOR * API_BUDGET_FACTOR;
 
 const TRIAL_RESTRICTIONS = {
   blockedModels: ['veo', 'kling_motion', 'runway_gen4'],
@@ -204,7 +215,7 @@ module.exports = {
   subscriptions: {
     trial: {
       name: 'TRIAL',
-      tokens: 15,
+      tokens: 10,
       price: 0,
       features: ['🎁 15 безкоштовних токенів', '✨ Спробуйте базові моделі', '⚡ Токени НЕ згорають!']
     },
@@ -216,8 +227,8 @@ module.exports = {
 
   _pricingAssumptions: {
     worstCaseTokenUSD: WORST_CASE_TOKEN_USD,
-    targetGross: '≈30%',
-    pricingRule: 'tokens = ceil(apiCost / (0.70 * worstCaseTokenUSD))',
-    note: 'liqpay fees/taxes враховуй окремо при розрахунку пакетів (LIQPAY_OVERHEAD = 7%)'
+    targetGross: '≈30% after fees',
+    pricingRule: 'tokens = ceil(apiCost / (worstCaseTokenUSD * 0.93 * 0.70))',
+    note: 'wayforpay fees/taxes included (WAYFORPAY_OVERHEAD = 7%)'
   }
 };
