@@ -36,6 +36,12 @@ const OFFICIAL_PRICING = {
   },
 
   // Nano Banana - ціна залежить від resolution!
+  'google/nano-banana': {
+    pricePerRun: 0.039,  // $0.039 per image
+    model: 'nano_banana',
+    lastChecked: '2026-01-26',
+    source: 'https://replicate.com/google/nano-banana'
+  },
   'google/nano-banana-pro-2k': {
     pricePerRun: 0.15,  // 1K та 2K = $0.15
     model: 'nano_banana_2k',
@@ -113,6 +119,7 @@ const OFFICIAL_PRICING = {
  */
 const MODEL_MAPPING = {
   'stable_diffusion': 'stability-ai/stable-diffusion-3.5-large',
+  'nano_banana': 'google/nano-banana',
   'nano_banana_2k': 'google/nano-banana-pro-2k',
   'nano_banana_4k': 'google/nano-banana-pro-4k',
   'seedream_2k': 'bytedance/seedream-4.5-2k',

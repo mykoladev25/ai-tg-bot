@@ -234,6 +234,40 @@ async function generateWithNanoBanana(prompt, imageInput = null, resolution = "2
 }
 
 /**
+ * Генерувати зображення через Nano Banana (base)
+ */
+async function generateWithNanoBananaBase(prompt, imageInput = null, aspectRatio = "match_input_image", outputFormat = "jpg") {
+  try {
+    console.log('Generating with Nano Banana:', prompt, `aspect_ratio: ${aspectRatio}`);
+
+    const input = {
+      prompt: prompt,
+      image_input: normalizeImageInput(imageInput, 3),
+      aspect_ratio: aspectRatio,
+      output_format: outputFormat
+    };
+
+    if (input.image_input.length > 0) {
+      console.log(`Using ${input.image_input.length} image(s) as input`);
+    }
+
+    const output = await replicate.run("google/nano-banana", { input });
+
+    return {
+      success: true,
+      imageUrl: Array.isArray(output) ? output[0] : output
+    };
+
+  } catch (error) {
+    console.error('Nano Banana Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
  * Генерувати зображення через Seedream 4.5 (підтримка до 14 зображень)
  */
 async function generateWithSeedream(prompt, imageInput = null, size = "4K", aspectRatio = "match_input_image") {
@@ -720,6 +754,7 @@ module.exports = {
   generateWithFlux,
   generateWithStableDiffusion,
   generateWithNanoBanana,
+  generateWithNanoBananaBase,
   generateWithSeedream, 
   generateWithClarityUpscaler,
   generateWithIdeogram,

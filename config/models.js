@@ -165,6 +165,16 @@ module.exports = {
       // stable_diffusion $0.07 -> 12
       { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 12, apiCost: 0.07, available: true },
 
+      // nano_banana $0.039 -> 7
+      {
+        name: '🍌 Nano Banana',
+        key: 'nano_banana',
+        cost: 7,
+        apiCost: 0.039,
+        maxImages: 3,
+        available: true
+      },
+
       // nano_banana_2k $0.15 -> 25
       {
         name: '🍌 Nano Banana PRO 2K',

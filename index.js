@@ -292,6 +292,7 @@ async function checkTrialRestrictions(userId, modelKey, options = {}) {
 // ✅ ГРАФІЧНІ МОДЕЛІ ДЛЯ НОВОГО ФЛОУ (референси → промпт → генерація)
 const IMAGE_MODELS = [
   'stable_diffusion',
+  'nano_banana',
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_2k',
@@ -302,6 +303,7 @@ const IMAGE_MODELS = [
 
 // ✅ МОДЕЛІ КОТРІ ПІДТРИМУЮТЬ ВИБІР ASPECT RATIO
 const MODELS_WITH_ASPECT_RATIO = [
+  'nano_banana',
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_2k',
@@ -1830,7 +1832,7 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|4:5|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_in
 });
 
 // Design Models
-bot.action(/^(midjourney|flux|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_2k|seedream_4k|clarity|ideogram)$/, async (ctx) => {
+bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_2k|seedream_4k|clarity|ideogram)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
 
@@ -1868,7 +1870,7 @@ bot.action(/^(midjourney|flux|nano_banana_2k|nano_banana_4k|stable_diffusion|see
 
   userCurrentModel.set(ctx.from.id, modelKey);
 
-  const maxPhotos = (modelKey.includes('nano_banana') || modelKey.includes('seedream')) ? 14 : 1;
+  const maxPhotos = model.maxImages || 1;
 
   // ✅ НОВИЙ ФЛОУ: Зберігаємо стан - чекаємо на референси
   imageGenState.set(ctx.from.id, {
@@ -1998,7 +2000,7 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
   imageGenState.set(userId, imgState);
 
   const model = models.design.models.find(m => m.key === modelKey);
-  const maxPhotos = (modelKey.includes('nano_banana') || modelKey.includes('seedream')) ? 14 : 1;
+  const maxPhotos = model?.maxImages || 1;
 
   await ctx.reply(
     `📷 <b>Завантажте референс-зображення</b>\n\n` +
@@ -4008,6 +4010,7 @@ bot.on('text', async (ctx) => {
     midjourney: () => handleMidjourneyGeneration(ctx, text),
     flux: () => handleImageGeneration(ctx, text, 'flux'),
     stable_diffusion: () => handleImageGeneration(ctx, text, 'stable_diffusion'),
+    nano_banana: () => handleImageGeneration(ctx, text, 'nano_banana'),
     nano_banana_2k: () => handleImageGeneration(ctx, text, 'nano_banana_2k'),
     nano_banana_4k: () => handleImageGeneration(ctx, text, 'nano_banana_4k'),
     seedream_2k: () => handleImageGeneration(ctx, text, 'seedream_2k'),
@@ -4267,7 +4270,8 @@ bot.on('photo', async (ctx) => {
   const imgState = imageGenState.get(userId);
   if (imgState && imgState.step === 'waiting_photos') {
     const modelKey = imgState.model;
-    const maxPhotos = (modelKey.includes('nano_banana') || modelKey.includes('seedream')) ? 14 : 1;
+    const model = models.design.models.find(m => m.key === modelKey);
+    const maxPhotos = model?.maxImages || 1;
     const mediaGroupId = ctx.message.media_group_id;
 
     // Якщо це альбом - збираємо всі фото через mediaGroups Map
@@ -4438,7 +4442,7 @@ bot.on('photo', async (ctx) => {
 
   // Обробка одного фото
   const videoModels = ['kling', 'kling_v2_6', 'runway_gen4'];
-  const imageModels = ['nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_2k', 'seedream_4k', 'ideogram'];
+  const imageModels = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_2k', 'seedream_4k', 'ideogram'];
 
   // Отримуємо caption як промпт
   let prompt = ctx.message.caption || '';
@@ -4486,6 +4490,7 @@ bot.on('photo', async (ctx) => {
       const aspectRatios = {
         'seedream_2k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
         'seedream_4k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
+        'nano_banana': ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
         'nano_banana_2k': ['1:1', '4:5', '9:16', 'match_input_image'],
         'nano_banana_4k': ['1:1', '4:5', '9:16', 'match_input_image'],
         'stable_diffusion': ['1:1', '4:5', '9:16', 'match_input_image'],
@@ -4498,6 +4503,7 @@ bot.on('photo', async (ctx) => {
       const ratioLabels = {
         '1:1': '📐 1:1 (Square)',
         '4:5': '📱 4:5 (Portrait)',
+        '5:4': '🖼️ 5:4 (Classic Landscape)',
         '4:3': '🎬 4:3 (Landscape)',
         '3:4': '📱 3:4 (Portrait)',
         '16:9': '🎥 16:9 (Widescreen)',
@@ -4638,6 +4644,7 @@ async function handleMediaGroup(ctx, group) {
       const aspectRatios = {
         'seedream_2k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
         'seedream_4k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
+        'nano_banana': ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
         'nano_banana_2k': ['1:1', '4:5', '9:16', 'match_input_image'],
         'nano_banana_4k': ['1:1', '4:5', '9:16', 'match_input_image'],
         'stable_diffusion': ['1:1', '4:5', '9:16', 'match_input_image'],
@@ -4650,6 +4657,7 @@ async function handleMediaGroup(ctx, group) {
       const ratioLabels = {
         '1:1': '📐 1:1 (Square)',
         '4:5': '📱 4:5 (Portrait)',
+        '5:4': '🖼️ 5:4 (Classic Landscape)',
         '4:3': '🎬 4:3 (Landscape)',
         '3:4': '📱 3:4 (Portrait)',
         '16:9': '🎥 16:9 (Widescreen)',
@@ -4844,6 +4852,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       const replicateFunctions = {
         flux: () => replicate.generateWithFlux(generationData.prompt),
         stable_diffusion: () => replicate.generateWithStableDiffusion(generationData.prompt, generationData.imageInput, 0.8, generationData.aspectRatio),
+        nano_banana: () => replicate.generateWithNanoBananaBase(generationData.prompt, generationData.imageInput, generationData.aspectRatio),
         nano_banana_2k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
         nano_banana_4k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
         seedream_2k: () => replicate.generateWithSeedream(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
