@@ -150,6 +150,23 @@ module.exports = {
         supportsReferences: true
       },
 
+      /**
+       * OpenAI Sora 2 (Replicate)
+       * Standard quality: $0.10/sec
+       * tokens/sec = ceil(0.10*1.65/0.01)=17
+       */
+      {
+        name: '🌌 OpenAI Sora 2',
+        key: 'sora_2',
+        costPerSecond: 17,
+        apiCostPerSecond: 0.10,
+        durations: [4, 8, 12],
+        aspectRatios: ['portrait', 'landscape'],
+        available: true,
+        requiresImage: false,
+        supportsReferences: true
+      },
+
       { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 0, apiCost: 0, available: false, requiresImage: true },
       { name: '🌊 MidJourney Video', key: 'midjourney_video', cost: 0, apiCost: 0, available: false },
       { name: '💜 HeyGen', key: 'heygen', cost: 0, apiCost: 0, available: false }

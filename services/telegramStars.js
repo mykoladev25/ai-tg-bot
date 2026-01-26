@@ -38,6 +38,7 @@ class TelegramStarsService {
     this.cachedRate = DEFAULT_WITHDRAW_RATE; // Дефолтний withdraw курс
     this.cachedPurchaseRate = DEFAULT_PURCHASE_RATE;
     this.cachedPayoutFactor = DEFAULT_PAYOUT_FACTOR;
+    this.warnedNoDb = false;
   }
 
   /**
@@ -65,6 +66,14 @@ class TelegramStarsService {
     if (Number.isFinite(envFactorClamped)) {
       this.cachedPayoutFactor = envFactorClamped;
       return envFactorClamped;
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      if (!this.warnedNoDb) {
+        console.warn('⚠️ Stars withdrawal calibration skipped: DB not connected');
+        this.warnedNoDb = true;
+      }
+      return this.cachedPayoutFactor || DEFAULT_PAYOUT_FACTOR;
     }
 
     try {

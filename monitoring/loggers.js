@@ -85,6 +85,12 @@ function calculateApiCost(modelConfig, options = {}) {
     return (modelConfig.apiCostPerSecond || modelConfig.apiCost || 0.25) * secs;
   }
 
+  // Generic per-second models (e.g., Sora)
+  if (modelConfig.apiCostPerSecond) {
+    const secs = seconds || duration;
+    if (secs) return modelConfig.apiCostPerSecond * secs;
+  }
+
   // Kling Motion - mode-based
   if (modelConfig.key === 'kling_motion') {
     const costKey = `${mode || 'std'}_${orientation || 'image'}`;
@@ -126,6 +132,12 @@ function calculateTokenCost(modelConfig, options = {}) {
   if (modelConfig.key === 'runway_turbo') {
     const secs = seconds || duration || 5;
     return (modelConfig.costPerSecond || modelConfig.cost || 22) * secs;
+  }
+
+  // Generic per-second models (e.g., Sora)
+  if (modelConfig.costPerSecond) {
+    const secs = seconds || duration;
+    if (secs) return modelConfig.costPerSecond * secs;
   }
 
   // Kling Motion

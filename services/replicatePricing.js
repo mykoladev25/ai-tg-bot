@@ -117,6 +117,12 @@ const OFFICIAL_PRICING = {
     model: 'runway_turbo',
     lastChecked: '2026-01-25',
     source: 'https://replicate.com/runway/gen-4-turbo'
+  },
+  'openai/sora-2': {
+    pricePerSecond: 0.10,
+    model: 'sora_2',
+    lastChecked: '2026-01-26',
+    source: 'https://replicate.com/openai/sora-2'
   }
 };
 
@@ -133,6 +139,7 @@ const MODEL_MAPPING = {
   'ideogram': 'ideogram-ai/ideogram-v3',
   'clarity': 'philz1337x/clarity-upscaler',
   'recraft_upscale': 'recraft-ai/recraft-crisp-upscale',
+  'sora_2': 'openai/sora-2',
   'kling': 'kwaivgi/kling-v2.5-turbo-pro',
   'kling_v2_6': 'kwaivgi/kling-v2.6',
   'kling_motion': 'kwaivgi/kling-v2.5-turbo-pro',

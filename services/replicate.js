@@ -594,6 +594,39 @@ async function generateVideoWithRunwayTurbo(prompt, imageUrl = null, duration = 
   }
 }
 
+/**
+ * Генерація відео через OpenAI Sora 2 (Replicate)
+ */
+async function generateVideoWithSora2(prompt, seconds = 4, aspectRatio = 'portrait', inputReference = null) {
+  try {
+    console.log('Starting Sora 2 video generation:', prompt);
+
+    const input = {
+      prompt,
+      seconds,
+      aspect_ratio: aspectRatio
+    };
+
+    if (inputReference) {
+      input.input_reference = inputReference;
+    }
+
+    const output = await replicate.run('openai/sora-2', { input });
+
+    return {
+      success: true,
+      videoUrl: Array.isArray(output) ? output[0] : output
+    };
+
+  } catch (error) {
+    console.error('Sora 2 API Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 // ==================== AUDIO GENERATION ====================
 
 /**
@@ -795,5 +828,6 @@ module.exports = {
   generateVideoWithKling26,
   generateVideoWithKlingMotion,
   generateVideoWithRunway,
+  generateVideoWithSora2,
   generateVideoWithVeo
 };

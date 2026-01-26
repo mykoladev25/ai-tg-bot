@@ -319,6 +319,7 @@ const MODELS_WITH_STATE = [
   'kling_v2_6',             // duration + aspect + start_image (no end_image)
   'kling_motion',           // mode + orientation + sound + фото + відео
   'veo',                    // aspect ratio + prompt + last_frame + start_image
+  'sora_2',                 // duration + aspect ratio + optional reference + prompt
   'nano_banana_pro',        // вибір розміру (майбутнє)
   ...MODELS_WITH_ASPECT_RATIO // добавляємо моделі з вибором aspect ratio
 ];
@@ -342,6 +343,11 @@ bot.on('callback_query', async (ctx, next) => {
 
   // ✅ ДОЗВОЛЯЄМО VEO CALLBACKS
   if (callbackData.startsWith('veo_')) {
+    return next();
+  }
+
+  // ✅ ДОЗВОЛЯЄМО SORA CALLBACKS
+  if (callbackData.startsWith('sora_')) {
     return next();
   }
 
@@ -2087,7 +2093,7 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
 
 
 // Video Models
-bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|luma)$/, async (ctx) => {
+bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|sora_2|luma)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.video.models.find(m => m.key === modelKey);
 
@@ -2245,6 +2251,50 @@ bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|luma)$/
       `📊 Якість: 1080p\n` +
       `💰 Вартість: ${minCost}—${maxCost}⚡`,
       { parse_mode: 'HTML', ...aspectMenu }
+    );
+    return;
+  }
+
+  // Для Sora 2 показуємо вибір тривалості
+  if (modelKey === 'sora_2') {
+    if (!model.costPerSecond || model.costPerSecond <= 0) {
+      await ctx.reply(
+        '⚠️ Sora 2 тимчасово недоступна — не задано ціну.\n' +
+        'Оновіть costPerSecond/apiCostPerSecond у config/models.js.',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const durations = model.durations || [4, 8, 12];
+    const minDuration = Math.min(...durations);
+    const maxDuration = Math.max(...durations);
+    const minCost = minDuration * model.costPerSecond;
+    const maxCost = maxDuration * model.costPerSecond;
+    const durationButtons = durations.map(d =>
+      Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `sora_duration_${d}`)
+    );
+
+    userState.set(ctx.from.id, {
+      action: 'sora_generation',
+      step: 'select_duration',
+      modelKey
+    });
+
+    await ctx.reply(
+      `<b>${model.name}</b>\n\n` +
+      `📐 <b>Крок 1: Оберіть тривалість відео</b>\n\n` +
+      `⏱️ ${minDuration}-${maxDuration} секунд\n` +
+      `💰 Вартість: ${minCost}—${maxCost}⚡\n` +
+      `🖼️ Опціонально: стартове зображення\n` +
+      `📐 Пропорції: portrait / landscape`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          durationButtons,
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
     );
     return;
   }
@@ -2605,6 +2655,128 @@ bot.action('veo_generate_now', async (ctx) => {
 
   await ctx.reply(
     `✍️ <b>Крок 6: Введіть промпт</b>\n\n` +
+    `Опишіть детально що хочете бачити у відео.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// ==================== SORA 2 CALLBACKS ====================
+
+// Крок 1: Вибір тривалості
+bot.action(/^sora_duration_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const duration = parseInt(ctx.match[1]);
+  const state = userState.get(userId);
+  const model = models.video.models.find(m => m.key === 'sora_2');
+
+  if (!state || state.action !== 'sora_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    duration,
+    step: 'select_aspect'
+  });
+
+  await ctx.reply(
+    `🌌 <b>${model?.name || 'OpenAI Sora 2'}</b>\n\n` +
+    `⏱️ Тривалість: <b>${duration} сек</b>\n\n` +
+    `📐 <b>Крок 2: Оберіть пропорції відео</b>\n\n` +
+    `📱 Portrait — 720×1280\n` +
+    `🎬 Landscape — 1280×720`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📱 Portrait', 'sora_aspect_portrait'),
+          Markup.button.callback('🎬 Landscape', 'sora_aspect_landscape')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 2: Вибір aspect ratio
+bot.action(/^sora_aspect_(portrait|landscape)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const aspectRatio = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'sora_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    aspectRatio,
+    step: 'ask_reference'
+  });
+
+  await ctx.reply(
+    `🖼️ <b>Крок 3: Додати стартове зображення?</b>\n\n` +
+    `Опціонально можна задати перший кадр.\n` +
+    `Зображення має мати пропорції <b>${aspectRatio}</b>.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📷 Додати зображення', 'sora_add_reference'),
+          Markup.button.callback('⏭️ Без зображення', 'sora_skip_reference')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Додати reference image
+bot.action('sora_add_reference', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'sora_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_reference'
+  });
+
+  await ctx.reply(
+    `📷 <b>Надішліть стартове зображення</b>\n\n` +
+    `Пропорції мають бути: <b>${state.aspectRatio}</b>.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Пропустити reference image
+bot.action('sora_skip_reference', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'sora_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    inputReference: null,
+    step: 'waiting_prompt'
+  });
+
+  await ctx.reply(
+    `✍️ <b>Крок 4: Введіть промпт</b>\n\n` +
     `Опишіть детально що хочете бачити у відео.`,
     { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
   );
@@ -3689,6 +3861,138 @@ async function generateVeoVideo(ctx, state) {
   })();
 }
 
+// ==================== SORA 2 GENERATION FUNCTION ====================
+
+async function generateSoraVideo(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
+  const model = models.video.models.find(m => m.key === 'sora_2');
+
+  if (!model) {
+    await ctx.reply('❌ Модель Sora 2 не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  const duration = state.duration || 4;
+  const aspectRatio = state.aspectRatio || 'portrait';
+  const costPerSec = model.costPerSecond || 0;
+  const soraCost = duration * costPerSec;
+  const apiCostPerSec = model.apiCostPerSecond || 0;
+  const apiCost = duration * apiCostPerSec;
+  const hasReference = !!state.inputReference;
+
+  if (!(await userBalance.hasTokens(userId, soraCost))) {
+    await showInsufficientTokens(ctx, soraCost);
+    userState.delete(userId);
+    return;
+  }
+
+  const statusMsg = await ctx.reply(
+    `🌌 <b>OpenAI Sora 2 - Генерація</b>\n\n` +
+    `📐 Пропорції: ${aspectRatio}\n` +
+    `⏱️ Тривалість: ${duration} сек\n` +
+    `🖼️ Стартове зображення: ${hasReference ? 'Так' : 'Ні'}\n\n` +
+    `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
+    `⏱️ Це може зайняти 2-5 хвилин...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  const generationData = { ...state };
+
+  (async () => {
+    try {
+      const result = await replicate.generateVideoWithSora2(
+        generationData.prompt,
+        duration,
+        aspectRatio,
+        generationData.inputReference || null
+      );
+
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId, username, action: 'sora_generation', model: model.name,
+          prompt: generationData.prompt, aspectRatio: aspectRatio
+        });
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації Sora 2.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+        );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'sora_2',
+          success: false,
+          options: { duration },
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100)
+        });
+
+        return;
+      }
+
+      await userBalance.deductTokens(userId, soraCost, `${model.name} generation`, {
+        modelKey: 'sora_2',
+        modelName: model.name,
+        apiCost: apiCost,
+        prompt: generationData.prompt,
+        duration: duration,
+        aspectRatio: aspectRatio,
+        hasStartImage: hasReference
+      });
+
+      const isTrialSora = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey: 'sora_2',
+        success: true,
+        options: { duration },
+        isTrial: isTrialSora,
+        isFree: isTrialSora
+      });
+
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>OpenAI Sora 2 готово!</b>\n\n` +
+        `📐 Пропорції: ${aspectRatio}\n` +
+        `⏱️ Тривалість: ${duration} сек\n` +
+        `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
+        `💾 <b>Як зберегти:</b>\n` +
+        `1️⃣ Натисніть на відео нижче\n` +
+        `2️⃣ Натисніть ⋮ → "Зберегти"\n\n` +
+        `💰 Витрачено: ${soraCost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `🌌 OpenAI Sora 2\n\n📐 ${aspectRatio} | ⏱️ ${duration}сек\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${soraCost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
+
+    } catch (error) {
+      console.error('Sora 2 generation failed:', error);
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'sora_generation', model: model.name });
+      try {
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          '❌ Помилка генерації Sora 2. Спробуйте ще раз.'
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації Sora 2. Спробуйте ще раз.');
+      }
+    }
+  })();
+}
+
 // Audio Models
 bot.action(/^(suno|udio|elevenlabs)$/, async (ctx) => {
   const modelKey = ctx.match[1];
@@ -3924,6 +4228,28 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  // ✅ SORA 2: Обробка промпту (останній крок)
+  if (state?.action === 'sora_generation' && state?.step === 'waiting_prompt') {
+    if (!text || text.length < 5) {
+      await ctx.reply(
+        '⚠️ Промпт занадто короткий!\n\n' +
+        'Напишіть детальніше що хочете бачити у відео (мінімум 5 символів).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      prompt: text,
+      step: 'ready_to_generate'
+    });
+
+    await ctx.reply('🚀 Промпт збережено! Починаємо генерацію...');
+    runBackgroundTask(() => generateSoraVideo(ctx, { ...state, prompt: text }), 'sora_generate_text');
+    return;
+  }
+
   // ✅ KLING: Обробка промпту
   if (state?.action === 'kling_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
@@ -4018,6 +4344,17 @@ bot.on('text', async (ctx) => {
       '🎬 <b>Runway Gen-4 Turbo</b>\n\n' +
       '⚠️ Спочатку натисніть Runway Turbo в меню відео.\n' +
       'Потім: image → промпт.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  // ✅ SORA 2: якщо модель sora_2 але немає стану
+  if (currentModel === 'sora_2' && !state?.action) {
+    await ctx.reply(
+      '🌌 <b>OpenAI Sora 2</b>\n\n' +
+      '⚠️ Спочатку оберіть тривалість та пропорції відео.\n\n' +
+      'Натисніть на кнопку Sora 2 в меню відео.',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
     return;
@@ -4190,6 +4527,25 @@ bot.on('photo', async (ctx) => {
     await ctx.reply(
       `✅ <b>Останній кадр отримано!</b>\n\n` +
       `✍️ <b>Крок 6: Введіть промпт</b>\n\n` +
+      `Опишіть детально що хочете бачити у відео.`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  // ✅ SORA 2: Обробка стартового зображення (input_reference)
+  if (state?.action === 'sora_generation' && state?.step === 'waiting_reference') {
+    const imageUrl = await getImageUrl(ctx);
+
+    userState.set(userId, {
+      ...state,
+      inputReference: imageUrl,
+      step: 'waiting_prompt'
+    });
+
+    await ctx.reply(
+      `✅ <b>Стартове зображення отримано!</b>\n\n` +
+      `✍️ <b>Крок 4: Введіть промпт</b>\n\n` +
       `Опишіть детально що хочете бачити у відео.`,
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
@@ -4489,6 +4845,17 @@ bot.on('photo', async (ctx) => {
   if (currentModel === 'image') {
     console.log(`🖼️ Image analysis mode selected, redirecting to Claude vision`);
     runBackgroundTask(() => handleClaudeVision(ctx), 'claude_vision_image_mode');
+    return;
+  }
+
+  // ✅ SORA 2: якщо модель обрана але флоу не розпочато
+  if (currentModel === 'sora_2' && !state?.action) {
+    await ctx.reply(
+      '🌌 <b>OpenAI Sora 2</b>\n\n' +
+      '⚠️ Спочатку оберіть тривалість та пропорції відео.\n\n' +
+      'Натисніть на кнопку Sora 2 в меню відео.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
     return;
   }
 
