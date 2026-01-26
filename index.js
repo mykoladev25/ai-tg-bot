@@ -1982,6 +1982,16 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
     return;
   }
 
+  if (modelKey === 'clarity' && (!imgState.photos || imgState.photos.length === 0)) {
+    imageGenState.set(userId, { ...imgState, step: 'waiting_photos' });
+    await ctx.reply(
+      '🔮 <b>Clarity Upscaler</b> потребує зображення.\n\n' +
+      '📷 Надішліть фото для покращення якості.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
+
   // Якщо промпт ще не введено — переходимо до кроку промпту
   if (!imgState.prompt) {
     imageGenState.set(userId, { ...imgState, step: 'prompt' });
@@ -3983,6 +3993,16 @@ bot.on('text', async (ctx) => {
   // ✅ НОВИЙ ФЛОУ ДЛЯ ГРАФІЧНИХ МОДЕЛЕЙ
   const imgState = imageGenState.get(userId);
   if (imgState && IMAGE_MODELS.includes(currentModel)) {
+    if (currentModel === 'clarity' && (!imgState.photos || imgState.photos.length === 0)) {
+      imageGenState.set(userId, { ...imgState, step: 'waiting_photos' });
+      await ctx.reply(
+        '🔮 <b>Clarity Upscaler</b> потребує зображення.\n\n' +
+        '📷 Надішліть фото для покращення якості.',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+      );
+      return;
+    }
+
     if (imgState.step === 'waiting_photos') {
       imgState.prompt = text;
       const references = normalizeReferenceOrder(imgState.photos || []);
@@ -4822,6 +4842,14 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   if (!imageInput && ctx.message?.photo) {
     imageInput = await getImageUrl(ctx);
   }
+  if (modelKey === 'clarity' && !imageInput) {
+    await ctx.reply(
+      '🔮 <b>Clarity Upscaler</b> потребує зображення.\n\n' +
+      '📷 Надішліть фото для покращення якості.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
 
   if (model.maxImages && Array.isArray(imageInput)) {
     const originalCount = imageInput.length;
@@ -4892,7 +4920,27 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         }
       };
 
-      const result = await replicateFunctions[generationData.modelKey]();
+      const generator = replicateFunctions[generationData.modelKey];
+      if (!generator) {
+        const errorMsg = `No generator for model: ${generationData.modelKey}`;
+        console.error(errorMsg);
+        await adminNotifier.notifyAdmin(bot, new Error(errorMsg), { userId, username, action: `${modelKey}_generation`, model: model.name, prompt });
+        await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, '❌ Помилка генерації. Спробуйте іншу модель.');
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey,
+          success: false,
+          isTrial,
+          isFree: isTrial,
+          errorCode: 'no_generator'
+        });
+        finished = true;
+        gracefulShutdown.completeGeneration(requestId, false);
+        return;
+      }
+
+      const result = await generator();
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_generation`, model: model.name, prompt, hasImage: !!imageInput });
@@ -5069,7 +5117,18 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
         runway_turbo: replicate.generateVideoWithRunwayTurbo
       };
 
-      const result = await videoFunctions[modelKey](prompt, imageUrl);
+      const videoGenerator = videoFunctions[modelKey];
+      if (!videoGenerator) {
+        const errorMsg = `No video generator for model: ${modelKey}`;
+        console.error(errorMsg);
+        await adminNotifier.notifyAdmin(bot, new Error(errorMsg), { userId, username, action: `${modelKey}_video_generation`, model: model.name, prompt, hasImage: !!imageUrl });
+        await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, '❌ Помилка генерації відео. Спробуйте іншу модель.');
+        finished = true;
+        gracefulShutdown.completeGeneration(requestId, false);
+        return;
+      }
+
+      const result = await videoGenerator(prompt, imageUrl);
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_video_generation`, model: model.name, prompt, hasImage: !!imageUrl });
