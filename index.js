@@ -159,6 +159,62 @@ function runBackgroundTask(task, label = 'task') {
 // ==================== TRIAL RESTRICTIONS ====================
 const { TRIAL_RESTRICTIONS } = models;
 
+function getVideoMinCostTokens(model) {
+  if (!model) return null;
+
+  // Seconds-based (Kling)
+  if (model.costPerSecond) {
+    const durations = model.durations?.length ? model.durations : [5];
+    const minDuration = Math.min(...durations);
+    const perSec = model.costPerSecond ?? 0;
+    return minDuration * perSec;
+  }
+
+  // Veo (audio/no-audio)
+  if (model.costPerSecondAudio || model.costPerSecondNoAudio) {
+    const durations = model.durations?.length ? model.durations : [4];
+    const minDuration = model.minSeconds || Math.min(...durations);
+    const perSec = Math.min(
+      model.costPerSecondNoAudio ?? Number.POSITIVE_INFINITY,
+      model.costPerSecondAudio ?? Number.POSITIVE_INFINITY
+    );
+    if (!Number.isFinite(perSec)) return null;
+    return minDuration * perSec;
+  }
+
+  // Multi-mode models (Kling Motion)
+  if (model.costs) {
+    const values = Object.values(model.costs);
+    return values.length ? Math.min(...values) : null;
+  }
+
+  // Fixed cost
+  if (model.cost) return model.cost;
+
+  return null;
+}
+
+function buildDynamicTrialBlockedModels(trialTokens) {
+  const blocked = new Set(TRIAL_RESTRICTIONS.blockedModels);
+
+  // Design models: block if not affordable
+  models.design.models
+    .filter(m => m.available)
+    .forEach((m) => {
+      if (m.cost && m.cost > trialTokens) blocked.add(m.key);
+    });
+
+  // Video models: block if min cost not affordable
+  models.video.models
+    .filter(m => m.available || TRIAL_RESTRICTIONS.blockedModels.includes(m.key))
+    .forEach((m) => {
+      const minCost = getVideoMinCostTokens(m);
+      if (minCost && minCost > trialTokens) blocked.add(m.key);
+    });
+
+  return blocked;
+}
+
 /**
  * Перевіряє чи користувач на Trial (не робив покупок)
  */
@@ -6345,7 +6401,8 @@ async function startBot() {
           return 35;
         };
 
-        const isBlockedModel = (key) => models.TRIAL_RESTRICTIONS.blockedModels.includes(key);
+        const blockedModelsDynamic = buildDynamicTrialBlockedModels(trialTokens);
+        const isBlockedModel = (key) => blockedModelsDynamic.has(key);
         const blockedModes = models.TRIAL_RESTRICTIONS.blockedModes || {};
 
         const buildUsageEntry = (key, cost, { blocked = false } = {}) => {
@@ -6372,7 +6429,7 @@ async function startBot() {
         // Video models (available OR explicitly blocked)
         const allowedVideoKeys = new Set([
           ...models.video.models.filter(m => m.available).map(m => m.key),
-          ...models.TRIAL_RESTRICTIONS.blockedModels
+          ...blockedModelsDynamic
         ]);
 
         models.video.models
@@ -6447,7 +6504,7 @@ async function startBot() {
 
         // Trial restrictions для фронтенду
         const trialRestrictions = {
-          blockedModels: models.TRIAL_RESTRICTIONS.blockedModels,
+          blockedModels: Array.from(blockedModelsDynamic),
           blockedModes: models.TRIAL_RESTRICTIONS.blockedModes
         };
 
@@ -6532,6 +6589,8 @@ async function startBot() {
           return +margin.toFixed(1);
         };
 
+        const blockedModelsDynamic = buildDynamicTrialBlockedModels(TRIAL_TOKENS);
+
         res.json({
           success: true,
 
@@ -6562,13 +6621,18 @@ async function startBot() {
           design: models.design.models
             .filter(m => m.available)
             .map(m => {
+              const trialAvailable = !blockedModelsDynamic.has(m.key);
               const result = {
                 name: m.name.replace(/[🌀🍌🌊🔮🎯🖼️]/g, '').trim(),
                 key: m.key,
                 cost: m.cost,
                 priceUSD: +(m.cost * tokenPriceUSD).toFixed(4),
                 resolution: m.resolution || m.size || null,
-                maxImages: m.maxImages || 1
+                maxImages: m.maxImages || 1,
+                trial: {
+                  available: trialAvailable,
+                  minCostTokens: m.cost
+                }
               };
               if (m.apiCost !== undefined) {
                 result._debug = {
@@ -6583,6 +6647,7 @@ async function startBot() {
           video: models.video.models
             .filter(m => m.available)
             .map(m => {
+              const trialAvailable = !blockedModelsDynamic.has(m.key);
               const result = {
                 name: m.name.replace(/[🎭🔥🌟🎬🌊💜💎]/g, '').trim(),
                 key: m.key
@@ -6590,16 +6655,24 @@ async function startBot() {
 
               // Kling - cost per second
               if (m.costPerSecond) {
+                const durations = m.durations || [5, 10];
+                const minSeconds = durations[0];
+                const minCostTokens = minSeconds * m.costPerSecond;
                 result.costPerSecond = m.costPerSecond;
                 result.pricePerSecondUSD = +(m.costPerSecond * tokenPriceUSD).toFixed(4);
-                result.durations = m.durations || [5, 10];
-                result.minSeconds = result.durations[0];
-                result.maxSeconds = result.durations[result.durations.length - 1];
-                result.examples = result.durations.map(d => ({
+                result.durations = durations;
+                result.minSeconds = minSeconds;
+                result.maxSeconds = durations[durations.length - 1];
+                result.examples = durations.map(d => ({
                   duration: d,
                   cost: d * m.costPerSecond,
                   priceUSD: +(d * m.costPerSecond * tokenPriceUSD).toFixed(2)
                 }));
+                result.trial = {
+                  available: trialAvailable,
+                  minCostTokens,
+                  minSeconds
+                };
                 if (m.apiCostPerSecond !== undefined) {
                   result._debug = {
                     apiCostPerSecond: m.apiCostPerSecond,
@@ -6609,11 +6682,16 @@ async function startBot() {
               }
               // Kling Motion - multiple modes
               else if (m.costs) {
+                const minCostTokens = Math.min(...Object.values(m.costs));
                 result.costs = m.costs;
                 result.pricesUSD = {};
                 Object.entries(m.costs).forEach(([mode, cost]) => {
                   result.pricesUSD[mode] = +(cost * tokenPriceUSD).toFixed(2);
                 });
+                result.trial = {
+                  available: trialAvailable,
+                  minCostTokens
+                };
                 if (m.apiCosts) {
                   result._debug = {
                     apiCosts: m.apiCosts,
@@ -6626,15 +6704,22 @@ async function startBot() {
               }
               // Veo - cost per second with/without audio
               else if (m.costPerSecondAudio) {
+                const durations = m.durations || [4, 6, 8];
+                const minSeconds = m.minSeconds || durations[0];
+                const perSecMin = Math.min(
+                  m.costPerSecondNoAudio ?? Number.POSITIVE_INFINITY,
+                  m.costPerSecondAudio ?? Number.POSITIVE_INFINITY
+                );
+                const minCostTokens = Number.isFinite(perSecMin) ? minSeconds * perSecMin : null;
                 result.costPerSecondAudio = m.costPerSecondAudio;
                 result.costPerSecondNoAudio = m.costPerSecondNoAudio;
                 result.pricePerSecondAudioUSD = +(m.costPerSecondAudio * tokenPriceUSD).toFixed(4);
                 result.pricePerSecondNoAudioUSD = +(m.costPerSecondNoAudio * tokenPriceUSD).toFixed(4);
-                result.durations = m.durations || [4, 6, 8];
-                result.minSeconds = m.minSeconds || result.durations[0];
-                result.maxSeconds = result.durations[result.durations.length - 1];
+                result.durations = durations;
+                result.minSeconds = minSeconds;
+                result.maxSeconds = durations[durations.length - 1];
                 result.supportsAudio = true;
-                result.examples = result.durations.map(d => ({
+                result.examples = durations.map(d => ({
                   duration: d,
                   withAudio: {
                     cost: d * m.costPerSecondAudio,
@@ -6645,6 +6730,11 @@ async function startBot() {
                     priceUSD: +(d * m.costPerSecondNoAudio * tokenPriceUSD).toFixed(2)
                   }
                 }));
+                result.trial = {
+                  available: trialAvailable,
+                  minCostTokens,
+                  minSeconds
+                };
                 if (m.apiCostPerSecondAudio !== undefined) {
                   result._debug = {
                     apiCostPerSecondAudio: m.apiCostPerSecondAudio,
@@ -6658,6 +6748,10 @@ async function startBot() {
               else {
                 result.cost = m.cost;
                 result.priceUSD = +(m.cost * tokenPriceUSD).toFixed(4);
+                result.trial = {
+                  available: trialAvailable,
+                  minCostTokens: m.cost
+                };
                 if (m.apiCost !== undefined) {
                   result._debug = {
                     apiCost: m.apiCost,
@@ -6672,7 +6766,7 @@ async function startBot() {
           // Trial/FREE restrictions
           trialRestrictions: {
             freeTokens: TRIAL_TOKENS,
-            blockedModels: models.TRIAL_RESTRICTIONS.blockedModels,
+            blockedModels: Array.from(blockedModelsDynamic),
             blockedModes: models.TRIAL_RESTRICTIONS.blockedModes,
             description: 'Free users have limited access to expensive models'
           },
