@@ -6458,32 +6458,128 @@ async function startBot() {
         // Helper: safe division avoiding 0
         const safeDiv = (tokens, cost) => cost > 0 ? Math.floor(tokens / cost) : 0;
 
+        // Helpers: fetch model config from models.js (single source of truth)
+        const getDesignCost = (key, fallback = 0) =>
+          models.design.models.find(m => m.key === key)?.cost ?? fallback;
+        const getVideoModel = (key) => models.video.models.find(m => m.key === key);
+        const getKlingCost = (key, seconds, fallbackPerSec = 6) => {
+          const m = getVideoModel(key);
+          const perSec = m?.costPerSecond ?? fallbackPerSec;
+          return seconds * perSec;
+        };
+        const getRunwayTurboCost = () => {
+          const m = getVideoModel('runway_turbo');
+          const durations = m?.durations?.length ? m.durations : [5];
+          const minDuration = Math.min(...durations);
+          const perSec = m?.costPerSecond ?? (m?.cost ? m.cost / minDuration : 22 / 5);
+          return minDuration * perSec;
+        };
+        const getVeoMinCost = () => {
+          const m = getVideoModel('veo');
+          const minDuration = m?.minSeconds || (m?.durations?.length ? Math.min(...m.durations) : 4);
+          const perSec = m?.costPerSecondAudio ?? m?.costPerSecondNoAudio ?? 28;
+          return minDuration * perSec;
+        };
+        const getKlingMotionMinCost = () => {
+          const m = getVideoModel('kling_motion');
+          if (!m) return 35;
+          if (m.cost) return m.cost;
+          if (m.costs) return Math.min(...Object.values(m.costs));
+          return 35;
+        };
+
+        const isBlockedModel = (key) => models.TRIAL_RESTRICTIONS.blockedModels.includes(key);
+        const blockedModes = models.TRIAL_RESTRICTIONS.blockedModes || {};
+        const limitedModels = models.TRIAL_RESTRICTIONS.limitedModels || {};
+
+        const buildUsageEntry = (key, cost, { blocked = false, limited = null } = {}) => {
+          const entry = {
+            count: blocked ? 0 : safeDiv(trialTokens, cost),
+            cost: cost
+          };
+          if (limited) entry.limited = limited;
+          if (blocked) entry.blocked = true;
+          return entry;
+        };
+
+        // Build usage from models.js (single source of truth)
+        const trialUsage = {};
+
+        // Design models (available only)
+        models.design.models
+          .filter(m => m.available)
+          .forEach((m) => {
+            const blocked = isBlockedModel(m.key);
+            const limited = limitedModels[m.key] || null;
+            trialUsage[m.key] = buildUsageEntry(m.key, m.cost || 0, { blocked, limited });
+          });
+
+        // Video models (available OR explicitly blocked)
+        const allowedVideoKeys = new Set([
+          ...models.video.models.filter(m => m.available).map(m => m.key),
+          ...models.TRIAL_RESTRICTIONS.blockedModels
+        ]);
+
+        models.video.models
+          .filter(m => allowedVideoKeys.has(m.key))
+          .forEach((m) => {
+            const limited = limitedModels[m.key] || null;
+
+            // Kling variants (duration-specific keys)
+            if (m.key.startsWith('kling') && m.costPerSecond && Array.isArray(m.durations)) {
+              m.durations.forEach((duration) => {
+                const cost = duration * (m.costPerSecond || 0);
+                const modeBlocked = blockedModes[m.key]?.durations?.includes(duration) || false;
+                const blocked = isBlockedModel(m.key) || modeBlocked;
+                const key = `${m.key}_${duration}s`;
+                trialUsage[key] = buildUsageEntry(key, cost, { blocked, limited });
+              });
+              return;
+            }
+
+            // Runway Turbo (single entry with min duration)
+            if (m.key === 'runway_turbo') {
+              const durations = m.durations || [5];
+              const minDuration = Math.min(...durations);
+              const perSec = m.costPerSecond ?? (m.cost ? m.cost / minDuration : 0);
+              const cost = minDuration * perSec;
+              const blocked = isBlockedModel(m.key);
+              trialUsage[m.key] = buildUsageEntry(m.key, cost, { blocked, limited });
+              return;
+            }
+
+            // Veo (use min duration with audio pricing by default)
+            if (m.key === 'veo') {
+              const minDuration = m.minSeconds || (m.durations?.length ? Math.min(...m.durations) : 4);
+              const perSec = m.costPerSecondAudio ?? m.costPerSecondNoAudio ?? 0;
+              const cost = minDuration * perSec;
+              const blocked = isBlockedModel(m.key);
+              trialUsage[m.key] = buildUsageEntry(m.key, cost, { blocked, limited });
+              return;
+            }
+
+            // Kling Motion (min cost)
+            if (m.key === 'kling_motion') {
+              const minCost = m.cost ?? (m.costs ? Math.min(...Object.values(m.costs)) : 0);
+              const blocked = isBlockedModel(m.key);
+              trialUsage[m.key] = buildUsageEntry(m.key, minCost, { blocked, limited });
+              return;
+            }
+
+            // Default fixed-cost models
+            if (m.cost) {
+              const blocked = isBlockedModel(m.key);
+              trialUsage[m.key] = buildUsageEntry(m.key, m.cost, { blocked, limited });
+            }
+          });
+
         const trialPlan = {
           name: 'TRIAL (FREE)',
           tokens: trialTokens,
           price: 0,
           priceUSD: 0,
           // Explicit usage keyed by model.key (snake_case)
-          usage: {
-            // Design models
-            stable_diffusion: { count: safeDiv(trialTokens, 1), cost: 1 },
-            seedream_2k: { count: safeDiv(trialTokens, 3), cost: 3 },
-            seedream_4k: { count: safeDiv(trialTokens, 6), cost: 6 },
-            nano_banana_2k: { count: safeDiv(trialTokens, 14), cost: 14 },
-            nano_banana_4k: { count: safeDiv(trialTokens, 27), cost: 27, limited: models.TRIAL_RESTRICTIONS.limitedModels.nano_banana_4k || 1 },
-            clarity: { count: safeDiv(trialTokens, 2), cost: 2 },
-            ideogram: { count: safeDiv(trialTokens, 3), cost: 3 },
-            // Video models
-            kling_5s: { count: safeDiv(trialTokens, 30), cost: 30, limited: models.TRIAL_RESTRICTIONS.limitedModels.kling || 2 },
-            kling_10s: { count: safeDiv(trialTokens, 60), cost: 60, limited: models.TRIAL_RESTRICTIONS.limitedModels.kling || 2 },
-            kling_v2_6_5s: { count: safeDiv(trialTokens, 30), cost: 30, limited: models.TRIAL_RESTRICTIONS.limitedModels.kling_v2_6 || 2 },
-            kling_v2_6_10s: { count: safeDiv(trialTokens, 60), cost: 60, limited: models.TRIAL_RESTRICTIONS.limitedModels.kling_v2_6 || 2 },
-            runway_turbo: { count: safeDiv(trialTokens, 22), cost: 22, limited: models.TRIAL_RESTRICTIONS.limitedModels.runway_turbo || 1 },
-            // Blocked models (count=0, blocked=true)
-            veo: { count: 0, cost: 112, blocked: true },
-            kling_motion: { count: 0, cost: 35, blocked: true },
-            runway_gen4: { count: 0, cost: 94, blocked: true }
-          },
+          usage: trialUsage,
           features: [
             `🎁 ${trialTokens}⚡ безкоштовних токенів`,
             '🔒 Обмежений доступ до дорогих моделей',
