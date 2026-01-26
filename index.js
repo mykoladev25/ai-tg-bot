@@ -1209,7 +1209,7 @@ const nanoBanana2kModel = models.design.models.find(m => m.key === 'nano_banana_
 const seedream4kModel = models.design.models.find(m => m.key === 'seedream_4k');
 const CREATIVE_COST = 13;
 const CREATIVE_COST_2K = CREATIVE_COST;
-const CREATIVE_COST_SEEDREAM_4K = CREATIVE_COST;
+const CREATIVE_COST_SEEDREAM_4K = 5;
 
 // ==================== UKRAINIAN ROMANTIC QUOTES FOR LOVE IS... ====================
 // Точно 25 цитат, як запропоновано
