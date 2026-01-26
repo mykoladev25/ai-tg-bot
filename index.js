@@ -147,6 +147,14 @@ async function sendMainMenu(ctx, user) {
   await ctx.reply(buildMainMenuMessage(ctx, user), keyboard.createMainMenu());
 }
 
+function runBackgroundTask(task, label = 'task') {
+  Promise.resolve()
+    .then(task)
+    .catch((error) => {
+      console.error(`❌ Background task failed (${label}):`, error);
+    });
+}
+
 // ==================== TRIAL RESTRICTIONS ====================
 const { TRIAL_RESTRICTIONS } = models;
 
@@ -1533,6 +1541,13 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
     hearts: '❤️ Льодяник'
   };
 
+  if (!model) {
+    await ctx.reply('❌ Помилка: модель не знайдена.', keyboard.createBackButton('main_menu'));
+    userState.delete(userId);
+    userCurrentModel.delete(userId);
+    return true;
+  }
+
   const statusMsg = await ctx.reply(
       `🎨 <b>Генерую ${creativeNames[creativeType]}...</b>\n\n` +
       `📷 Ваше фото отримано\n` +
@@ -1542,57 +1557,67 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
       { parse_mode: 'HTML' }
   );
 
-  try {let result;
-    
-    // Вибираємо правильну функцію генерації в залежності від креативу
-    // По дефолту використовуємо 9:16 для всіх креативів
-    if (creativeType === 'hearts') {
-      // Hearts використовує Seedream 4K з aspect ratio 9:16
-      result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
-    } else if (creativeType === 'love_is') {
-      // Love is... використовує NanoBanana 2K з aspect ratio 9:16
-      result = await replicate.generateWithNanoBanana(prompt, imageUrl, '2K', '9:16');
-    } else {
-      // Fallback для інших креативів - теж 9:16
-      const resolution = modelKey === 'nano_banana_2k' ? '2K' : '4K';
-      result = await replicate.generateWithNanoBanana(prompt, imageUrl, resolution, '9:16');
-    }
+  const chatId = ctx.chat.id;
+  const username = ctx.from.username || 'unknown';
+  const creativeLabel = creativeNames[creativeType] || creativeType;
 
-    if (!result.success) {
-      await adminNotifier.notifyAdmin(
+  // Звільняємо стан одразу, щоб не блокувати користувача
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  runBackgroundTask(async () => {
+    try {
+      let result;
+
+      // Вибираємо правильну функцію генерації в залежності від креативу
+      // По дефолту використовуємо 9:16 для всіх креативів
+      if (creativeType === 'hearts') {
+        // Hearts використовує Seedream 4K з aspect ratio 9:16
+        result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
+      } else if (creativeType === 'love_is') {
+        // Love is... використовує NanoBanana 2K з aspect ratio 9:16
+        result = await replicate.generateWithNanoBanana(prompt, imageUrl, '2K', '9:16');
+      } else {
+        // Fallback для інших креативів - теж 9:16
+        const resolution = modelKey === 'nano_banana_2k' ? '2K' : '4K';
+        result = await replicate.generateWithNanoBanana(prompt, imageUrl, resolution, '9:16');
+      }
+
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(
           bot,
           new Error(result.error),
-          { userId, username: ctx.from.username, action: `creative_${creativeType}`, model: model.name }
-      );
-      await ctx.telegram.editMessageText(
-          ctx.chat.id,
+          { userId, username, action: `creative_${creativeType}`, model: model.name }
+        );
+        await bot.telegram.editMessageText(
+          chatId,
           statusMsg.message_id,
           null,
           `❌ Помилка генерації.\n\nСпробуйте ще раз або оберіть іншу модель.`
-      );
-      userState.delete(userId);
-      return true;
-    }
+        );
+        return;
+      }
 
-    await userBalance.deductTokens(
+      await userBalance.deductTokens(
         userId,
         model.cost,
-        `${creativeNames[creativeType]} generation`,
+        `${creativeLabel} generation`,
         { modelKey: modelKey, modelName: model.name, apiCost: model.apiCost }
-    );
+      );
 
-    // Перевірити розмір файлу
-    const fileSize = await getFileSize(result.imageUrl);
-    const maxPhotoSize = 10 * 1024 * 1024; // 10MB
+      // Перевірити розмір файлу
+      const fileSize = await getFileSize(result.imageUrl);
+      const maxPhotoSize = 10 * 1024 * 1024; // 10MB
 
-    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
 
-    if (fileSize > maxPhotoSize) {
-      // Файл завеликий - віддати посиланням
-      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+      if (fileSize > maxPhotoSize) {
+        // Файл завеликий - віддати посиланням
+        const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
 
-      await ctx.reply(
-          `✅ <b>${creativeNames[creativeType]}</b>\n\n` +
+        await bot.telegram.sendMessage(
+          chatId,
+          `✅ <b>${creativeLabel}</b>\n\n` +
           `📊 <b>Розмір:</b> ${fileSizeMB} MB\n` +
           `⚠️ Файл завеликий для Telegram\n\n` +
           `🔗 <a href="${result.imageUrl}">📥 Натисніть для завантаження PNG</a>\n\n` +
@@ -1609,30 +1634,31 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
             disable_web_page_preview: true,
             ...keyboard.createBackButton('main_menu')
           }
-      );
-    } else {
-      // Файл нормальний - відправити як фото
-      await safeSendPhoto(ctx.chat.id, result.imageUrl, {
-        caption: `✅ ${creativeNames[creativeType]}\n\n⚠️ Посилання активне 1 ГОДИНУ - завантажте одразу! 📥\n\n💰 Витрачено: ${model.cost}⚡`,
-        ...keyboard.createBackButton('main_menu')
-      });
+        );
+      } else {
+        // Файл нормальний - відправити як фото
+        await safeSendPhoto(chatId, result.imageUrl, {
+          caption: `✅ ${creativeLabel}\n\n⚠️ Посилання активне 1 ГОДИНУ - завантажте одразу! 📥\n\n💰 Витрачено: ${model.cost}⚡`,
+          ...keyboard.createBackButton('main_menu')
+        });
+      }
+    } catch (error) {
+      console.error(`Creative ${creativeType} generation failed:`, error);
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: `creative_${creativeType}` });
+      try {
+        await bot.telegram.editMessageText(
+          chatId,
+          statusMsg.message_id,
+          null,
+          '❌ Помилка генерації. Спробуйте ще раз.'
+        );
+      } catch (editError) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації. Спробуйте ще раз.');
+      }
     }
+  }, `creative_${creativeType}`);
 
-    userState.delete(userId);
-    return true;
-
-  } catch (error) {
-    console.error(`Creative ${creativeType} generation failed:`, error);
-    await adminNotifier.notifyAdmin(bot, error, { userId, username: ctx.from.username, action: `creative_${creativeType}` });
-    await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        '❌ Помилка генерації. Спробуйте ще раз.'
-    );
-    userState.delete(userId);
-    return true;
-  }
+  return true;
 }
 // ==================== CALLBACK HANDLERS ====================
 
@@ -1717,8 +1743,11 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|4:5|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_in
 
   console.log(`📐 Aspect ratio selected: ${aspectRatio} for model: ${modelKey}`);
 
-  // Генеруємо з вибраним aspect ratio
-  await handleImageGeneration(ctx, state.prompt, modelKey, state.imageUrl, aspectRatio);
+  // Генеруємо з вибраним aspect ratio (у фоні, щоб не блокувати інші апдейти)
+  runBackgroundTask(
+    () => handleImageGeneration(ctx, state.prompt, modelKey, state.imageUrl, aspectRatio),
+    'image_generation_aspect_ratio'
+  );
 
   userState.delete(userId);
 });
@@ -1866,7 +1895,10 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
   imageGenState.delete(userId);
 
   await ctx.reply('🚀 Починаємо генерацію...', { parse_mode: 'HTML' });
-  await handleImageGeneration(ctx, prompt, modelKey, references.length ? references : null);
+  runBackgroundTask(
+    () => handleImageGeneration(ctx, prompt, modelKey, references.length ? references : null),
+    'image_generation_start'
+  );
 });
 
 // ✅ НОВИЙ ФЛОУ: Кнопка "Додати референси"
@@ -3131,7 +3163,7 @@ bot.action('motion_generate_now', async (ctx) => {
   }
 
   await ctx.reply('🚀 Починаємо генерацію Kling Motion...');
-  await generateKlingMotionVideo(ctx, state);
+  runBackgroundTask(() => generateKlingMotionVideo(ctx, state), 'kling_motion_generate_now');
 });
 
 // ==================== KLING MOTION GENERATION FUNCTION ====================
@@ -3276,7 +3308,7 @@ bot.action('kling_generate_now', async (ctx) => {
   }
 
   await ctx.reply('🚀 Починаємо генерацію Kling...');
-  await generateKlingVideo(ctx, state);
+  runBackgroundTask(() => generateKlingVideo(ctx, state), 'kling_generate_now');
 });
 
 // ==================== KLING GENERATION FUNCTION ====================
@@ -3917,7 +3949,7 @@ bot.on('text', async (ctx) => {
     });
 
     await ctx.reply('🚀 Промпт збережено! Починаємо генерацію...');
-    await generateVeoVideo(ctx, { ...state, prompt: text });
+    runBackgroundTask(() => generateVeoVideo(ctx, { ...state, prompt: text }), 'veo_generate_text');
     return;
   }
 
@@ -3945,7 +3977,7 @@ bot.on('text', async (ctx) => {
     });
 
     await ctx.reply('🚀 Промпт збережено! Починаємо генерацію...');
-    await generateRunwayTurboVideo(ctx, { ...state, prompt: text });
+    runBackgroundTask(() => generateRunwayTurboVideo(ctx, { ...state, prompt: text }), 'runway_turbo_generate_text');
     return;
   }
 
@@ -3968,7 +4000,7 @@ bot.on('text', async (ctx) => {
     });
 
     await ctx.reply('🚀 Промпт збережено! Починаємо генерацію Kling...');
-    await generateKlingVideo(ctx, { ...state, prompt: text });
+    runBackgroundTask(() => generateKlingVideo(ctx, { ...state, prompt: text }), 'kling_generate_text');
     return;
   }
 
@@ -3982,7 +4014,7 @@ bot.on('text', async (ctx) => {
     });
 
     await ctx.reply('🚀 Промпт збережено! Починаємо генерацію Kling Motion...');
-    await generateKlingMotionVideo(ctx, { ...state, prompt: text });
+    runBackgroundTask(() => generateKlingMotionVideo(ctx, { ...state, prompt: text }), 'kling_motion_generate_text');
     return;
   }
 
@@ -4068,7 +4100,10 @@ bot.on('text', async (ctx) => {
         { parse_mode: 'HTML' }
       );
 
-      await handleImageGeneration(ctx, text, currentModel, references.length ? references : null);
+      runBackgroundTask(
+        () => handleImageGeneration(ctx, text, currentModel, references.length ? references : null),
+        'image_generation_references_prompt'
+      );
       return;
     }
 
@@ -4084,7 +4119,10 @@ bot.on('text', async (ctx) => {
         { parse_mode: 'HTML' }
       );
 
-      await handleImageGeneration(ctx, text, currentModel, references.length ? references : null);
+      runBackgroundTask(
+        () => handleImageGeneration(ctx, text, currentModel, references.length ? references : null),
+        'image_generation_prompt'
+      );
       return;
     }
   }
@@ -4110,7 +4148,7 @@ bot.on('text', async (ctx) => {
   };
   
   if (handlers[currentModel]) {
-    await handlers[currentModel]();
+    runBackgroundTask(handlers[currentModel], `text_handler_${currentModel}`);
   } else {
     await ctx.reply(`Модель "${currentModel}" ще не підтримується.\nВиберіть іншу модель.`, keyboard.createMainMenu());
   }
@@ -4137,7 +4175,7 @@ bot.on('voice', async (ctx) => {
     }
 
     await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `📝 Розпізнано: "${transcription.text}"\n\n🤔 Думаю...`);
-    await handleClaudeText(ctx, transcription.text);
+    runBackgroundTask(() => handleClaudeText(ctx, transcription.text), 'claude_voice');
 
   } catch (error) {
     console.error('Voice processing error:', error);
@@ -4529,7 +4567,7 @@ bot.on('photo', async (ctx) => {
   // ✅ Спеціальний випадок: користувач обрав "🖼️ Завантажте зображення для аналізу" з гідлінгу Claude
   if (currentModel === 'image') {
     console.log(`🖼️ Image analysis mode selected, redirecting to Claude vision`);
-    await handleClaudeVision(ctx);
+    runBackgroundTask(() => handleClaudeVision(ctx), 'claude_vision_image_mode');
     return;
   }
 
@@ -4575,7 +4613,7 @@ bot.on('photo', async (ctx) => {
       const finalGroup = mediaGroups.get(mediaGroupId);
       mediaGroups.delete(mediaGroupId);
       console.log(`📸 Album received: ${finalGroup.photos.length} photos`);
-      await handleMediaGroup(ctx, finalGroup);
+      runBackgroundTask(() => handleMediaGroup(ctx, finalGroup), 'media_group');
     }, 500);
 
     return;
@@ -4595,9 +4633,9 @@ bot.on('photo', async (ctx) => {
   }
 
   if (currentModel === 'claude_vision') {
-    await handleClaudeVision(ctx);
+    runBackgroundTask(() => handleClaudeVision(ctx), 'claude_vision_photo');
   } else if (currentModel === 'clarity') {
-    await handleClarityUpscaler(ctx);
+    runBackgroundTask(() => handleClarityUpscaler(ctx), 'clarity_upscaler');
   } else if (currentModel === 'kling_motion' || currentModel === 'kling_motion_minimal') {
     // Kling Motion: зберігаємо фото, чекаємо на відео
     const imageUrl = await getImageUrl(ctx);
@@ -4669,10 +4707,10 @@ bot.on('photo', async (ctx) => {
       );
     } else {
       // Для інших моделей просто генерувати
-      await handleImageGeneration(ctx, prompt, currentModel);
+      runBackgroundTask(() => handleImageGeneration(ctx, prompt, currentModel), 'image_generation_photo');
     }
   } else if (videoModels.includes(currentModel)) {
-    await handleVideoGeneration(ctx, prompt, currentModel);
+    runBackgroundTask(() => handleVideoGeneration(ctx, prompt, currentModel), 'video_generation_photo');
   } else if (currentModel === 'runway_turbo') {
     await ctx.reply(
       '🎬 <b>Runway Gen-4 Turbo</b>\n\n' +
@@ -4821,7 +4859,10 @@ async function handleMediaGroup(ctx, group) {
         { parse_mode: 'HTML', ...aspectRatioMenu }
       );
     } else {
-      await handleImageGeneration(ctx, finalPrompt, currentModel, photos);
+      runBackgroundTask(
+        () => handleImageGeneration(ctx, finalPrompt, currentModel, photos),
+        'image_generation_media_group'
+      );
     }
   } else {
     await ctx.reply(
@@ -4829,7 +4870,10 @@ async function handleMediaGroup(ctx, group) {
       `⚠️ ${model?.name || 'Ця модель'} підтримує тільки 1 зображення.\n` +
       `Обробляю перше фото...`
     );
-    await handleImageGeneration(ctx, finalPrompt, currentModel, photos[0]);
+    runBackgroundTask(
+      () => handleImageGeneration(ctx, finalPrompt, currentModel, photos[0]),
+      'image_generation_media_group_single'
+    );
   }
 }
 
