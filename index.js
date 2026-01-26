@@ -1897,6 +1897,18 @@ bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_d
 
   userCurrentModel.set(ctx.from.id, modelKey);
 
+  if (modelKey === 'recraft_upscale') {
+    await ctx.reply(
+      `✨ <b>${model.name}</b>\n\n` +
+      `🔎 Розумне підвищення якості (upscale)\n\n` +
+      `📷 <b>Крок 1:</b> Надішліть зображення\n\n` +
+      `💰 Вартість: ${model.cost}⚡\n` +
+      `⏱️ Час: ~20-40 секунд`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
+
   const maxPhotos = model.maxImages || 1;
 
   // ✅ НОВИЙ ФЛОУ: Зберігаємо стан - чекаємо на референси
@@ -4062,8 +4074,8 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  if (currentModel === 'clarity') {
-    await ctx.reply('🔮 Clarity Upscaler чекає на зображення.\n\nНадішліть фото для покращення якості.', keyboard.createGPTActionsMenu(models.design.models));
+  if (currentModel === 'clarity' || currentModel === 'recraft_upscale') {
+    await ctx.reply('🔮 Upscaler чекає на зображення.\n\nНадішліть фото для покращення якості.', keyboard.createGPTActionsMenu(models.design.models));
     return;
   }
 
