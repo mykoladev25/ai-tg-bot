@@ -3735,10 +3735,15 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
     return;
   }
 
-  // Розраховуємо ціну за токен та економію
-  const pricePerToken = sub.priceUSD / sub.tokens;
-  const starterPricePerToken = 7 / 220; // базова ціна STARTER
-  const savingsPercent = Math.round((1 - pricePerToken / starterPricePerToken) * 100);
+  // Розраховуємо ціну за токен та економію (базуємось на актуальному STARTER)
+  const starterSub = models.subscriptions.starter;
+  const starterTokens = starterSub?.tokensLiqPay ?? starterSub?.tokens;
+  const starterPricePerToken = starterTokens ? (starterSub.priceUSD / starterTokens) : 0;
+  const planTokens = sub.tokensLiqPay ?? sub.tokens;
+  const pricePerToken = planTokens ? (sub.priceUSD / planTokens) : 0;
+  const savingsPercent = starterPricePerToken && pricePerToken
+    ? Math.round((1 - pricePerToken / starterPricePerToken) * 100)
+    : 0;
 
   // Короткий опис пакету в доларах
   let message = `⚡ <b>Пакет ${sub.name}</b> — $${sub.priceUSD}\n\n`;
@@ -3747,7 +3752,7 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
   message += `✨ Комбінуйте як завгодно!\n\n`;
 
   // Показуємо економію для пакетів більших за STARTER
-  if (savingsPercent > 0) {
+  if (planKey !== 'starter' && savingsPercent > 0) {
     message += `🔥 <b>Економія ${savingsPercent}%</b> порівняно зі STARTER!\n\n`;
   }
 
