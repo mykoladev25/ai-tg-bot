@@ -5,6 +5,7 @@
 const UsageEvent = require('../database/models/UsageEvent');
 const PaymentEvent = require('../database/models/PaymentEvent');
 const DailySummary = require('../database/models/DailySummary');
+const User = require('../database/models/User');
 
 /**
  * Parse date range from query params
@@ -86,6 +87,14 @@ async function getSummary(from, to) {
     }
   ]);
 
+  const freeUsersTotal = await User.countDocuments({ totalTokensPurchased: 0 });
+  const freeUsersNew = await User.countDocuments({
+    totalTokensPurchased: 0,
+    createdAt: { $gte: startDate, $lte: endDate }
+  });
+  const totalUsers = await User.countDocuments();
+  const paidUsersTotal = await User.countDocuments({ totalTokensPurchased: { $gt: 0 } });
+
   const revenue = revenueAgg[0] || {};
   const cogs = cogsAgg[0] || {};
   const trial = trialAgg[0] || {};
@@ -115,6 +124,12 @@ async function getSummary(from, to) {
       burnUSD: trial.trialBurn || 0,
       generations: trial.trialCount || 0,
       users: trial.trialUsers?.length || 0
+    },
+    users: {
+      total: totalUsers || 0,
+      paidTotal: paidUsersTotal || 0,
+      freeTotal: freeUsersTotal || 0,
+      freeNew: freeUsersNew || 0
     },
     gross: {
       estimated: (revenue.totalUSD || 0) - (cogs.totalCogs || 0),
@@ -283,4 +298,3 @@ module.exports = {
   computeDailySummary,
   getDailySummaries
 };
-

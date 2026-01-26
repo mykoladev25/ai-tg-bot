@@ -561,6 +561,10 @@ router.get('/dashboard', (req, res) => {
         <span class="legend-desc">— собівартість генерацій безкоштовних юзерів (вони не платять, ми - платимо)</span>
       </div>
       <div class="legend-item">
+        <span class="legend-term">🆓 Безкоштовні</span>
+        <span class="legend-desc">— юзери, що запустили бота, але ще не купили жодного тарифу</span>
+      </div>
+      <div class="legend-item">
         <span class="legend-term">📊 Маржа</span>
         <span class="legend-desc">— відсоток прибутку від доходу (чим більше - тим краще)</span>
       </div>
@@ -791,6 +795,8 @@ router.get('/dashboard', (req, res) => {
         const summary = await fetchAPI('/metrics/summary?from=' + from + '&to=' + to);
         if (summary.success) {
           const d = summary.data;
+          const freeUsersTotal = d.users?.freeTotal ?? 0;
+          const freeUsersNew = d.users?.freeNew ?? 0;
           document.getElementById('summary').innerHTML = \`
             <div class="card">
               <div class="card-title">💰 Дохід</div>
@@ -815,6 +821,12 @@ router.get('/dashboard', (req, res) => {
               <div class="card-hint">Безкоштовні юзери "з'їли"</div>
               <div class="card-value danger">\${formatUSD(d.trial.burnUSD)}</div>
               <div class="card-subtitle">\${d.trial.users} trial юзерів</div>
+            </div>
+            <div class="card">
+              <div class="card-title">🆓 Безкоштовні юзери</div>
+              <div class="card-hint">Запустили бота, але не купляли</div>
+              <div class="card-value">\${freeUsersTotal}</div>
+              <div class="card-subtitle">+\${freeUsersNew} за період</div>
             </div>
             <div class="card">
               <div class="card-title">✅ Успішність</div>
