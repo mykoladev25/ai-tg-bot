@@ -544,7 +544,6 @@ const INSTRUCTION_HTML = `
 <b>2️⃣ Генерація зображень</b>
 - Оберіть модель (<i>Nano Banana, Seedream, Ideogram тощо</i>)
 - Опишіть що хочете побачити (промпт)
-- 💡 <b>Довгий промпт?</b> Надсилайте частинами з <code>...</code> в кінці
 - Можна додати до 14 референс-фото!
 - Очікуйте результат <i>(~20–60 сек)</i>
 
@@ -557,7 +556,7 @@ const INSTRUCTION_HTML = `
 💰 <b>Токени ⚡</b>
 - <b>Кожна генерація списує токени</b>
 - 🎁 <b>Безкоштовно:</b> 35⚡ при реєстрації
-- 💎 Поповніть баланс для необмеженого доступу
+- 💎 Далі — можна поповнити баланс
 - 📉 <b>Чим більший пакет — тим вигідніше!</b>
 
 <i>⚡ Вартість вказана біля кожної моделі</i>
@@ -1142,8 +1141,9 @@ bot.hears('📝 Feedback', async (ctx) => {
 // Отримуємо ціни моделей
 const nanoBanana2kModel = models.design.models.find(m => m.key === 'nano_banana_2k');
 const seedream4kModel = models.design.models.find(m => m.key === 'seedream_4k');
-const CREATIVE_COST_2K = nanoBanana2kModel?.cost || 14;
-const CREATIVE_COST_SEEDREAM_4K = seedream4kModel?.cost || 4;
+const CREATIVE_COST = 13;
+const CREATIVE_COST_2K = CREATIVE_COST;
+const CREATIVE_COST_SEEDREAM_4K = CREATIVE_COST;
 
 // ==================== UKRAINIAN ROMANTIC QUOTES FOR LOVE IS... ====================
 // Точно 25 цитат, як запропоновано
@@ -1557,12 +1557,14 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
     return true;
   }
 
+  const creativeCost = CREATIVE_COST;
+
   const statusMsg = await ctx.reply(
       `🎨 <b>Генерую ${creativeNames[creativeType]}...</b>\n\n` +
       `📷 Ваше фото отримано\n` +
       `✨ Зберігаю ваші риси обличчя\n` +
       `⏱️ Це займе ~30-40 секунд\n\n` +
-      `💰 Списується: ${model.cost}⚡`,
+      `💰 Списується: ${creativeCost}⚡`,
       { parse_mode: 'HTML' }
   );
 
@@ -1609,7 +1611,7 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
 
       await userBalance.deductTokens(
         userId,
-        model.cost,
+        creativeCost,
         `${creativeLabel} generation`,
         { modelKey: modelKey, modelName: model.name, apiCost: model.apiCost }
       );
@@ -1637,7 +1639,7 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
           `1️⃣ Натисніть на посилання вище\n` +
           `2️⃣ Файл завантажиться\n` +
           `3️⃣ Збережіть на телефон/комп'ютер\n\n` +
-          `💰 Витрачено: ${model.cost}⚡`,
+          `💰 Витрачено: ${creativeCost}⚡`,
           {
             parse_mode: 'HTML',
             disable_web_page_preview: true,
@@ -1647,7 +1649,7 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
       } else {
         // Файл нормальний - відправити як фото
         await safeSendPhoto(chatId, result.imageUrl, {
-          caption: `✅ ${creativeLabel}\n\n💰 Витрачено: ${model.cost}⚡`,
+          caption: `✅ ${creativeLabel}\n\n💰 Витрачено: ${creativeCost}⚡`,
           ...keyboard.createBackButton('main_menu')
         });
       }
@@ -3065,6 +3067,7 @@ async function generateKlingMotionVideo(ctx, state) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>Kling Motion готово!</b>\n\n` +
+        `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
         `⚙️ ${generationData.mode === 'pro' ? '💎 PRO' : '⚡ STD'} | ` +
         `${generationData.orientation === 'image' ? '📷' : '🎥'} | ` +
         `${generationData.keepOriginalSound ? '🔊' : '🔇'}\n\n` +
@@ -3237,6 +3240,7 @@ async function generateKlingVideo(ctx, state) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>${model.name} готово!</b>\n\n` +
+        `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
         `⏱️ Тривалість: ${duration} сек\n` +
         `📐 Пропорції: ${generationData.aspectRatio || '16:9'}\n` +
         `${audioLine}` +
@@ -3370,6 +3374,7 @@ async function generateRunwayTurboVideo(ctx, state) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>Runway Gen-4 Turbo готово!</b>\n\n` +
+        `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
         `⏱️ ${duration} сек | 📐 ${aspectRatio}\n` +
         `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
         `💰 Витрачено: ${runwayCost.toFixed(1)}⚡`,
@@ -3515,6 +3520,7 @@ async function generateVeoVideo(ctx, state) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>Google Veo 3.1 готово!</b>\n\n` +
+        `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
         `📐 Пропорції: ${generationData.aspectRatio}\n` +
         `⏱️ Тривалість: ${duration} сек\n` +
         `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
@@ -4965,6 +4971,7 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>${model.name} готово!</b>\n\n` +
+        `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
         `📝 Промпт: ${prompt}\n\n` +
         `💾 <b>ЗБЕРЕЖІТЬ на пристрій перед закриттям:</b>\n` +
         `1️⃣ Натисніть на відео (☝️ див. нижче)\n` +
