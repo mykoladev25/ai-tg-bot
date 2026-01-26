@@ -211,7 +211,7 @@ module.exports = {
       { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 3, apiCost: 0.04, size: '2K', maxImages: 14, available: true },
 
       // 0.04 => ceil(...) = 3  (якщо реально apiCost інший для 4K — тоді перерахую)
-      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 3, apiCost: 0.04, size: '4K', maxImages: 14, available: true },
+      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 6, apiCost: 0.08, size: '4K', maxImages: 14, available: true },
 
       // 0.02 => 2
       { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 2, apiCost: 0.02, maxImages: 1, available: true },
