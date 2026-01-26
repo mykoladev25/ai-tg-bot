@@ -1,19 +1,20 @@
 /**
- * Target gross margin (Revenue - API COGS): ~15%
- * Revenue = apiCost / 0.85
+ * Target gross margin (Revenue - API COGS): ~30%
+ * Revenue = apiCost / 0.70
  *
  * Token-based pricing anchored to WORST-CASE token value (cheapest token):
  * WORST_CASE_TOKEN_USD = $110 / 4760
  *
  * Tokens per unit:
- * tokens = ceil(apiCost / (0.85 * WORST_CASE_TOKEN_USD))
+ * tokens = ceil(apiCost / ((1 - TARGET_GROSS) * WORST_CASE_TOKEN_USD))
  */
 
 const WORST_CASE_TOKEN_USD = 110 / 4760; // 0.02311...
-const TARGET_GROSS = 0.15;
-const EFFECTIVE_TOKEN_USD = (1 - TARGET_GROSS) * WORST_CASE_TOKEN_USD; // 0.85 * token
+const TARGET_GROSS = 0.30;
+const EFFECTIVE_TOKEN_USD = (1 - TARGET_GROSS) * WORST_CASE_TOKEN_USD; // 0.70 * token
 const LIQPAY_OVERHEAD = 0.07;
 const LIQPAY_FACTOR = 1 - LIQPAY_OVERHEAD;
+
 /**
  * TRIAL RESTRICTIONS
  */
@@ -53,7 +54,7 @@ module.exports = {
       // apiCost 0.008 => ceil(0.008 / EFFECTIVE_TOKEN_USD) = 1
       { name: '✍️ Пишіть', key: 'text', cost: 1, apiCost: 0.008 },
 
-      // apiCost 0.048 => ceil(0.048 / EFFECTIVE_TOKEN_USD) = 3
+      // apiCost 0.048 => ceil(...) = 3
       { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 3, apiCost: 0.048 }
     ]
   },
@@ -62,15 +63,15 @@ module.exports = {
     models: [
       /**
        * Runway Turbo
-       * apiCostPerSecond 0.05 => ceil(0.05 / EFFECTIVE_TOKEN_USD) = 3 ток/сек
-       * default 5s => 15 ток
+       * apiCostPerSecond 0.05 => ceil(...) = 4 ток/сек
+       * default 5s => 20 ток
        */
       {
         name: '🎬 RunWay: Gen-4 Turbo ⚡',
         key: 'runway_turbo',
-        costPerSecond: 3,
+        costPerSecond: 4,
         apiCostPerSecond: 0.05,
-        cost: 15,     // 5 sec * 3
+        cost: 20, // 5 sec * 4
         apiCost: 0.25,
         available: true,
         requiresImage: true,
@@ -80,14 +81,14 @@ module.exports = {
 
       /**
        * Kling v2.5
-       * apiCostPerSecond 0.07 => ceil(...) = 4 ток/сек
-       * default 5s => 20 ток
+       * apiCostPerSecond 0.07 => ceil(...) = 5 ток/сек
+       * default 5s => 25 ток
        */
       {
         name: '🎭 Kling v2.5 Turbo',
         key: 'kling',
-        costPerSecond: 4,
-        cost: 20,
+        costPerSecond: 5,
+        cost: 25,
         apiCostPerSecond: 0.07,
         available: true,
         requiresImage: false,
@@ -97,15 +98,15 @@ module.exports = {
 
       /**
        * Kling v2.6
-       * no audio: 0.07 => 4 ток/сек
-       * audio:    0.14 => 8 ток/сек
+       * no audio: 0.07 => 5 ток/сек
+       * audio:    0.14 => 9 ток/сек
        */
       {
         name: '🎭 Kling v2.6',
         key: 'kling_v2_6',
-        costPerSecond: 4,
-        costPerSecondAudio: 8,
-        cost: 20, // default 5s no-audio
+        costPerSecond: 5,
+        costPerSecondAudio: 9,
+        cost: 25, // default 5s no-audio
         apiCostPerSecond: 0.07,
         apiCostPerSecondAudio: 0.14,
         audioParam: 'generate_audio',
@@ -117,18 +118,18 @@ module.exports = {
 
       /**
        * Kling Motion Control
-       * std_image 0.50 => 26 ток
-       * std_video 1.00 => 51 ток
-       * pro_video 2.00 => 102 ток
+       * std_image 0.50 => 31 ток
+       * std_video 1.00 => 62 ток
+       * pro_video 2.00 => 124 ток
        */
       {
         name: '🔥 Kling Motion Control',
         key: 'kling_motion',
         costs: {
-          std_image: 26,
-          std_video: 51,
-          pro_image: 51,
-          pro_video: 102
+          std_image: 31,
+          std_video: 62,
+          pro_image: 62,
+          pro_video: 124
         },
         apiCosts: {
           std_image: 0.50,
@@ -136,8 +137,8 @@ module.exports = {
           pro_image: 1.00,
           pro_video: 2.00
         },
-        cost: 26,
-        maxCost: 102,
+        cost: 31,
+        maxCost: 124,
         available: true,
         requiresImage: true,
         requiresVideo: true
@@ -145,18 +146,18 @@ module.exports = {
 
       /**
        * Veo 3.1
-       * audio 0.40 => 21 ток/сек
-       * noAudio 0.20 => 11 ток/сек
-       * default 8s audio => 168 ток
+       * audio 0.40 => 25 ток/сек
+       * noAudio 0.20 => 13 ток/сек
+       * default 8s audio => 200 ток
        */
       {
         name: '🌟 Google Veo 3.1 💎',
         key: 'veo',
-        costPerSecondAudio: 21,
-        costPerSecondNoAudio: 11,
+        costPerSecondAudio: 25,
+        costPerSecondNoAudio: 13,
         minSeconds: 4,
         durations: [4, 8, 12],
-        cost: 168,
+        cost: 200, // 8 * 25
         apiCostPerSecondAudio: 0.40,
         apiCostPerSecondNoAudio: 0.20,
         available: true,
@@ -167,7 +168,7 @@ module.exports = {
       {
         name: '🎬 RunWay: Gen-4 Aleph 💎',
         key: 'runway_gen4',
-        cost: 0, // disabled anyway
+        cost: 0,
         apiCost: 0.9,
         available: false,
         requiresImage: true
@@ -180,27 +181,27 @@ module.exports = {
   design: {
     models: [
       /**
-       * 15% gross everywhere
+       * 30% gross everywhere
        */
-      // 0.065 => ceil(...) = 4
-      { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 4, apiCost: 0.065, available: true },
+      // 0.065 => ceil(...) = 5
+      { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 5, apiCost: 0.065, available: true },
 
-      // 0.15 => ceil(...) = 8
+      // 0.15 => ceil(...) = 10
       {
         name: '🍌 Nano Banana PRO 2K',
         key: 'nano_banana_2k',
-        cost: 8,
+        cost: 10,
         apiCost: 0.15,
         resolution: '2K',
         maxImages: 14,
         available: true
       },
 
-      // 0.30 => ceil(...) = 16
+      // 0.30 => ceil(...) = 19
       {
         name: '🍌🍌 Nano Banana PRO 4K',
         key: 'nano_banana_4k',
-        cost: 16,
+        cost: 19,
         apiCost: 0.30,
         resolution: '4K',
         maxImages: 14,
@@ -210,8 +211,8 @@ module.exports = {
       // 0.04 => ceil(...) = 3
       { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 3, apiCost: 0.04, size: '2K', maxImages: 14, available: true },
 
-      // 0.04 => ceil(...) = 3  (якщо реально apiCost інший для 4K — тоді перерахую)
-      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 6, apiCost: 0.08, size: '4K', maxImages: 14, available: true },
+      // 0.08 => ceil(...) = 5
+      { name: '🌊 Seedream 4.5 4K', key: 'seedream_4k', cost: 5, apiCost: 0.08, size: '4K', maxImages: 14, available: true },
 
       // 0.02 => 2
       { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 2, apiCost: 0.02, maxImages: 1, available: true },
@@ -232,16 +233,83 @@ module.exports = {
   },
 
   subscriptions: {
-    trial: { name: 'TRIAL', tokens: 35, price: 0, features: ['🎁 35 безкоштовних токенів', '✨ Спробуйте всі моделі', '⚡ Токени НЕ згорають!'] },
-    starter: { name: 'STARTER', tokens: 186, tokensLiqPay: 240, price: 299, priceUSD: 7, features: ['🚀 186⚡ токенів (Telegram Stars)', '🚀 260⚡ токенів (LiqPay)', '💎 Доступ до всіх моделей', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!', '📉 Чим більший план — тим дешевший ⚡'] },
-    basic: { name: 'BASIC', tokens: 620, tokensLiqPay: 810, price: 899, priceUSD: 20, features: ['💎 620⚡ токенів (Telegram Stars)', '💎 870⚡ токенів (LiqPay)', '🎨 Для активних користувачів', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!', '📉 Чим більший план — тим дешевший ⚡'] },
-    pro: { name: 'PRO', tokens: 1500, tokensLiqPay: 1960, price: 1999, priceUSD: 45, features: ['🔥 1500⚡ токенів (Telegram Stars)', '🔥 2100⚡ токенів (LiqPay)', '🚀 Для професіоналів', '⏰ Токени НЕ згорають', '⚡ Найкраще співвідношення', '📉 Чим більший план — тим дешевший ⚡'] },
-    premium: { name: 'PREMIUM', tokens: 4080, tokensLiqPay: 5300, price: 4999, priceUSD: 110, features: ['👑 4080⚡ токенів (Telegram Stars)', '👑 5700⚡ токенів (LiqPay)', '💫 Максимум можливостей', '⏰ Токени НЕ згорають', '👑 VIP підтримка 24/7', '📉 Найнижча ціна за ⚡'] }
+    // 👇 на старті даємо лише 15 токенів
+    trial: {
+      name: 'TRIAL',
+      tokens: 15,
+      price: 0,
+      features: [
+        '🎁 15 безкоштовних токенів',
+        '✨ Спробуйте базові моделі',
+        '⚡ Токени НЕ згорають!'
+      ]
+    },
+    starter: {
+      name: 'STARTER',
+      tokens: 186,
+      tokensLiqPay: 240,
+      price: 299,
+      priceUSD: 7,
+      features: [
+        '🚀 186⚡ токенів (Telegram Stars)',
+        '🚀 260⚡ токенів (LiqPay)',
+        '💎 Доступ до всіх моделей',
+        '⏰ Токени НЕ згорають',
+        '✨ Комбінуйте як завгодно!',
+        '📉 Чим більший план — тим дешевший ⚡'
+      ]
+    },
+    basic: {
+      name: 'BASIC',
+      tokens: 620,
+      tokensLiqPay: 810,
+      price: 899,
+      priceUSD: 20,
+      features: [
+        '💎 620⚡ токенів (Telegram Stars)',
+        '💎 870⚡ токенів (LiqPay)',
+        '🎨 Для активних користувачів',
+        '⏰ Токени НЕ згорають',
+        '✨ Комбінуйте як завгодно!',
+        '📉 Чим більший план — тим дешевший ⚡'
+      ]
+    },
+    pro: {
+      name: 'PRO',
+      tokens: 1500,
+      tokensLiqPay: 1960,
+      price: 1999,
+      priceUSD: 45,
+      features: [
+        '🔥 1500⚡ токенів (Telegram Stars)',
+        '🔥 2100⚡ токенів (LiqPay)',
+        '🚀 Для професіоналів',
+        '⏰ Токени НЕ згорають',
+        '⚡ Найкраще співвідношення',
+        '📉 Чим більший план — тим дешевший ⚡'
+      ]
+    },
+    premium: {
+      name: 'PREMIUM',
+      tokens: 4080,
+      tokensLiqPay: 5300,
+      price: 4999,
+      priceUSD: 110,
+      features: [
+        '👑 4080⚡ токенів (Telegram Stars)',
+        '👑 5700⚡ токенів (LiqPay)',
+        '💫 Максимум можливостей',
+        '⏰ Токени НЕ згорають',
+        '👑 VIP підтримка 24/7',
+        '📉 Найнижча ціна за ⚡'
+      ]
+    }
   },
 
   _pricingAssumptions: {
     worstCaseTokenUSD: WORST_CASE_TOKEN_USD,
-    targetGross: '≈15%',
-    pricingRule: 'tokens = ceil(apiCost / (0.85 * worstCaseTokenUSD))'
+    targetGross: '≈30%',
+    pricingRule: 'tokens = ceil(apiCost / (0.70 * worstCaseTokenUSD))',
+    note: 'liqpay fees/taxes враховуй окремо при розрахунку пакетів (LIQPAY_OVERHEAD = 7%)'
   }
 };
