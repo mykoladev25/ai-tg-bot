@@ -149,10 +149,9 @@ async function getSummary(from, to) {
   const cogs = cogsAgg[0] || {};
   const trial = trialAgg[0] || {};
   const trialTokensPerUser = TRIAL_TOKENS;
-  const effectiveTokenUSD = EFFECTIVE_TOKEN_USD ?? ((WORST_CASE_TOKEN_USD ?? (110 / 4760)) * 0.93 * 0.70);
-  const trialTokenLiabilityUSD = (freeUsersNew || 0) * trialTokensPerUser * effectiveTokenUSD;
   const revenueUSD = revenue.totalUSD || 0;
   const netRevenueUSD = revenueUSD * (NET_REVENUE_FACTOR ?? 0.93);
+  const trialTokenLiabilityUSD = trial.trialBurn || 0;
   const grossEstimated = netRevenueUSD - (cogs.totalCogs || 0) - trialTokenLiabilityUSD;
 
   return {
@@ -193,7 +192,7 @@ async function getSummary(from, to) {
       tokensPerUser: trialTokensPerUser,
       newUsers: freeUsersNew || 0,
       liabilityUSD: trialTokenLiabilityUSD,
-      effectiveTokenUSD: effectiveTokenUSD
+      source: 'usage_events'
     },
     gross: {
       estimated: grossEstimated,

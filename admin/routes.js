@@ -559,7 +559,7 @@ router.get('/dashboard', (req, res) => {
       </div>
       <div class="legend-item">
         <span class="legend-term">📈 Прибуток</span>
-        <span class="legend-desc">— (Дохід після fees, WayForPay 7%) мінус Собівартість мінус бонуси новим (${TRIAL_TOKENS}⚡)</span>
+        <span class="legend-desc">— (Дохід після fees, WayForPay 7%) мінус Собівартість мінус реальні trial витрати</span>
       </div>
       <div class="legend-item">
         <span class="legend-term">🔥 Trial витрати</span>
@@ -836,9 +836,9 @@ router.get('/dashboard', (req, res) => {
             </div>
             <div class="card">
               <div class="card-title">📈 Прибуток</div>
-              <div class="card-hint">Дохід після fees (WayForPay 7%) - Собівартість - бонуси новим (\${trialTokensPerUser}⚡)</div>
+              <div class="card-hint">Дохід після fees (WayForPay 7%) - Собівартість - trial витрати (реально)</div>
               <div class="card-value">\${formatUSD(d.gross.estimated)}</div>
-              <div class="card-subtitle">\${d.gross.marginPercent}% маржа (після fees) • -\${formatUSD(trialBonusUSD)} бонуси (\${trialBonusUsers} юз.)</div>
+              <div class="card-subtitle">\${d.gross.marginPercent}% маржа (після fees) • -\${formatUSD(trialBonusUSD)} trial витрати (\${trialBonusUsers} юз.)</div>
             </div>
             <div class="card">
               <div class="card-title">🔥 Trial витрати</div>
