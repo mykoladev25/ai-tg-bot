@@ -13,9 +13,9 @@ const UsageEvent = require('../database/models/UsageEvent');
 const PaymentEvent = require('../database/models/PaymentEvent');
 const models = require('../config/models');
 
-// Ціна 1 токена в USD (найгірший випадок з premium плану)
+// Ціна 1 токена в USD (worst-case з premium плану)
 // Потрібна для розрахунку Revenue
-const TOKEN_PRICE_USD = 110 / 4760; // ≈ $0.0231 за токен
+const TOKEN_PRICE_USD = models._pricingAssumptions?.worstCaseTokenUSD ?? (110 / 4760);
 
 /**
  * Generate unique request ID

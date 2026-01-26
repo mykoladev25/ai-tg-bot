@@ -1,5 +1,8 @@
 const User = require('../database/models/User');
 const Transaction = require('../database/models/Transaction');
+const models = require('../config/models');
+
+const TRIAL_TOKENS = models.subscriptions?.trial?.tokens ?? 15;
 
 /**
  * Отримати або створити користувача
@@ -16,8 +19,8 @@ async function getUser(userId, userInfo = {}) {
         firstName: userInfo.first_name,
         lastName: userInfo.last_name,
         languageCode: userInfo.language_code || 'uk',
-        tokens: 15,  // Початковий баланс
-        totalTokensEarned: 15
+        tokens: TRIAL_TOKENS,  // Початковий баланс
+        totalTokensEarned: TRIAL_TOKENS
       });
 
       await user.save();
@@ -27,9 +30,9 @@ async function getUser(userId, userInfo = {}) {
         userId,
         type: 'bonus',
         category: 'initial',
-        amount: 10,
+        amount: TRIAL_TOKENS,
         balanceBefore: 0,
-        balanceAfter: 10,
+        balanceAfter: TRIAL_TOKENS,
         description: 'Початковий бонус при реєстрації'
       });
     } else {

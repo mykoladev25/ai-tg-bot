@@ -1,4 +1,7 @@
 const mongoose = require('mongoose');
+const models = require('../../config/models');
+
+const TRIAL_TOKENS = models.subscriptions?.trial?.tokens ?? 15;
 
 const userSchema = new mongoose.Schema({
   // Telegram user info
@@ -9,10 +12,10 @@ const userSchema = new mongoose.Schema({
   languageCode: { type: String, default: 'uk' },
   
   // Баланс токенів
-  tokens: { type: Number, default: 35, required: true },  // Початковий баланс 35
+  tokens: { type: Number, default: TRIAL_TOKENS, required: true },  // Початковий баланс
   totalTokensPurchased: { type: Number, default: 0 },
   totalTokensSpent: { type: Number, default: 0 },
-  totalTokensEarned: { type: Number, default: 35 },  // Включає початковий бонус
+  totalTokensEarned: { type: Number, default: TRIAL_TOKENS },  // Включає початковий бонус
   
   // Trial usage tracking (для обмеження дорогих генерацій)
   trialUsage: {

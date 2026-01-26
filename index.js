@@ -6162,7 +6162,9 @@ async function startBot() {
 
         // Default tokenPriceUSD = premium plan (найкращий для клієнта, найгірший для нас)
         // Використовується для backwards compatibility та UI calculations
-        const tokenPriceUSD = tokenPriceUSDByPlan.premium || 0.02311; // fallback: 110/4760
+        const tokenPriceUSD = tokenPriceUSDByPlan.premium
+          || models._pricingAssumptions?.worstCaseTokenUSD
+          || 0.02311; // fallback: 110/4760
 
         // Helper: calculate gross margin for a model
         const calcGrossMargin = (cost, apiCost) => {
