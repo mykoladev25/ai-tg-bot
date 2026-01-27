@@ -16,6 +16,18 @@ const ALERT_TRIAL_BURN_USD_DAILY = parseFloat(process.env.ALERT_TRIAL_BURN_USD_D
 const ALERT_FAIL_RATE_PCT = Number.isFinite(parseFloat(process.env.ALERT_FAIL_RATE_PCT))
   ? parseFloat(process.env.ALERT_FAIL_RATE_PCT)
   : DEFAULT_ALERT_FAIL_RATE_PCT;
+const ALERT_FAIL_RATE_MIN_GENERATIONS = Number.isFinite(parseInt(process.env.ALERT_FAIL_RATE_MIN_GENERATIONS, 10))
+  ? parseInt(process.env.ALERT_FAIL_RATE_MIN_GENERATIONS, 10)
+  : 5;
+
+const sentAlerts = new Set();
+
+function shouldSendAlert(type, dateKey) {
+  const key = `${dateKey}:${type}`;
+  if (sentAlerts.has(key)) return false;
+  sentAlerts.add(key);
+  return true;
+}
 
 /**
  * Check daily metrics and send alerts if thresholds exceeded
@@ -38,9 +50,10 @@ async function checkAndAlert(bot) {
     );
 
     const alerts = [];
+    const dateKey = now.toISOString().split('T')[0];
 
     // Check COGS
-    if (summary.cogs.estimated > ALERT_COGS_USD_DAILY) {
+    if (summary.cogs.estimated > ALERT_COGS_USD_DAILY && shouldSendAlert('cogs', dateKey)) {
       alerts.push(
         `🔴 <b>COGS Alert!</b>\n` +
         `Today's API costs: $${summary.cogs.estimated.toFixed(2)}\n` +
@@ -49,7 +62,7 @@ async function checkAndAlert(bot) {
     }
 
     // Check trial burn
-    if (summary.trial.burnUSD > ALERT_TRIAL_BURN_USD_DAILY) {
+    if (summary.trial.burnUSD > ALERT_TRIAL_BURN_USD_DAILY && shouldSendAlert('trial', dateKey)) {
       alerts.push(
         `🟠 <b>Trial Burn Alert!</b>\n` +
         `Today's trial API costs: $${summary.trial.burnUSD.toFixed(2)}\n` +
@@ -58,13 +71,20 @@ async function checkAndAlert(bot) {
     }
 
     // Check fail rate
-    const failRate = 100 - parseFloat(summary.cogs.successRate);
-    if (failRate > ALERT_FAIL_RATE_PCT) {
-      alerts.push(
-        `🟡 <b>Fail Rate Alert!</b>\n` +
-        `Today's fail rate: ${failRate.toFixed(1)}%\n` +
-        `Threshold: ${ALERT_FAIL_RATE_PCT}%`
-      );
+    const generationCount = summary.cogs.generations || 0;
+    if (generationCount >= ALERT_FAIL_RATE_MIN_GENERATIONS) {
+      const successRate = parseFloat(summary.cogs.successRate);
+      const failRate = Number.isFinite(successRate) ? (100 - successRate) : null;
+      if (Number.isFinite(failRate) && failRate > ALERT_FAIL_RATE_PCT && shouldSendAlert('failRate', dateKey)) {
+        alerts.push(
+          `🟡 <b>Fail Rate Alert!</b>\n` +
+          `Today's fail rate: ${failRate.toFixed(1)}%\n` +
+          `Threshold: ${ALERT_FAIL_RATE_PCT}%\n` +
+          `Generations: ${generationCount}`
+        );
+      }
+    } else {
+      console.log(`ℹ️ [Alerts] Fail rate skipped (gen count ${generationCount} < ${ALERT_FAIL_RATE_MIN_GENERATIONS})`);
     }
 
     // Send alerts
