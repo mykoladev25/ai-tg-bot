@@ -244,7 +244,7 @@ module.exports = {
   subscriptions: {
     trial: {
       name: 'TRIAL',
-      tokens: 0.1,
+      tokens: 7,
       price: 0,
       priceUSD: 0,
       features: ['🎁 7 безкоштовних токенів', '✨ Спробуйте базові моделі', '⚡ Токени НЕ згорають!']
@@ -254,7 +254,7 @@ module.exports = {
       name: 'STARTER',
       tokens: 700,
       tokensWayForPay: 700,
-      priceUSD: 7,
+      priceUSD: 0.1,
       price: 552,
       features: ['🚀 700⚡ токенів', '💎 Доступ до всіх моделей', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!']
     },
