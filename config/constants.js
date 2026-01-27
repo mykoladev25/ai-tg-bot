@@ -1,7 +1,8 @@
 const models = require('./models');
 
 const TRIAL_TOKENS = models.subscriptions?.trial?.tokens;
-const WORST_CASE_TOKEN_USD = models._pricingAssumptions?.worstCaseTokenUSD;
+const WORST_CASE_TOKEN_USD = models._pricingAssumptions?.tokenUSD
+  ?? models._pricingAssumptions?.worstCaseTokenUSD;
 const NET_REVENUE_FACTOR = models._pricingAssumptions?.netRevenueFactor;
 const API_BUDGET_FACTOR = models._pricingAssumptions?.apiBudgetFactor;
 const EFFECTIVE_TOKEN_USD = models._pricingAssumptions?.effectiveTokenUSD;

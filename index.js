@@ -4173,6 +4173,91 @@ bot.action(/^pay_stars_(starter|basic|pro|premium)$/, async (ctx) => {
   }
 });
 
+// ✅ Telegram Stars: pre-checkout handler (required)
+bot.on('pre_checkout_query', async (ctx) => {
+  try {
+    await ctx.answerPreCheckoutQuery(true);
+  } catch (error) {
+    console.error('pre_checkout_query error:', error);
+  }
+});
+
+// ✅ Telegram Stars: successful payment handler
+bot.on('successful_payment', async (ctx) => {
+  const payment = ctx.message.successful_payment;
+  const userId = ctx.from.id;
+
+  let payload;
+  try {
+    payload = JSON.parse(payment.invoice_payload || '{}');
+  } catch (e) {
+    payload = null;
+  }
+
+  if (!payload || payload.type !== 'tokens_purchase') {
+    console.warn('⚠️ Unknown payment payload:', payment.invoice_payload);
+    return;
+  }
+
+  const planKey = payload.plan;
+  const sub = models.subscriptions[planKey];
+  if (!sub) {
+    await ctx.reply('❌ План не знайдено. Зверніться до підтримки.');
+    return;
+  }
+
+  const tokens = sub.tokens; // Stars — без бонусів
+  const amountStars = payment.total_amount;
+
+  try {
+    await userBalance.addTokens(userId, tokens, 'stars_payment', {
+      plan: sub.name,
+      planKey,
+      stars: amountStars,
+      currency: payment.currency,
+      telegramPaymentChargeId: payment.telegram_payment_charge_id,
+      providerPaymentChargeId: payment.provider_payment_charge_id
+    });
+
+    // Log payment for revenue stats
+    try {
+      const PaymentEvent = require('./database/models/PaymentEvent');
+      await PaymentEvent.logPayment({
+        provider: 'stars',
+        providerPaymentId: payment.telegram_payment_charge_id || payment.provider_payment_charge_id,
+        planKey,
+        planName: sub.name,
+        amountStars,
+        amountUSD: sub.priceUSD ?? null,
+        tokensGranted: tokens,
+        status: 'success',
+        raw: payment
+      });
+    } catch (e) {
+      console.warn('⚠️ Could not log stars payment:', e.message);
+    }
+
+    const user = await userBalance.getUser(userId, { id: userId });
+    await ctx.reply(
+      `✅ <b>Оплату отримано!</b>\n\n` +
+      `⭐ Метод: Telegram Stars\n` +
+      `💎 Тариф: ${sub.name}\n` +
+      `⚡ Токенів нараховано: ${tokens}\n` +
+      `💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
+      `Дякуємо за покупку! 🎉`,
+      { parse_mode: 'HTML' }
+    );
+  } catch (error) {
+    console.error('❌ Stars payment processing error:', error);
+    await ctx.reply(
+      '⚠️ Платіж отримано, але токени не нараховані.\n' +
+      'Ми вже розбираємось. Напишіть в підтримку.',
+      keyboard.createMainMenu()
+    );
+    await adminNotifier.notifyAdmin(bot, error, { userId, action: 'stars_payment', planKey, amountStars });
+  }
+});
+
 // ==================== MESSAGE HANDLERS ====================
 
 bot.on('text', async (ctx) => {
