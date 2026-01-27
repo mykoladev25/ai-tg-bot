@@ -43,6 +43,10 @@ const isShowBroadCast = process.env.SEND_STARTUP_BROADCAST === 'true' && false;
 // Для збирання feedback від користувачів
 const feedbackData = new Map(); // userId -> { type, message, timestamp }
 
+// Чернетки розсилок (адмін)
+const broadcastDrafts = new Map(); // adminId -> { type, text?, caption?, fileId?, parseMode? }
+const broadcastStates = new Map(); // adminId -> { step: 'awaiting_content', parseMode }
+
 // Стан генерації зображень (новий флоу)
 // userId -> { model: string, prompt?: string, photos?: Array, step: 'waiting_photos'|'prompt' }
 const imageGenState = new Map();
@@ -907,6 +911,159 @@ bot.command(/^unblock_(\d+)$/, async (ctx) => {
   } else {
     await ctx.reply(`❌ Помилка при розблокуванні користувача`);
   }
+});
+
+// ==================== BROADCAST (ADMIN) ====================
+
+bot.command('broadcast', async (ctx) => {
+  const adminId = getAdminTelegramId();
+  if (!adminId || ctx.from.id !== adminId) {
+    await ctx.reply('❌ Доступ заборонений');
+    return;
+  }
+
+  const parts = ctx.message.text.trim().split(' ');
+  const args = parts.slice(1);
+
+  let parseMode = 'HTML';
+  if (args.length) {
+    const modeCandidate = args[0].toLowerCase();
+    if (['html', 'plain', 'text', 'none', 'off'].includes(modeCandidate)) {
+      parseMode = resolveBroadcastParseMode(modeCandidate);
+      args.shift();
+    }
+  }
+
+  const inlineText = args.join(' ').trim();
+
+  broadcastDrafts.delete(adminId);
+  broadcastStates.delete(adminId);
+
+  if (inlineText) {
+    const draft = { type: 'text', text: inlineText, parseMode };
+    broadcastDrafts.set(adminId, draft);
+    await sendBroadcastPreview(ctx, draft);
+    return;
+  }
+
+  broadcastStates.set(adminId, { step: 'awaiting_content', parseMode });
+
+  const modeLabel = parseMode ? 'HTML' : 'без форматування';
+  await ctx.reply(
+    `📣 <b>Режим розсилки</b>\n\n` +
+    `Надішліть повідомлення для розсилки.\n` +
+    `Підтримка: текст, фото, відео, кружечки.\n` +
+    `Підпис (caption) доступний для фото/відео.\n\n` +
+    `Форматування: <b>${modeLabel}</b>\n` +
+    `Скасувати: /broadcast_cancel`,
+    { parse_mode: 'HTML' }
+  );
+});
+
+bot.command('broadcast_cancel', async (ctx) => {
+  const adminId = getAdminTelegramId();
+  if (!adminId || ctx.from.id !== adminId) {
+    await ctx.reply('❌ Доступ заборонений');
+    return;
+  }
+
+  broadcastStates.delete(adminId);
+  broadcastDrafts.delete(adminId);
+  await ctx.reply('✅ Розсилку скасовано.');
+});
+
+bot.action('broadcast_send', async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const adminId = getAdminTelegramId();
+  if (!adminId || ctx.from.id !== adminId) {
+    await ctx.reply('❌ Доступ заборонений');
+    return;
+  }
+
+  const draft = broadcastDrafts.get(adminId);
+  if (!draft) {
+    await ctx.reply('⚠️ Чернетку не знайдено. Запустіть /broadcast ще раз.');
+    return;
+  }
+
+  broadcastStates.delete(adminId);
+
+  await ctx.reply('📢 Розсилка запущена. Зачекайте...');
+
+  try {
+    const stats = await broadcastPayload(draft);
+    broadcastDrafts.delete(adminId);
+
+    await ctx.reply(
+      `✅ Розсилка завершена:\n` +
+      `✅ Надіслано: ${stats.success}\n` +
+      `❌ Помилок: ${stats.failed}`
+    );
+  } catch (error) {
+    console.error('Broadcast send error:', error);
+    await ctx.reply('❌ Помилка розсилки. Перевірте логи.');
+  }
+});
+
+bot.action('broadcast_cancel', async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const adminId = getAdminTelegramId();
+  if (!adminId || ctx.from.id !== adminId) {
+    await ctx.reply('❌ Доступ заборонений');
+    return;
+  }
+
+  broadcastStates.delete(adminId);
+  broadcastDrafts.delete(adminId);
+  await ctx.reply('✅ Розсилку скасовано.');
+});
+
+// Перехоплюємо контент для превʼю (тільки адмін)
+bot.on('message', async (ctx, next) => {
+  const adminId = getAdminTelegramId();
+  if (!adminId || ctx.from.id !== adminId) return next();
+
+  const state = broadcastStates.get(adminId);
+  if (!state || state.step !== 'awaiting_content') return next();
+
+  const text = ctx.message.text;
+  if (text && text.startsWith('/')) {
+    const cmd = text.split(' ')[0].toLowerCase();
+    if (cmd === '/broadcast_cancel') {
+      return next();
+    }
+  }
+
+  const parseMode = state.parseMode ?? null;
+  let draft = null;
+
+  if (ctx.message.text) {
+    draft = { type: 'text', text: ctx.message.text, parseMode };
+  } else if (ctx.message.photo) {
+    const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+    draft = { type: 'photo', fileId, caption: ctx.message.caption || '', parseMode };
+  } else if (ctx.message.video) {
+    const fileId = ctx.message.video.file_id;
+    draft = { type: 'video', fileId, caption: ctx.message.caption || '', parseMode };
+  } else if (ctx.message.video_note) {
+    const fileId = ctx.message.video_note.file_id;
+    draft = { type: 'video_note', fileId };
+  } else if (ctx.message.document) {
+    const fileId = ctx.message.document.file_id;
+    draft = { type: 'document', fileId, caption: ctx.message.caption || '', parseMode };
+  }
+
+  if (!draft) {
+    await ctx.reply('⚠️ Підтримка: текст, фото, відео, кружечки.');
+    return;
+  }
+
+  broadcastDrafts.set(adminId, draft);
+  broadcastStates.delete(adminId);
+
+  await sendBroadcastPreview(ctx, draft);
 });
 
 // Обробники feedback категорій
@@ -5918,16 +6075,120 @@ async function showInsufficientTokens(ctx, required) {
   );
 }
 
-async function broadcastMessage(message, parseMode = null) {
+function getAdminTelegramId() {
+  const adminId = parseInt(process.env.ADMIN_TELEGRAM_ID || '0');
+  return Number.isFinite(adminId) ? adminId : 0;
+}
+
+function getBroadcastPriorityIds() {
+  const raw = process.env.BROADCAST_PRIORITY_IDS || '';
+  if (!raw.trim()) return [];
+  const ids = raw
+    .split(/[,\s]+/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  return Array.from(new Set(ids));
+}
+
+function resolveBroadcastParseMode(modeArg) {
+  const normalized = (modeArg || '').toLowerCase();
+  if (['plain', 'text', 'none', 'off'].includes(normalized)) return null;
+  return 'HTML';
+}
+
+function buildMessageOptions(parseMode) {
+  const options = { disable_web_page_preview: true };
+  if (parseMode) options.parse_mode = parseMode;
+  return options;
+}
+
+function buildMediaOptions(caption, parseMode) {
+  const options = {};
+  if (caption) options.caption = caption;
+  if (caption && parseMode) options.parse_mode = parseMode;
+  return options;
+}
+
+function buildBroadcastConfirmKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('✅ Надіслати всім', 'broadcast_send')],
+    [Markup.button.callback('❌ Скасувати', 'broadcast_cancel')]
+  ]);
+}
+
+async function sendBroadcastToChatId(chatId, draft) {
+  if (draft.type === 'text') {
+    return bot.telegram.sendMessage(chatId, draft.text, buildMessageOptions(draft.parseMode));
+  }
+  if (draft.type === 'photo') {
+    return bot.telegram.sendPhoto(chatId, draft.fileId, buildMediaOptions(draft.caption, draft.parseMode));
+  }
+  if (draft.type === 'video') {
+    return bot.telegram.sendVideo(chatId, draft.fileId, buildMediaOptions(draft.caption, draft.parseMode));
+  }
+  if (draft.type === 'video_note') {
+    return bot.telegram.sendVideoNote(chatId, draft.fileId);
+  }
+  if (draft.type === 'document') {
+    return bot.telegram.sendDocument(chatId, draft.fileId, buildMediaOptions(draft.caption, draft.parseMode));
+  }
+
+  throw new Error(`Unsupported broadcast type: ${draft.type}`);
+}
+
+async function sendBroadcastPreview(ctx, draft) {
+  if (draft.type === 'text') {
+    await ctx.reply(draft.text, buildMessageOptions(draft.parseMode));
+  } else if (draft.type === 'photo') {
+    await ctx.replyWithPhoto(draft.fileId, buildMediaOptions(draft.caption, draft.parseMode));
+  } else if (draft.type === 'video') {
+    await ctx.replyWithVideo(draft.fileId, buildMediaOptions(draft.caption, draft.parseMode));
+  } else if (draft.type === 'video_note') {
+    await ctx.replyWithVideoNote(draft.fileId);
+  } else if (draft.type === 'document') {
+    await ctx.replyWithDocument(draft.fileId, buildMediaOptions(draft.caption, draft.parseMode));
+  }
+
+  await ctx.reply('Підтвердити розсилку?', buildBroadcastConfirmKeyboard());
+}
+
+async function broadcastDraft(draft) {
   try {
     console.log('📢 Starting broadcast...');
     const User = require('./database/models/User');
     const users = await User.find({}, '_id username');
     console.log(`📊 Found ${users.length} users`);
-    
+
+    const priorityIds = getBroadcastPriorityIds();
+    const prioritySet = new Set(priorityIds);
+
     let successCount = 0;
     let failCount = 0;
-    
+
+    if (priorityIds.length) {
+      console.log(`⭐ Priority-only broadcast to ${priorityIds.length} users`);
+      for (const chatId of priorityIds) {
+        try {
+          await sendBroadcastToChatId(chatId, draft);
+          successCount++;
+          console.log(`✅ Sent to ${chatId} (priority)`);
+          await new Promise(resolve => setTimeout(resolve, 35));
+        } catch (error) {
+          failCount++;
+          console.error(`❌ Failed to send to ${chatId} (priority):`, error.message);
+        }
+      }
+    }
+
+    // Якщо заданий список, розсилаємо ТІЛЬКИ цим користувачам
+    if (priorityIds.length) {
+      console.log('ℹ️ Broadcast limited to priority list only.');
+      console.log(`✅ Broadcast complete: ${successCount} sent, ${failCount} failed`);
+      return { success: successCount, failed: failCount };
+    }
+
     for (const user of users) {
       try {
         const chatId = user._id;
@@ -5937,7 +6198,7 @@ async function broadcastMessage(message, parseMode = null) {
           continue;
         }
         
-        await bot.telegram.sendMessage(chatId, message, { parse_mode: parseMode, disable_web_page_preview: true });
+        await sendBroadcastToChatId(chatId, draft);
         successCount++;
         console.log(`✅ Sent to ${chatId} (@${user.username || 'no_username'})`);
         await new Promise(resolve => setTimeout(resolve, 35));
@@ -5946,13 +6207,25 @@ async function broadcastMessage(message, parseMode = null) {
         console.error(`❌ Failed to send to ${user._id}:`, error.message);
       }
     }
-    
+
     console.log(`✅ Broadcast complete: ${successCount} sent, ${failCount} failed`);
     return { success: successCount, failed: failCount };
   } catch (error) {
     console.error('Broadcast error:', error);
     throw error;
   }
+}
+
+async function broadcastPayload(draft) {
+  return broadcastDraft(draft);
+}
+
+async function broadcastMedia(draft) {
+  return broadcastDraft(draft);
+}
+
+async function broadcastMessage(message, parseMode = null) {
+  return broadcastDraft({ type: 'text', text: message, parseMode });
 }
 
 // ==================== ЗАПУСК БОТА ====================
