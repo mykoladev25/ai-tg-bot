@@ -6077,8 +6077,15 @@ async function showProfile(ctx) {
 
 async function showInsufficientTokens(ctx, required) {
   const user = await userBalance.getUser(ctx.from.id, ctx.from);
+  const starterPlan = models.subscriptions?.starter;
+  const starterTokens = starterPlan?.tokensWayForPay ?? starterPlan?.tokens;
+  const starterPrice = starterPlan?.priceUSD;
+  const starterName = starterPlan?.name || 'STARTER';
+  const starterLine = (starterTokens && starterPrice)
+    ? `Рекомендуємо тариф ${starterName} — всього ${starterPrice}$ — ${starterTokens} токенів😍\n\n`
+    : '';
   await ctx.reply(
-    `⚠️ Недостатньо токенів!\n\nНеобхідно: ${required}⚡\nВаш баланс: ${user.tokens.toFixed(2)}⚡\n\nКупіть підписку та отримайте більше токенів 👇`,
+    `Ви використали токени.🙌🏻\n\nНеобхідно: ${required}⚡\nВаш баланс: ${user.tokens.toFixed(2)}⚡\n\nВсі генерації в таких нейромережах коштують нам реальних грошей. Але ми зробили зручний бот, де ви можете користуватись ними прямо в Телеграм 😍\n\n${starterLine}Щоб продовжити, придбайте підписку та отримайте більше токенів👇🏻\n\n`,
     keyboard.createSubscriptionMenu()
   );
 }

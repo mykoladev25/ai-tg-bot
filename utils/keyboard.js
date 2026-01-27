@@ -181,18 +181,15 @@ function createSubscriptionsMenu() {
   const paidPlans = ['starter', 'basic', 'pro', 'premium'];
   const emojis = { starter: '🚀', basic: '💎', pro: '🔥', premium: '👑' };
 
-  // Показуємо tokensWayForPay (більше токенів за картку) на кнопках
-  const getTokens = (plan) => subscriptions[plan].tokensWayForPay || subscriptions[plan].tokens;
-
   // По 2 кнопки в ряд
   const buttons = [
     [
-      Markup.button.callback(`${emojis.starter} ${getTokens('starter')}⚡`, 'sub_starter'),
-      Markup.button.callback(`${emojis.basic} ${getTokens('basic')}⚡`, 'sub_basic')
+      Markup.button.callback(`${emojis.starter} STARTER`, 'sub_starter'),
+      Markup.button.callback(`${emojis.basic} BASIC`, 'sub_basic')
     ],
     [
-      Markup.button.callback(`${emojis.pro} ${getTokens('pro')}⚡`, 'sub_pro'),
-      Markup.button.callback(`${emojis.premium} ${getTokens('premium')}⚡`, 'sub_premium')
+      Markup.button.callback(`${emojis.pro} PRO`, 'sub_pro'),
+      Markup.button.callback(`${emojis.premium} PREMIUM`, 'sub_premium')
     ],
     [Markup.button.callback('← Назад', 'main_menu')]
   ];
