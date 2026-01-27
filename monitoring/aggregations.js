@@ -337,6 +337,86 @@ async function getTopModels(from, to, limit = 10) {
 }
 
 /**
+ * Get top users by tokens spent
+ */
+async function getTopUsers(from, to, limit = 10) {
+  const { startDate, endDate } = parseDateRange(from, to);
+
+  return UsageEvent.aggregate([
+    {
+      $match: {
+        ts: { $gte: startDate, $lte: endDate }
+      }
+    },
+    {
+      $group: {
+        _id: '$userId',
+        generations: { $sum: 1 },
+        successCount: { $sum: { $cond: ['$success', 1, 0] } },
+        tokensSpent: { $sum: '$tokensSpent' },
+        cogs: { $sum: '$estimatedApiCostUSD' },
+        revenue: { $sum: '$estimatedRevenueUSD' }
+      }
+    },
+    {
+      $addFields: {
+        userIdLong: {
+          $convert: { input: '$_id', to: 'long', onError: null, onNull: null }
+        }
+      }
+    },
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'userIdLong',
+        foreignField: '_id',
+        as: 'user'
+      }
+    },
+    {
+      $unwind: { path: '$user', preserveNullAndEmptyArrays: true }
+    },
+    {
+      $project: {
+        userId: '$_id',
+        tokensSpent: 1,
+        generations: 1,
+        cogs: 1,
+        revenue: 1,
+        successRate: {
+          $cond: [
+            { $gt: ['$generations', 0] },
+            { $multiply: [{ $divide: ['$successCount', '$generations'] }, 100] },
+            0
+          ]
+        },
+        user: {
+          _id: '$user._id',
+          username: '$user.username',
+          firstName: '$user.firstName',
+          lastName: '$user.lastName',
+          languageCode: '$user.languageCode',
+          subscription: '$user.subscription',
+          tokens: '$user.tokens',
+          totalTokensSpent: '$user.totalTokensSpent',
+          totalTokensPurchased: '$user.totalTokensPurchased',
+          totalTokensEarned: '$user.totalTokensEarned',
+          isBanned: '$user.isBanned',
+          isAdmin: '$user.isAdmin',
+          referralCode: '$user.referralCode',
+          referredBy: '$user.referredBy',
+          referralEarnings: '$user.referralEarnings',
+          createdAt: '$user.createdAt',
+          lastActivityAt: '$user.lastActivityAt'
+        }
+      }
+    },
+    { $sort: { tokensSpent: -1 } },
+    { $limit: limit }
+  ]);
+}
+
+/**
  * Compute and cache daily summary
  */
 async function computeDailySummary(dayString) {
@@ -359,6 +439,7 @@ module.exports = {
   getFailRate,
   getPurchasesByPlan,
   getTopModels,
+  getTopUsers,
   getReplicateBalance,
   computeDailySummary,
   getDailySummaries

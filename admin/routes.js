@@ -139,6 +139,21 @@ router.get('/metrics/top-models', async (req, res) => {
 });
 
 /**
+ * GET /admin/metrics/top-users
+ * Top users by tokens spent
+ */
+router.get('/metrics/top-users', async (req, res) => {
+  try {
+    const { from, to, limit = 20 } = req.query;
+    const data = await aggregations.getTopUsers(from, to, parseInt(limit));
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Admin top-users error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * POST /admin/metrics/reset
  * Reset analytics collections (UsageEvent, PaymentEvent, DailySummary)
  * Body: { scope: 'all'|'usage'|'payments'|'daily', confirm: 'RESET' }
@@ -414,6 +429,28 @@ router.get('/dashboard', (req, res) => {
       font-weight: 500;
     }
     td { font-size: 14px; }
+    details {
+      color: var(--text-muted);
+    }
+    details summary {
+      cursor: pointer;
+      color: var(--text);
+      font-size: 12px;
+      list-style: none;
+    }
+    details summary::-webkit-details-marker {
+      display: none;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 6px 12px;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+    .detail-item span {
+      color: var(--text);
+    }
     .loading {
       text-align: center;
       padding: 40px;
@@ -623,6 +660,27 @@ router.get('/dashboard', (req, res) => {
         </tbody>
       </table>
     </div>
+
+    <div class="section">
+      <h2 class="section-title">👤 Топ юзерів по токенах</h2>
+      <p class="section-hint">Користувачі, які витратили найбільше токенів за період</p>
+      <table id="users-table">
+        <thead>
+          <tr>
+            <th>Юзер</th>
+            <th>Токенів</th>
+            <th>Генерацій</th>
+            <th>Собівартість $</th>
+            <th>Дохід $</th>
+            <th>Успішність</th>
+            <th>Деталі</th>
+          </tr>
+        </thead>
+        <tbody id="users-body">
+          <tr><td colspan="7" class="loading">Завантаження...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <!-- Tab: Pricing -->
@@ -708,6 +766,15 @@ router.get('/dashboard', (req, res) => {
     
     function formatPct(val) {
       return (val || 0).toFixed(1) + '%';
+    }
+
+    function formatDate(val) {
+      if (!val) return '—';
+      try {
+        return new Date(val).toLocaleString('uk-UA');
+      } catch (e) {
+        return '—';
+      }
     }
 
     // Tabs
@@ -906,6 +973,67 @@ router.get('/dashboard', (req, res) => {
                   <td><span class="badge badge-\${failClass}">\${formatPct(m.failRate)}</span></td>
                 </tr>
               \`;
+            }).join('');
+          }
+        }
+
+        // Top users
+        const users = await fetchAPI('/metrics/top-users?from=' + from + '&to=' + to + '&limit=20');
+        if (users.success) {
+          const tbody = document.getElementById('users-body');
+          if (users.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7">Немає даних за період</td></tr>';
+          } else {
+            tbody.innerHTML = users.data.map(u => {
+              const user = u.user || {};
+              const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ');
+              const username = user.username ? '@' + user.username : '—';
+              const subscription = user.subscription?.type || 'TRIAL';
+              const subActive = user.subscription?.isActive ? 'active' : 'inactive';
+              const subExpires = formatDate(user.subscription?.expiresAt);
+              const createdAt = formatDate(user.createdAt);
+              const lastActivity = formatDate(user.lastActivityAt);
+              const locale = user.languageCode || '—';
+              const statusFlags = [
+                user.isAdmin ? 'admin' : null,
+                user.isBanned ? 'banned' : null
+              ].filter(Boolean).join(', ') || '—';
+
+              return `
+                <tr>
+                  <td>
+                    <strong>${fullName || 'Без імені'}</strong><br/>
+                    <span class="badge">${username}</span><br/>
+                    <span class="card-subtitle">ID: ${u.userId}</span>
+                  </td>
+                  <td><strong>${(u.tokensSpent || 0).toFixed(0)}⚡</strong></td>
+                  <td>${u.generations || 0}</td>
+                  <td>${formatUSD(u.cogs)}</td>
+                  <td>${formatUSD(u.revenue)}</td>
+                  <td>${formatPct(u.successRate)}</td>
+                  <td>
+                    <details>
+                      <summary>Деталі</summary>
+                      <div class="detail-grid">
+                        <div class="detail-item">Підписка: <span>${subscription}</span></div>
+                        <div class="detail-item">Статус: <span>${subActive}</span></div>
+                        <div class="detail-item">До: <span>${subExpires}</span></div>
+                        <div class="detail-item">Мова: <span>${locale}</span></div>
+                        <div class="detail-item">Баланс: <span>${Number(user.tokens || 0).toFixed(2)}⚡</span></div>
+                        <div class="detail-item">Куплено: <span>${user.totalTokensPurchased || 0}⚡</span></div>
+                        <div class="detail-item">Витрачено: <span>${user.totalTokensSpent || 0}⚡</span></div>
+                        <div class="detail-item">Зароблено: <span>${user.totalTokensEarned || 0}⚡</span></div>
+                        <div class="detail-item">Статус/ролі: <span>${statusFlags}</span></div>
+                        <div class="detail-item">Referral: <span>${user.referralCode || '—'}</span></div>
+                        <div class="detail-item">Referred by: <span>${user.referredBy || '—'}</span></div>
+                        <div class="detail-item">Referral $: <span>${formatUSD(user.referralEarnings || 0)}</span></div>
+                        <div class="detail-item">Створено: <span>${createdAt}</span></div>
+                        <div class="detail-item">Остання активність: <span>${lastActivity}</span></div>
+                      </div>
+                    </details>
+                  </td>
+                </tr>
+              `;
             }).join('');
           }
         }
