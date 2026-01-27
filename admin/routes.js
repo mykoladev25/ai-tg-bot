@@ -816,6 +816,12 @@ router.get('/dashboard', (req, res) => {
           if (p.pricePerSecondAudio && p.pricePerSecondNoAudio) {
             // Veo - показуємо обидва варіанти
             priceDisplay = \`$\${p.pricePerSecondAudio.toFixed(2)}/сек 🔊<br>$\${p.pricePerSecondNoAudio.toFixed(2)}/сек 🔇\`;
+          } else if (p.priceByMode) {
+            const modeLines = Object.entries(p.priceByMode).map(([mode, price]) => {
+              const label = mode.replace('_', ' ').toUpperCase();
+              return \`$\${price.toFixed(2)}/run <small>\${label}</small>\`;
+            });
+            priceDisplay = modeLines.join('<br>');
           } else if (p.pricePerSecond) {
             priceDisplay = \`$\${p.pricePerSecond.toFixed(2)}/сек\`;
           } else if (p.pricePerRun) {
@@ -840,7 +846,7 @@ router.get('/dashboard', (req, res) => {
           const dBody = document.getElementById('discrepancies-body');
           dBody.innerHTML = data.data.discrepancies.map(d => \`
             <tr>
-              <td><strong>\${d.modelName}</strong><br><small>\${d.model}</small></td>
+              <td><strong>\${d.modelName}</strong><br><small>\${d.model}\${d.mode ? ' • ' + d.mode : ''}</small></td>
               <td class="danger">$\${d.ourPrice || d.ourPricePerSec}</td>
               <td class="success">$\${d.officialPrice || d.officialPricePerSec}</td>
               <td><span class="badge badge-danger">\${d.differencePercent}</span></td>

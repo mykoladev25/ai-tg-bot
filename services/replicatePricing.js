@@ -103,6 +103,17 @@ const OFFICIAL_PRICING = {
     lastChecked: '2026-01-25',
     source: 'https://replicate.com/kwaivgi/kling-v2.6'
   },
+  'kwaivgi/kling-v2.6-motion-control': {
+    priceByMode: {
+      std_image: 0.50,
+      std_video: 1.00,
+      pro_image: 1.00,
+      pro_video: 2.00
+    },
+    model: 'kling_motion',
+    lastChecked: '2026-01-27',
+    source: 'https://replicate.com/kwaivgi/kling-v2.6-motion-control'
+  },
 
   'google/veo-3.1': {
     pricePerSecondAudio: 0.40,
@@ -142,7 +153,7 @@ const MODEL_MAPPING = {
   'sora_2': 'openai/sora-2',
   'kling': 'kwaivgi/kling-v2.5-turbo-pro',
   'kling_v2_6': 'kwaivgi/kling-v2.6',
-  'kling_motion': 'kwaivgi/kling-v2.5-turbo-pro',
+  'kling_motion': 'kwaivgi/kling-v2.6-motion-control',
   'veo': 'google/veo-3.1',
   'runway_turbo': 'runway/gen-4-turbo'
 };
@@ -224,6 +235,28 @@ function comparePrices() {
           source: official.source,
           lastChecked: official.lastChecked
         });
+      }
+    }
+
+    if (official.priceByMode && model.apiCosts) {
+      for (const [mode, officialPrice] of Object.entries(official.priceByMode)) {
+        const ourPrice = model.apiCosts?.[mode];
+        if (!Number.isFinite(ourPrice)) continue;
+        const diff = Math.abs(ourPrice - officialPrice);
+        const diffPercent = (diff / officialPrice) * 100;
+        if (diffPercent > 10) {
+          discrepancies.push({
+            model: model.key,
+            modelName: model.name,
+            mode,
+            ourPrice,
+            officialPrice,
+            difference: diff.toFixed(4),
+            differencePercent: diffPercent.toFixed(1) + '%',
+            source: official.source,
+            lastChecked: official.lastChecked
+          });
+        }
       }
     }
   }
@@ -350,6 +383,21 @@ function getSuggestedUpdates() {
           suggestedValue: pricing.pricePerSecond,
           source: pricing.source
         });
+      }
+
+      if (pricing.priceByMode && ourModel.apiCosts) {
+        for (const [mode, price] of Object.entries(pricing.priceByMode)) {
+          const current = ourModel.apiCosts?.[mode];
+          if (Number.isFinite(current) && current !== price) {
+            updates.push({
+              modelKey,
+              field: `apiCosts.${mode}`,
+              currentValue: current,
+              suggestedValue: price,
+              source: pricing.source
+            });
+          }
+        }
       }
     }
   }
