@@ -999,41 +999,41 @@ router.get('/dashboard', (req, res) => {
                 user.isBanned ? 'banned' : null
               ].filter(Boolean).join(', ') || '—';
 
-              return `
+              return \`
                 <tr>
                   <td>
-                    <strong>${fullName || 'Без імені'}</strong><br/>
-                    <span class="badge">${username}</span><br/>
-                    <span class="card-subtitle">ID: ${u.userId}</span>
+                    <strong>\${fullName || 'Без імені'}</strong><br/>
+                    <span class="badge">\${username}</span><br/>
+                    <span class="card-subtitle">ID: \${u.userId}</span>
                   </td>
-                  <td><strong>${(u.tokensSpent || 0).toFixed(0)}⚡</strong></td>
-                  <td>${u.generations || 0}</td>
-                  <td>${formatUSD(u.cogs)}</td>
-                  <td>${formatUSD(u.revenue)}</td>
-                  <td>${formatPct(u.successRate)}</td>
+                  <td><strong>\${(u.tokensSpent || 0).toFixed(0)}⚡</strong></td>
+                  <td>\${u.generations || 0}</td>
+                  <td>\${formatUSD(u.cogs)}</td>
+                  <td>\${formatUSD(u.revenue)}</td>
+                  <td>\${formatPct(u.successRate)}</td>
                   <td>
                     <details>
                       <summary>Деталі</summary>
                       <div class="detail-grid">
-                        <div class="detail-item">Підписка: <span>${subscription}</span></div>
-                        <div class="detail-item">Статус: <span>${subActive}</span></div>
-                        <div class="detail-item">До: <span>${subExpires}</span></div>
-                        <div class="detail-item">Мова: <span>${locale}</span></div>
-                        <div class="detail-item">Баланс: <span>${Number(user.tokens || 0).toFixed(2)}⚡</span></div>
-                        <div class="detail-item">Куплено: <span>${user.totalTokensPurchased || 0}⚡</span></div>
-                        <div class="detail-item">Витрачено: <span>${user.totalTokensSpent || 0}⚡</span></div>
-                        <div class="detail-item">Зароблено: <span>${user.totalTokensEarned || 0}⚡</span></div>
-                        <div class="detail-item">Статус/ролі: <span>${statusFlags}</span></div>
-                        <div class="detail-item">Referral: <span>${user.referralCode || '—'}</span></div>
-                        <div class="detail-item">Referred by: <span>${user.referredBy || '—'}</span></div>
-                        <div class="detail-item">Referral $: <span>${formatUSD(user.referralEarnings || 0)}</span></div>
-                        <div class="detail-item">Створено: <span>${createdAt}</span></div>
-                        <div class="detail-item">Остання активність: <span>${lastActivity}</span></div>
+                        <div class="detail-item">Підписка: <span>\${subscription}</span></div>
+                        <div class="detail-item">Статус: <span>\${subActive}</span></div>
+                        <div class="detail-item">До: <span>\${subExpires}</span></div>
+                        <div class="detail-item">Мова: <span>\${locale}</span></div>
+                        <div class="detail-item">Баланс: <span>\${Number(user.tokens || 0).toFixed(2)}⚡</span></div>
+                        <div class="detail-item">Куплено: <span>\${user.totalTokensPurchased || 0}⚡</span></div>
+                        <div class="detail-item">Витрачено: <span>\${user.totalTokensSpent || 0}⚡</span></div>
+                        <div class="detail-item">Зароблено: <span>\${user.totalTokensEarned || 0}⚡</span></div>
+                        <div class="detail-item">Статус/ролі: <span>\${statusFlags}</span></div>
+                        <div class="detail-item">Referral: <span>\${user.referralCode || '—'}</span></div>
+                        <div class="detail-item">Referred by: <span>\${user.referredBy || '—'}</span></div>
+                        <div class="detail-item">Referral $: <span>\${formatUSD(user.referralEarnings || 0)}</span></div>
+                        <div class="detail-item">Створено: <span>\${createdAt}</span></div>
+                        <div class="detail-item">Остання активність: <span>\${lastActivity}</span></div>
                       </div>
                     </details>
                   </td>
                 </tr>
-              `;
+              \`;
             }).join('');
           }
         }
