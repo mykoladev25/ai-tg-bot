@@ -254,8 +254,8 @@ module.exports = {
       name: 'STARTER',
       tokens: 700,
       tokensWayForPay: 700,
-      priceUSD: 0.1,
-      price: 10,
+      priceUSD: 7,
+      price: 552,
       features: ['🚀 700⚡ токенів', '💎 Доступ до всіх моделей', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!']
     },
 
