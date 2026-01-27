@@ -989,7 +989,9 @@ bot.action('broadcast_send', async (ctx) => {
 
   broadcastStates.delete(adminId);
 
-  await ctx.reply('📢 Розсилка запущена. Зачекайте...');
+  const priorityIds = getBroadcastPriorityIds();
+  const priorityLabel = priorityIds.length ? `Priority IDs: [${priorityIds.join(', ')}]` : 'Priority IDs: (empty)';
+  await ctx.reply(`📢 Розсилка запущена. Зачекайте...\n${priorityLabel}`);
 
   try {
     const stats = await broadcastPayload(draft);
