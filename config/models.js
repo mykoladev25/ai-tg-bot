@@ -255,7 +255,7 @@ module.exports = {
       tokens: 700,
       tokensWayForPay: 700,
       priceUSD: 0.1,
-      price: 1,
+      price: 10,
       features: ['🚀 700⚡ токенів', '💎 Доступ до всіх моделей', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!']
     },
 
