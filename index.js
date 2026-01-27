@@ -935,11 +935,16 @@ bot.command('broadcast', async (ctx) => {
   }
 
   const inlineText = args.join(' ').trim();
+  const priorityIds = getBroadcastPriorityIds();
+  const priorityLabel = priorityIds.length
+    ? `Priority IDs: [${priorityIds.join(', ')}]`
+    : 'Priority IDs: Всім';
 
   broadcastDrafts.delete(adminId);
   broadcastStates.delete(adminId);
 
   if (inlineText) {
+    await ctx.reply(priorityLabel);
     const draft = { type: 'text', text: inlineText, parseMode };
     broadcastDrafts.set(adminId, draft);
     await sendBroadcastPreview(ctx, draft);
@@ -955,6 +960,7 @@ bot.command('broadcast', async (ctx) => {
     `Підтримка: текст, фото, відео, кружечки.\n` +
     `Підпис (caption) доступний для фото/відео.\n\n` +
     `Форматування: <b>${modeLabel}</b>\n` +
+    `Priority IDs: <code>${priorityIds.length ? priorityIds.join(', ') : 'Всім'}</code>\n` +
     `Скасувати: /broadcast_cancel`,
     { parse_mode: 'HTML' }
   );
@@ -990,7 +996,7 @@ bot.action('broadcast_send', async (ctx) => {
   broadcastStates.delete(adminId);
 
   const priorityIds = getBroadcastPriorityIds();
-  const priorityLabel = priorityIds.length ? `Priority IDs: [${priorityIds.join(', ')}]` : 'Priority IDs: (empty)';
+  const priorityLabel = priorityIds.length ? `Priority IDs: [${priorityIds.join(', ')}]` : 'Priority IDs: Всім';
   await ctx.reply(`📢 Розсилка запущена. Зачекайте...\n${priorityLabel}`);
 
   try {
