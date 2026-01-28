@@ -158,7 +158,8 @@ async function generateWithStableDiffusion(prompt, imageUrl = null, strength = 0
     };
 
     if (imageUrl) {
-      input.image = imageUrl;
+      const imageRef = Array.isArray(imageUrl) ? imageUrl[0] : imageUrl;
+      input.image = imageRef;
       input.prompt_strength = strength;
       console.log('Using image input (url), prompt_strength:', strength);
     } else {
