@@ -328,6 +328,49 @@ const MODELS_WITH_STATE = [
   ...MODELS_WITH_ASPECT_RATIO // добавляємо моделі з вибором aspect ratio
 ];
 
+const ASPECT_RATIO_OPTIONS = {
+  seedream_2k: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
+  seedream_4k: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
+  nano_banana: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+  nano_banana_2k: ['1:1', '4:5', '9:16', 'match_input_image'],
+  nano_banana_4k: ['1:1', '4:5', '9:16', 'match_input_image'],
+  stable_diffusion: ['1:1', '4:5', '9:16', 'match_input_image'],
+  ideogram: ['1:1', '4:5', '9:16', 'match_input_image']
+};
+
+const ASPECT_RATIO_LABELS = {
+  '1:1': '📐 1:1 (Square)',
+  '4:5': '📱 4:5 (Portrait)',
+  '5:4': '🖼️ 5:4 (Classic Landscape)',
+  '4:3': '🎬 4:3 (Landscape)',
+  '3:4': '📱 3:4 (Portrait)',
+  '16:9': '🎥 16:9 (Widescreen)',
+  '9:16': '📱 9:16 (Vertical)',
+  '3:2': '🖼️ 3:2 (Classic)',
+  '2:3': '🖼️ 2:3 (Classic Portrait)',
+  '21:9': '🎬 21:9 (Ultrawide)',
+  'match_input_image': 'Auto'
+};
+
+const TEXT_ASPECT_RATIO_MODELS = new Set(['nano_banana', 'nano_banana_2k', 'nano_banana_4k']);
+
+function getAspectRatiosForModel(modelKey, hasImageInput = true) {
+  const ratios = ASPECT_RATIO_OPTIONS[modelKey] || ['1:1', 'match_input_image'];
+  if (!hasImageInput) {
+    return ratios.filter(ratio => ratio !== 'match_input_image');
+  }
+  return ratios;
+}
+
+function buildAspectRatioKeyboard(modelKey, hasImageInput = true) {
+  const ratios = getAspectRatiosForModel(modelKey, hasImageInput);
+  const buttons = ratios.map(ratio => [
+    Markup.button.callback(ASPECT_RATIO_LABELS[ratio] || ratio, `aspect_ratio_${modelKey}_${ratio}`)
+  ]);
+  buttons.push([Markup.button.callback('🔙 Назад', 'design_menu')]);
+  return { keyboard: Markup.inlineKeyboard(buttons), ratios };
+}
+
 // ✅ MIDDLEWARE: обнуляти стан при callback (крім моделей зі станами)
 bot.on('callback_query', async (ctx, next) => {
   const callbackData = ctx.callbackQuery.data;
@@ -1985,11 +2028,11 @@ bot.action('new_conversation', async (ctx) => {
 });
 
 // ==================== ASPECT RATIO SELECTION ====================
-bot.action(/^aspect_ratio_(.+?)_(1:1|4:5|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/, async (ctx) => {
+bot.action(/^aspect_ratio_(.+?)_(1:1|4:5|5:4|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   const callbackData = ctx.callbackQuery.data;
-  const match = callbackData.match(/^aspect_ratio_(.+?)_(1:1|4:5|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/);
+  const match = callbackData.match(/^aspect_ratio_(.+?)_(1:1|4:5|5:4|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/);
   const userId = ctx.from.id;
 
   console.log(`📐 Aspect ratio callback: ${callbackData}`);
@@ -2011,9 +2054,9 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|4:5|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_in
   console.log(`📐 Model: ${modelKey}, Ratio: ${aspectRatio}`);
   console.log(`📐 Retrieved state for userId ${userId}:`, state);
 
-  if (!state || !state.imageUrl || !state.prompt) {
+  if (!state || !state.prompt) {
     console.error(`❌ Стан відсутній або неповний. State:`, state);
-    await ctx.reply('❌ Помилка. Спробуйте завантажити фото знову.');
+    await ctx.reply('❌ Помилка. Спробуйте ще раз.');
     userState.delete(userId);
     return;
   }
@@ -2021,8 +2064,9 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|4:5|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_in
   console.log(`📐 Aspect ratio selected: ${aspectRatio} for model: ${modelKey}`);
 
   // Генеруємо з вибраним aspect ratio (у фоні, щоб не блокувати інші апдейти)
+  const imageInput = state.imageUrl || null;
   runBackgroundTask(
-    () => handleImageGeneration(ctx, state.prompt, modelKey, state.imageUrl, aspectRatio),
+    () => handleImageGeneration(ctx, state.prompt, modelKey, imageInput, aspectRatio),
     'image_generation_aspect_ratio'
   );
 
@@ -4631,6 +4675,34 @@ bot.on('text', async (ctx) => {
     if (imgState.step === 'waiting_photos') {
       imgState.prompt = text;
       const references = normalizeReferenceOrder(imgState.photos || []);
+      const referenceList = Array.isArray(references) ? references : (references ? [references] : []);
+      const hasReferences = referenceList.length > 0;
+
+      if (TEXT_ASPECT_RATIO_MODELS.has(currentModel)) {
+        imageGenState.delete(userId);
+        userState.set(userId, {
+          model: currentModel,
+          step: 'waiting_aspect_ratio',
+          imageUrl: hasReferences ? references : null,
+          prompt: text
+        });
+
+        const { keyboard: aspectRatioMenu, ratios: validRatios } = buildAspectRatioKeyboard(currentModel, hasReferences);
+        const modelName = models.design.models.find(m => m.key === currentModel)?.name || currentModel;
+        const promptPreview = text.length > 100 ? text.substring(0, 100) + '...' : text;
+
+        await ctx.reply(
+          `✅ <b>Промпт збережено!</b>\n\n` +
+          `📝 "${promptPreview}"\n\n` +
+          `📐 <b>Оберіть пропорції зображення (Aspect Ratio):</b>\n\n` +
+          `Модель: ${modelName}\n` +
+          `${hasReferences ? `📸 Референси: ${referenceList.length} фото\n` : ''}` +
+          `Доступні формати: ${validRatios.join(', ')}`,
+          { parse_mode: 'HTML', ...aspectRatioMenu }
+        );
+        return;
+      }
+
       imageGenState.delete(userId);
 
       await ctx.reply(
@@ -4650,6 +4722,34 @@ bot.on('text', async (ctx) => {
     if (imgState.step === 'prompt') {
       imgState.prompt = text;
       const references = normalizeReferenceOrder(imgState.photos || []);
+      const referenceList = Array.isArray(references) ? references : (references ? [references] : []);
+      const hasReferences = referenceList.length > 0;
+
+      if (TEXT_ASPECT_RATIO_MODELS.has(currentModel)) {
+        imageGenState.delete(userId);
+        userState.set(userId, {
+          model: currentModel,
+          step: 'waiting_aspect_ratio',
+          imageUrl: hasReferences ? references : null,
+          prompt: text
+        });
+
+        const { keyboard: aspectRatioMenu, ratios: validRatios } = buildAspectRatioKeyboard(currentModel, hasReferences);
+        const modelName = models.design.models.find(m => m.key === currentModel)?.name || currentModel;
+        const promptPreview = text.length > 100 ? text.substring(0, 100) + '...' : text;
+
+        await ctx.reply(
+          `✅ <b>Промпт збережено!</b>\n\n` +
+          `📝 "${promptPreview}"\n\n` +
+          `📐 <b>Оберіть пропорції зображення (Aspect Ratio):</b>\n\n` +
+          `Модель: ${modelName}\n` +
+          `${hasReferences ? `📸 Референси: ${referenceList.length} фото\n` : ''}` +
+          `Доступні формати: ${validRatios.join(', ')}`,
+          { parse_mode: 'HTML', ...aspectRatioMenu }
+        );
+        return;
+      }
+
       imageGenState.delete(userId);
 
       await ctx.reply(
@@ -5208,41 +5308,7 @@ bot.on('photo', async (ctx) => {
       console.log(`💾 State saved for user ${userId}:`, stateData);
       console.log(`💾 Checking state immediately:`, userState.get(userId));
 
-      // Дозволені aspect ratio для різних моделей
-      const aspectRatios = {
-        'seedream_2k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
-        'seedream_4k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
-        'nano_banana': ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-        'nano_banana_2k': ['1:1', '4:5', '9:16', 'match_input_image'],
-        'nano_banana_4k': ['1:1', '4:5', '9:16', 'match_input_image'],
-        'stable_diffusion': ['1:1', '4:5', '9:16', 'match_input_image'],
-        'ideogram': ['1:1', '4:5', '9:16', 'match_input_image']
-      };
-
-      const validRatios = aspectRatios[currentModel] || ['1:1', 'match_input_image'];
-
-      // Маппінг для красивого виведення
-      const ratioLabels = {
-        '1:1': '📐 1:1 (Square)',
-        '4:5': '📱 4:5 (Portrait)',
-        '5:4': '🖼️ 5:4 (Classic Landscape)',
-        '4:3': '🎬 4:3 (Landscape)',
-        '3:4': '📱 3:4 (Portrait)',
-        '16:9': '🎥 16:9 (Widescreen)',
-        '9:16': '📱 9:16 (Vertical)',
-        '3:2': '🖼️ 3:2 (Classic)',
-        '2:3': '🖼️ 2:3 (Classic Portrait)',
-        '21:9': '🎬 21:9 (Ultrawide)',
-        'match_input_image': 'Auto'
-      };
-
-      // Показуємо меню вибору aspect ratio
-      const buttons = validRatios.map(ratio => [
-        Markup.button.callback(ratioLabels[ratio], `aspect_ratio_${currentModel}_${ratio}`)
-      ]);
-      buttons.push([Markup.button.callback('🔙 Назад', 'design_menu')]);
-
-      const aspectRatioMenu = Markup.inlineKeyboard(buttons);
+      const { keyboard: aspectRatioMenu, ratios: validRatios } = buildAspectRatioKeyboard(currentModel, true);
 
       await ctx.reply(
         `📐 <b>Оберіть пропорції зображення (Aspect Ratio):</b>\n\n` +
@@ -5362,41 +5428,7 @@ async function handleMediaGroup(ctx, group) {
         prompt: finalPrompt
       });
 
-      // Дозволені aspect ratio для різних моделей
-      const aspectRatios = {
-        'seedream_2k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
-        'seedream_4k': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
-        'nano_banana': ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-        'nano_banana_2k': ['1:1', '4:5', '9:16', 'match_input_image'],
-        'nano_banana_4k': ['1:1', '4:5', '9:16', 'match_input_image'],
-        'stable_diffusion': ['1:1', '4:5', '9:16', 'match_input_image'],
-        'ideogram': ['1:1', '4:5', '9:16', 'match_input_image']
-      };
-
-      const validRatios = aspectRatios[currentModel] || ['1:1', 'match_input_image'];
-
-      // Маппінг для красивого виведення
-      const ratioLabels = {
-        '1:1': '📐 1:1 (Square)',
-        '4:5': '📱 4:5 (Portrait)',
-        '5:4': '🖼️ 5:4 (Classic Landscape)',
-        '4:3': '🎬 4:3 (Landscape)',
-        '3:4': '📱 3:4 (Portrait)',
-        '16:9': '🎥 16:9 (Widescreen)',
-        '9:16': '📱 9:16 (Vertical)',
-        '3:2': '🖼️ 3:2 (Classic)',
-        '2:3': '🖼️ 2:3 (Classic Portrait)',
-        '21:9': '🎬 21:9 (Ultrawide)',
-        'match_input_image': 'Auto'
-      };
-
-      // Показуємо меню вибору aspect ratio
-      const buttons = validRatios.map(ratio => [
-        Markup.button.callback(ratioLabels[ratio], `aspect_ratio_${currentModel}_${ratio}`)
-      ]);
-      buttons.push([Markup.button.callback('🔙 Назад', 'design_menu')]);
-
-      const aspectRatioMenu = Markup.inlineKeyboard(buttons);
+      const { keyboard: aspectRatioMenu, ratios: validRatios } = buildAspectRatioKeyboard(currentModel, true);
 
       await ctx.reply(
         `📐 <b>Оберіть пропорції зображення (Aspect Ratio):</b>\n\n` +
