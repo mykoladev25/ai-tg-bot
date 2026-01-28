@@ -335,38 +335,40 @@ const ASPECT_RATIO_OPTIONS = {
   nano_banana_2k: ['1:1', '4:5', '9:16', 'match_input_image'],
   nano_banana_4k: ['1:1', '4:5', '9:16', 'match_input_image'],
   stable_diffusion: ['1:1', '4:5', '9:16', 'match_input_image'],
-  ideogram: ['1:1', '4:5', '9:16', 'match_input_image']
+  ideogram: ['1:3', '3:1', '1:2', '2:1', '9:16', '16:9', '10:16', '16:10', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '1:1']
 };
 
 const ASPECT_RATIO_LABELS = {
   '1:1': '📐 1:1 (Square)',
+  '1:2': '📱 1:2 (Portrait)',
+  '2:1': '🖼️ 2:1 (Wide)',
+  '1:3': '📱 1:3 (Tall)',
+  '3:1': '🖼️ 3:1 (Panorama)',
   '4:5': '📱 4:5 (Portrait)',
   '5:4': '🖼️ 5:4 (Classic Landscape)',
   '4:3': '🎬 4:3 (Landscape)',
   '3:4': '📱 3:4 (Portrait)',
   '16:9': '🎥 16:9 (Widescreen)',
   '9:16': '📱 9:16 (Vertical)',
+  '10:16': '📱 10:16 (Vertical)',
+  '16:10': '🖼️ 16:10 (Wide)',
   '3:2': '🖼️ 3:2 (Classic)',
   '2:3': '🖼️ 2:3 (Classic Portrait)',
   '21:9': '🎬 21:9 (Ultrawide)',
-  'match_input_image': 'Auto'
+  'match_input_image': 'Авто'
 };
 
 const RATIO_NOTES = {
-  '9:16': 'Вертикальний формат для Instagram Stories/Reels та TikTok (vertical reels).',
-  'match_input_image': 'Автоматично підлаштується під розмір вашого фото.',
-  '21:9': 'Ультраширокі кадри, добре для cinematic сцени.',
-  '16:9': 'Горизонтальна widescreen (YouTube, презентації).'
+  '9:16': 'Вертикальний формат для Instagram Stories/Reels та TikTok.',
+  '21:9': 'Ультраширокі кадри, добре для кінематографічних сцен.',
+  '16:9': 'Горизонтальний widescreen (YouTube, презентації).'
 };
 
 const TEXT_ASPECT_RATIO_MODELS = new Set(['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'ideogram']);
 
 function getAspectRatiosForModel(modelKey, hasImageInput = true) {
   const ratios = ASPECT_RATIO_OPTIONS[modelKey] || ['1:1', 'match_input_image'];
-  if (!hasImageInput) {
-    return ratios.filter(ratio => ratio !== 'match_input_image');
-  }
-  return ratios;
+  return ratios.filter(ratio => ratio !== 'match_input_image');
 }
 
 function buildAspectRatioKeyboard(modelKey, hasImageInput = true) {
@@ -387,7 +389,7 @@ async function promptAspectRatioSelection(ctx, { modelKey, promptText, hasRefere
     ? `\n\nПримітки:\n${ratioNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}`
     : '';
   const referenceLine = hasReferences
-    ? `\n📸 Референси: ${referencesCount} фото`
+    ? `\n📸 Референси: ${referencesCount} фото\n`
     : '';
   const promptPreview = promptText.length > 100 ? promptText.substring(0, 100) + '...' : promptText;
 
@@ -2061,11 +2063,11 @@ bot.action('new_conversation', async (ctx) => {
 });
 
 // ==================== ASPECT RATIO SELECTION ====================
-bot.action(/^aspect_ratio_(.+?)_(1:1|4:5|5:4|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/, async (ctx) => {
+bot.action(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|4:5|5:4|9:16|10:16|16:10|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   const callbackData = ctx.callbackQuery.data;
-  const match = callbackData.match(/^aspect_ratio_(.+?)_(1:1|4:5|5:4|9:16|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/);
+  const match = callbackData.match(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|4:5|5:4|9:16|10:16|16:10|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/);
   const userId = ctx.from.id;
 
   console.log(`📐 Aspect ratio callback: ${callbackData}`);
