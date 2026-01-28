@@ -318,9 +318,13 @@ async function generateWithIdeogram(prompt, imageInput = null, imageWeight = 0.5
     // ✅ Ideogram приймає тільки ОДНЕ зображення в base64 data URI
     if (imageInput) {
       const imageUrl = Array.isArray(imageInput) ? imageInput[0] : imageInput;
-      input.image_file = await convertImageToBase64(imageUrl);
-      input.image_weight = imageWeight; // 0.0-1.0 (default 0.5)
-      console.log(`Using 1 image as input (base64), weight: ${imageWeight}`);
+      if (!imageUrl) {
+        console.warn('Ideogram: imageInput provided but empty/invalid, skipping image_file.');
+      } else {
+        input.image_file = await convertImageToBase64(imageUrl);
+        input.image_weight = imageWeight; // 0.0-1.0 (default 0.5)
+        console.log(`Using 1 image as input (base64), weight: ${imageWeight}, size: ${input.image_file.length} chars`);
+      }
     }
 
     const output = await replicate.run("ideogram-ai/ideogram-v3-turbo", { input });
