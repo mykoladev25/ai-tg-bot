@@ -359,7 +359,7 @@ const RATIO_NOTES = {
   '16:9': 'Горизонтальна widescreen (YouTube, презентації).'
 };
 
-const TEXT_ASPECT_RATIO_MODELS = new Set(['nano_banana', 'nano_banana_2k', 'nano_banana_4k']);
+const TEXT_ASPECT_RATIO_MODELS = new Set(['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'ideogram']);
 
 function getAspectRatiosForModel(modelKey, hasImageInput = true) {
   const ratios = ASPECT_RATIO_OPTIONS[modelKey] || ['1:1', 'match_input_image'];

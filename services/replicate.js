@@ -315,15 +315,15 @@ async function generateWithIdeogram(prompt, imageInput = null, imageWeight = 0.5
       magic_prompt_option: "Auto"
     };
 
-    // ✅ Ideogram приймає тільки ОДНЕ зображення в base64 data URI
+    // ✅ Ideogram v3 Turbo: для референсів використовуємо URL (style_reference_images)
     if (imageInput) {
       const imageUrl = Array.isArray(imageInput) ? imageInput[0] : imageInput;
       if (!imageUrl) {
-        console.warn('Ideogram: imageInput provided but empty/invalid, skipping image_file.');
+        console.warn('Ideogram: imageInput provided but empty/invalid, skipping style_reference_images.');
       } else {
-        input.image_file = await convertImageToBase64(imageUrl);
+        input.style_reference_images = [imageUrl];
         input.image_weight = imageWeight; // 0.0-1.0 (default 0.5)
-        console.log(`Using 1 image as input (base64), weight: ${imageWeight}, size: ${input.image_file.length} chars`);
+        console.log(`Using 1 image as style_reference_images (url), weight: ${imageWeight}`);
       }
     }
 
