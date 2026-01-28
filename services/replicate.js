@@ -146,22 +146,23 @@ async function generateWithFlux(prompt) {
 /**
  * Stable Diffusion 3.5 Large (text2img + img2img)
  */
-async function generateWithStableDiffusion(prompt, imageUrl = null, strength = 0.8) {
+async function generateWithStableDiffusion(prompt, imageUrl = null, strength = 0.8, aspectRatio = '1:1') {
   try {
     console.log('Starting Stable Diffusion 3.5 generation:', prompt);
 
     const input = {
       prompt: prompt,
       negative_prompt: 'ugly, blurry, low quality, distorted',
-      aspect_ratio: '1:1',
       output_format: 'png',
       output_quality: 90
     };
 
     if (imageUrl) {
-      input.image = await convertImageToBase64(imageUrl);
-      input.strength = strength;
-      console.log('Using image input (base64), strength:', strength);
+      input.image = imageUrl;
+      input.prompt_strength = strength;
+      console.log('Using image input (url), prompt_strength:', strength);
+    } else {
+      input.aspect_ratio = aspectRatio;
     }
 
     const response = await axios.post(

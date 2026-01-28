@@ -334,7 +334,7 @@ const ASPECT_RATIO_OPTIONS = {
   nano_banana: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   nano_banana_2k: ['1:1', '4:5', '9:16', 'match_input_image'],
   nano_banana_4k: ['1:1', '4:5', '9:16', 'match_input_image'],
-  stable_diffusion: ['1:1', '4:5', '9:16', 'match_input_image'],
+  stable_diffusion: ['1:1', '16:9', '21:9', '2:3', '3:2', '4:5', '5:4', '9:16', '9:21'],
   ideogram: ['1:3', '3:1', '1:2', '2:1', '9:16', '16:9', '10:16', '16:10', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '1:1']
 };
 
@@ -355,6 +355,7 @@ const ASPECT_RATIO_LABELS = {
   '3:2': '🖼️ 3:2 (Classic)',
   '2:3': '🖼️ 2:3 (Classic Portrait)',
   '21:9': '🎬 21:9 (Ultrawide)',
+  '9:21': '📱 9:21 (Vertical)',
   'match_input_image': 'Авто'
 };
 
@@ -364,7 +365,7 @@ const RATIO_NOTES = {
   '16:9': 'Горизонтальний widescreen (YouTube, презентації).'
 };
 
-const TEXT_ASPECT_RATIO_MODELS = new Set(['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'ideogram']);
+const TEXT_ASPECT_RATIO_MODELS = new Set(['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'ideogram', 'stable_diffusion']);
 
 function getAspectRatiosForModel(modelKey, hasImageInput = true) {
   const ratios = ASPECT_RATIO_OPTIONS[modelKey] || ['1:1', 'match_input_image'];
@@ -4713,6 +4714,20 @@ bot.on('text', async (ctx) => {
       const referenceList = Array.isArray(references) ? references : (references ? [references] : []);
       const hasReferences = referenceList.length > 0;
 
+      if (currentModel === 'stable_diffusion' && hasReferences) {
+        imageGenState.delete(userId);
+        await ctx.reply(
+          'ℹ️ Для Stable Diffusion 3.5 з референсом пропорції беруться з самого фото.\n' +
+          'Формат обирати не потрібно — запускаю генерацію.',
+          { parse_mode: 'HTML' }
+        );
+        runBackgroundTask(
+          () => handleImageGeneration(ctx, text, currentModel, references.length ? references : null),
+          'image_generation_references_prompt'
+        );
+        return;
+      }
+
       if (TEXT_ASPECT_RATIO_MODELS.has(currentModel)) {
         imageGenState.delete(userId);
         userState.set(userId, {
@@ -4752,6 +4767,20 @@ bot.on('text', async (ctx) => {
       const references = normalizeReferenceOrder(imgState.photos || []);
       const referenceList = Array.isArray(references) ? references : (references ? [references] : []);
       const hasReferences = referenceList.length > 0;
+
+      if (currentModel === 'stable_diffusion' && hasReferences) {
+        imageGenState.delete(userId);
+        await ctx.reply(
+          'ℹ️ Для Stable Diffusion 3.5 з референсом пропорції беруться з самого фото.\n' +
+          'Формат обирати не потрібно — запускаю генерацію.',
+          { parse_mode: 'HTML' }
+        );
+        runBackgroundTask(
+          () => handleImageGeneration(ctx, text, currentModel, references.length ? references : null),
+          'image_generation_prompt'
+        );
+        return;
+      }
 
       if (TEXT_ASPECT_RATIO_MODELS.has(currentModel)) {
         imageGenState.delete(userId);
@@ -5629,7 +5658,12 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
     try {
       const replicateFunctions = {
         flux: () => replicate.generateWithFlux(generationData.prompt),
-        stable_diffusion: () => replicate.generateWithStableDiffusion(generationData.prompt, generationData.imageInput, 0.8, generationData.aspectRatio),
+        stable_diffusion: () => replicate.generateWithStableDiffusion(
+          generationData.prompt,
+          generationData.imageInput,
+          0.8,
+          generationData.aspectRatio
+        ),
         nano_banana: () => replicate.generateWithNanoBananaBase(generationData.prompt, generationData.imageInput, generationData.aspectRatio),
         nano_banana_2k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
         nano_banana_4k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
