@@ -352,6 +352,13 @@ const ASPECT_RATIO_LABELS = {
   'match_input_image': 'Auto'
 };
 
+const RATIO_NOTES = {
+  '9:16': 'Вертикальний формат для Instagram Stories/Reels та TikTok (vertical reels).',
+  'match_input_image': 'Автоматично підлаштується під розмір вашого фото.',
+  '21:9': 'Ультраширокі кадри, добре для cinematic сцени.',
+  '16:9': 'Горизонтальна widescreen (YouTube, презентації).'
+};
+
 const TEXT_ASPECT_RATIO_MODELS = new Set(['nano_banana', 'nano_banana_2k', 'nano_banana_4k']);
 
 function getAspectRatiosForModel(modelKey, hasImageInput = true) {
@@ -369,6 +376,32 @@ function buildAspectRatioKeyboard(modelKey, hasImageInput = true) {
   ]);
   buttons.push([Markup.button.callback('🔙 Назад', 'design_menu')]);
   return { keyboard: Markup.inlineKeyboard(buttons), ratios };
+}
+
+async function promptAspectRatioSelection(ctx, { modelKey, promptText, hasReferences = false, referencesCount = 0 }) {
+  const { keyboard: aspectRatioMenu, ratios: validRatios } = buildAspectRatioKeyboard(modelKey, hasReferences);
+  const ratioNotes = validRatios
+    .map(ratio => RATIO_NOTES[ratio])
+    .filter(Boolean);
+  const notesBlock = ratioNotes.length
+    ? `\n\nПримітки:\n${ratioNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}`
+    : '';
+  const referenceLine = hasReferences
+    ? `\n📸 Референси: ${referencesCount} фото`
+    : '';
+  const promptPreview = promptText.length > 100 ? promptText.substring(0, 100) + '...' : promptText;
+
+  await ctx.reply(
+    `✅ <b>Промпт збережено!</b>\n\n` +
+    `📝 "${promptPreview}"\n\n` +
+    `📐 <b>Оберіть пропорції зображення (Aspect Ratio)</b>\n\n` +
+    `📝 Крок 1: ваша ідея/промпт\n` +
+    `📐 Крок 2: вибір пропорцій\n` +
+    `✍️ Крок 3: генерація запускається одразу після вибору\n\n` +
+    `${referenceLine}` +
+    `Доступні формати: ${validRatios.join(', ')}${notesBlock}`,
+    { parse_mode: 'HTML', ...aspectRatioMenu }
+  );
 }
 
 // ✅ MIDDLEWARE: обнуляти стан при callback (крім моделей зі станами)
@@ -4687,19 +4720,12 @@ bot.on('text', async (ctx) => {
           prompt: text
         });
 
-        const { keyboard: aspectRatioMenu, ratios: validRatios } = buildAspectRatioKeyboard(currentModel, hasReferences);
-        const modelName = models.design.models.find(m => m.key === currentModel)?.name || currentModel;
-        const promptPreview = text.length > 100 ? text.substring(0, 100) + '...' : text;
-
-        await ctx.reply(
-          `✅ <b>Промпт збережено!</b>\n\n` +
-          `📝 "${promptPreview}"\n\n` +
-          `📐 <b>Оберіть пропорції зображення (Aspect Ratio):</b>\n\n` +
-          `Модель: ${modelName}\n` +
-          `${hasReferences ? `📸 Референси: ${referenceList.length} фото\n` : ''}` +
-          `Доступні формати: ${validRatios.join(', ')}`,
-          { parse_mode: 'HTML', ...aspectRatioMenu }
-        );
+        await promptAspectRatioSelection(ctx, {
+          modelKey: currentModel,
+          promptText: text,
+          hasReferences,
+          referencesCount: referenceList.length
+        });
         return;
       }
 
@@ -4734,19 +4760,12 @@ bot.on('text', async (ctx) => {
           prompt: text
         });
 
-        const { keyboard: aspectRatioMenu, ratios: validRatios } = buildAspectRatioKeyboard(currentModel, hasReferences);
-        const modelName = models.design.models.find(m => m.key === currentModel)?.name || currentModel;
-        const promptPreview = text.length > 100 ? text.substring(0, 100) + '...' : text;
-
-        await ctx.reply(
-          `✅ <b>Промпт збережено!</b>\n\n` +
-          `📝 "${promptPreview}"\n\n` +
-          `📐 <b>Оберіть пропорції зображення (Aspect Ratio):</b>\n\n` +
-          `Модель: ${modelName}\n` +
-          `${hasReferences ? `📸 Референси: ${referenceList.length} фото\n` : ''}` +
-          `Доступні формати: ${validRatios.join(', ')}`,
-          { parse_mode: 'HTML', ...aspectRatioMenu }
-        );
+        await promptAspectRatioSelection(ctx, {
+          modelKey: currentModel,
+          promptText: text,
+          hasReferences,
+          referencesCount: referenceList.length
+        });
         return;
       }
 
@@ -5308,14 +5327,12 @@ bot.on('photo', async (ctx) => {
       console.log(`💾 State saved for user ${userId}:`, stateData);
       console.log(`💾 Checking state immediately:`, userState.get(userId));
 
-      const { keyboard: aspectRatioMenu, ratios: validRatios } = buildAspectRatioKeyboard(currentModel, true);
-
-      await ctx.reply(
-        `📐 <b>Оберіть пропорції зображення (Aspect Ratio):</b>\n\n` +
-        `Модель: ${models.design.models.find(m => m.key === currentModel)?.name || currentModel}\n` +
-        `Доступні формати: ${validRatios.join(', ')}`,
-        { parse_mode: 'HTML', ...aspectRatioMenu }
-      );
+      await promptAspectRatioSelection(ctx, {
+        modelKey: currentModel,
+        promptText: prompt,
+        hasReferences: true,
+        referencesCount: imageUrl ? 1 : 0
+      });
     } else {
       // Для інших моделей просто генерувати
       runBackgroundTask(() => handleImageGeneration(ctx, prompt, currentModel), 'image_generation_photo');
@@ -5428,15 +5445,12 @@ async function handleMediaGroup(ctx, group) {
         prompt: finalPrompt
       });
 
-      const { keyboard: aspectRatioMenu, ratios: validRatios } = buildAspectRatioKeyboard(currentModel, true);
-
-      await ctx.reply(
-        `📐 <b>Оберіть пропорції зображення (Aspect Ratio):</b>\n\n` +
-        `📸 Отримано ${photos.length} фото\n` +
-        `Модель: ${model?.name || currentModel}\n` +
-        `Доступні формати: ${validRatios.join(', ')}`,
-        { parse_mode: 'HTML', ...aspectRatioMenu }
-      );
+      await promptAspectRatioSelection(ctx, {
+        modelKey: currentModel,
+        promptText: finalPrompt,
+        hasReferences: true,
+        referencesCount: photos.length
+      });
     } else {
       runBackgroundTask(
         () => handleImageGeneration(ctx, finalPrompt, currentModel, photos),
