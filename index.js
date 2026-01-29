@@ -1791,7 +1791,9 @@ bot.action('creative_bridgerton', async (ctx) => {
     model: 'seedream_4k'
   });
 
-  userCurrentModel.set(userId, 'bridgerton');
+  // Скидаємо інші флоу, щоб фото точно пішло в креатив
+  imageGenState.delete(userId);
+  userCurrentModel.delete(userId);
 
   await ctx.reply(
       `👑 <b>Готовий креатив: Bridgerton</b>\n\n` +
@@ -1984,6 +1986,9 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
       // По дефолту використовуємо 9:16 для всіх креативів
       if (creativeType === 'hearts') {
         // Hearts використовує Seedream 4K з aspect ratio 9:16
+        result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
+      } else if (creativeType === 'bridgerton') {
+        // Bridgerton використовує Seedream 4K з aspect ratio 9:16
         result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
       } else if (creativeType === 'love_is') {
         // Love is... використовує NanoBanana 2K з aspect ratio 9:16
@@ -5180,6 +5185,12 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
+  if (state?.creative && state?.step === 'waiting_photo') {
+    const imageUrl = await getImageUrl(ctx);
+    const handled = await handleCreativePhoto(ctx, imageUrl);
+    if (handled) return;
+  }
+
   // ✅ НОВИЙ ФЛОУ: Обробка референс-фото
   const imgState = imageGenState.get(userId);
   if (imgState && imgState.step === 'waiting_photos') {
@@ -5308,12 +5319,6 @@ bot.on('photo', async (ctx) => {
       );
     }
     return;
-  }
-
-  if (state?.creative && state?.step === 'waiting_photo') {
-    const imageUrl = await getImageUrl(ctx);
-    const handled = await handleCreativePhoto(ctx, imageUrl);
-    if (handled) return;
   }
 
   // ✅ Перевірити чи користувач вибрав модель
