@@ -5310,6 +5310,12 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
+  if (state?.creative && state?.step === 'waiting_photo') {
+    const imageUrl = await getImageUrl(ctx);
+    const handled = await handleCreativePhoto(ctx, imageUrl);
+    if (handled) return;
+  }
+
   // ✅ Перевірити чи користувач вибрав модель
   if (!currentModel) {
     await ctx.reply(
@@ -5354,7 +5360,9 @@ bot.on('photo', async (ctx) => {
     if (handled) return;
   }
 
-  if (state?.creative && state?.step === 'waiting_photo') {
+  // 👑 Bridgerton креатив
+  if (currentModel === 'bridgerton') {
+    console.log(`👑 Bridgerton creative selected, handling creative photo`);
     const imageUrl = await getImageUrl(ctx);
     const handled = await handleCreativePhoto(ctx, imageUrl);
     if (handled) return;
