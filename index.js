@@ -1884,44 +1884,40 @@ Framing: chest-up portrait (from upper chest to top of head), centered, no full-
 
 NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any fantasy makeup, any face markings, any graphic eyeliner, any mole removal, any skin-smoothing that erases pores or beauty marks.`
   } else if (creativeType === 'bridgerton') {
-    prompt = `INPUT IMAGES:
-- Image 1 (SELFIE) = the ONLY identity + pose + camera reference. Use it to match the exact camera angle, head tilt, facial expression, and perspective.
-- (Optional) Image 2 (STYLE REF) = ONLY for background/mood/color palette (flowers/arch/garden). Do NOT borrow face, hairline, or any identity features from it.
+    prompt = `INPUT:
+- Image 1 (SELFIE) = ONLY identity + exact pose + camera reference.
+- (Optional) Image 2 (STYLE REF) = ONLY background/mood/colors (arch/garden/flowers). Do NOT borrow face/hairline/identity.
 
-MAIN RULE (NON-NEGOTIABLE):
-Recreate the selfie’s geometry 1:1:
-- Keep the EXACT camera angle and perspective from the selfie (same viewpoint, same rotation, same distance feel).
-- Keep the EXACT head tilt/turn, eye gaze direction, and facial expression from the selfie.
-- Keep the subject’s face and identity perfectly recognizable: same facial proportions, eyes, eyebrows, nose, lips, skin tone, and all distinctive marks (moles/freckles). Do NOT beautify into a different person.
+ABSOLUTE LOCK:
+- Match the selfie 1:1: camera angle/perspective, head tilt/turn, gaze, facial expression.
+- Match the BODY 1:1: same torso rotation, shoulder angle, posture, collarbone orientation (no reposing, no “straightening”).
+- Preserve identity: same facial proportions, eyes/brows/nose/lips, skin tone, distinctive marks. No face “upgrade” into another person.
 
 FRAMING:
-Upper-body portrait cropped slightly below the bust (just below chest), like an editorial portrait, but KEEP the selfie’s pose and camera perspective.
+Tighter crop, chest-up portrait (approximately to mid-chest), keep selfie geometry and viewpoint.
+
+HANDS / PHONE:
+Do NOT add a phone. If phone/extended arm is not visible in the selfie, keep arms neutral and relaxed (no selfie-hand).
 
 WARDROBE (REGENCY / BRIDGERTON VIBE):
-Transform the outfit into an elegant Regency-era off-shoulder gown:
-- Off-shoulder neckline, structured bodice, luxurious satin/silk texture, subtle embroidery, refined seamwork.
-- Color palette “tone 8” cold icy blue for the dress (cool blue).
+Elegant Regency off-shoulder gown with structured bodice, satin/silk texture, subtle embroidery. Color: icy cold blue (“tone 8”).
 
-HAIR:
-Regency-inspired updo with soft loose curls and a few delicate tendrils; gentle breeze moves only a few strands (subtle, not messy). Keep hair color consistent with the selfie.
+HAIR (REGISTRY WAVY BUN, but still consistent):
+- Regency-inspired loose wavy bun/updo: softly gathered (not fully tight), airy volume, with a few curled tendrils falling naturally around the face and neck.
+- Keep hair color and overall hair direction consistent with the selfie (no mirroring; bun placement stays on the same side/center as the selfie’s hair flow).
+- Hair should look intentionally styled, not messy; only slight breeze moving a few strands.
 
 ENVIRONMENT:
-Outdoor grand palace garden in full bloom:
-- A large floral arch directly behind/around the subject, EXTREMELY abundant flowers (dense, pompous, premium).
-- Flowers in cool palette: icy blues + whites + hints of lavender, lush greenery, elegant estate garden atmosphere.
-- Background softly blurred (bokeh), subject sharp.
+Grand palace garden with a huge dense premium floral arch behind/around the subject. Flowers: icy blues + whites + hints of lavender, lush greenery. Background bokeh, subject sharp.
 
-LIGHTING / CAMERA LOOK:
-High-end cinematic daylight, soft and flattering; realistic skin texture (no plastic skin), sharp focus on eyes, shallow depth of field, premium editorial color grading leaning cool/blue while remaining natural.
+LIGHTING / CAMERA:
+Cinematic daylight, soft flattering, realistic skin texture, sharp eyes, shallow depth of field, premium cool-leaning editorial grading.
 
 DO NOT:
-- Do NOT change pose, head angle, face angle, eye direction, or expression.
-- Do NOT change the selfie’s camera viewpoint/perspective (no “new” angle, no reposing).
-- No extra people, no text, no logos, no watermark, no cartoon/anime look.
-- No face swapping with the style reference.
+No changes to head/body turn, no new pose, no extra people, no text/logos/watermarks, no cartoon/anime, no face swap from style ref.
 
 OUTPUT:
-Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
+ONE photorealistic, expensive Regency romance drama image, Instagram-ready.`
   }
   
   if (!prompt) {
