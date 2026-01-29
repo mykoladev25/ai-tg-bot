@@ -1884,40 +1884,53 @@ Framing: chest-up portrait (from upper chest to top of head), centered, no full-
 
 NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any fantasy makeup, any face markings, any graphic eyeliner, any mole removal, any skin-smoothing that erases pores or beauty marks.`
   } else if (creativeType === 'bridgerton') {
-    prompt = `INPUT:
-- Image 1 (SELFIE) = ONLY identity + exact pose + camera reference.
-- (Optional) Image 2 (STYLE REF) = ONLY background/mood/colors (arch/garden/flowers). Do NOT borrow face/hairline/identity.
+    prompt = `INPUT IMAGES:
+- Image 1 (SELFIE) = the ONLY reference for identity + exact pose + exact camera geometry.
+- (Optional) Image 2 (STYLE REF) = ONLY for environment/mood/color palette (garden/arch/flowers). No identity borrowing.
 
-ABSOLUTE LOCK:
-- Match the selfie 1:1: camera angle/perspective, head tilt/turn, gaze, facial expression.
-- Match the BODY 1:1: same torso rotation, shoulder angle, posture, collarbone orientation (no reposing, no “straightening”).
-- Preserve identity: same facial proportions, eyes/brows/nose/lips, skin tone, distinctive marks. No face “upgrade” into another person.
+ABSOLUTE 1:1 LOCK (NON-NEGOTIABLE):
+Recreate the SELFIE exactly:
+- Same camera angle, viewpoint, head tilt/turn, gaze, facial expression.
+- Same BODY: identical torso rotation, shoulder angle, posture, neck/collarbone line, body turn relative to camera. Do NOT rotate torso more front-facing. No “straightening”.
+- Same perspective/FOV feel (same selfie-lens look, same distortion).
+- Keep pose + proportions identical; only crop changes are allowed.
 
-FRAMING:
-Tighter crop, chest-up portrait (approximately to mid-chest), keep selfie geometry and viewpoint.
+FRAMING / FORMAT:
+- Output format: 9:16 vertical.
+- Tighter crop: chest-up portrait (approximately to mid-chest).
+- Achieve “closer” framing ONLY by cropping/zooming while keeping the original pose/camera geometry (no reposing, no new angle).
+- If any body parts are outside the selfie frame, keep them outside (do not extend the frame to reveal new arms/hands).
 
-HANDS / PHONE:
-Do NOT add a phone. If phone/extended arm is not visible in the selfie, keep arms neutral and relaxed (no selfie-hand).
+ARMS / HANDS (NO INVENTING):
+- Do NOT add a phone.
+- Do NOT invent a raised “selfie arm”.
+- Keep arm visibility exactly as in the selfie: if arms/hands are not visible, keep them out of frame; if partially visible, keep the same side and approximate position without changing the pose.
+
+IDENTITY LOCK:
+Same person, highly recognizable: same facial proportions, eyes/brows/nose/lips, skin tone, and distinctive marks (moles/freckles). No beautify into a different person.
 
 WARDROBE (REGENCY / BRIDGERTON VIBE):
-Elegant Regency off-shoulder gown with structured bodice, satin/silk texture, subtle embroidery. Color: icy cold blue (“tone 8”).
+Elegant Regency off-shoulder gown: structured bodice, satin/silk texture, subtle embroidery, refined seamwork.
+Color: icy cold blue (“tone 8”).
 
-HAIR (REGISTRY WAVY BUN, but still consistent):
-- Regency-inspired loose wavy bun/updo: softly gathered (not fully tight), airy volume, with a few curled tendrils falling naturally around the face and neck.
-- Keep hair color and overall hair direction consistent with the selfie (no mirroring; bun placement stays on the same side/center as the selfie’s hair flow).
-- Hair should look intentionally styled, not messy; only slight breeze moving a few strands.
+HAIR (REGAL LOOSE WAVY BUN):
+Regency-inspired loose wavy bun/updo (not tight), airy volume, with a few curled tendrils falling naturally around the face/neck.
+Keep hair color consistent with the selfie.
+No mirroring; keep parting direction and hair flow consistent with the selfie.
 
 ENVIRONMENT:
-Grand palace garden with a huge dense premium floral arch behind/around the subject. Flowers: icy blues + whites + hints of lavender, lush greenery. Background bokeh, subject sharp.
+Grand palace garden with one huge dense premium floral arch behind/around the subject.
+Flowers: icy blues + whites + hints of lavender, lush greenery.
+Background bokeh, subject sharp.
 
-LIGHTING / CAMERA:
-Cinematic daylight, soft flattering, realistic skin texture, sharp eyes, shallow depth of field, premium cool-leaning editorial grading.
+LIGHTING / CAMERA LOOK:
+High-end cinematic daylight, soft flattering, realistic skin texture, sharp eyes, shallow DOF, premium cool-leaning editorial grade.
 
 DO NOT:
-No changes to head/body turn, no new pose, no extra people, no text/logos/watermarks, no cartoon/anime, no face swap from style ref.
+No changes to head/body/shoulders, no new angle, no extra people, no text/logos/watermark, no cartoon/anime, no face swap from style ref.
 
 OUTPUT:
-ONE photorealistic, expensive Regency romance drama image, Instagram-ready.`
+ONE photorealistic, expensive Regency romance drama image, Instagram-ready, 9:16.`
   }
   
   if (!prompt) {
