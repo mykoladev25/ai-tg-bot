@@ -1435,6 +1435,7 @@ bot.hears('🎨 Креативи', async (ctx) => {
   const creativesKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('💌 До Дня Закоханих', 'creative_love_is')],
     [Markup.button.callback('❤️ Льодяник', 'creative_hearts')],
+    [Markup.button.callback('👑 Bridgerton', 'creative_bridgerton')],
     [Markup.button.callback('🏠 Головне меню', 'main_menu')]
   ]);
 
@@ -1774,6 +1775,37 @@ bot.action('creative_hearts', async (ctx) => {
   );
 });
 
+// 👑 Bridgerton - Regency portrait у стилі серіалу
+bot.action('creative_bridgerton', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_SEEDREAM_4K))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST_SEEDREAM_4K);
+    return;
+  }
+
+  userState.set(userId, {
+    creative: 'bridgerton',
+    step: 'waiting_photo',
+    model: 'seedream_4k'
+  });
+
+  userCurrentModel.set(userId, 'bridgerton');
+
+  await ctx.reply(
+      `👑 <b>Готовий креатив: Bridgerton</b>\n\n` +
+      `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST_SEEDREAM_4K}⚡\n` +
+      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `👉 Надішліть своє селфі зараз`,
+      {
+        parse_mode: 'HTML',
+        ...keyboard.createBackButton('main_menu')
+      }
+  );
+});
+
 // ==================== ОБРОБКА ФОТО ДЛЯ КРЕАТИВІВ ====================
 // Вставити ПЕРЕД bot.on('photo') handler
 
@@ -1849,6 +1881,45 @@ Remove lipstick kiss marks. Add a small amount of glossy heart stickers: cluster
 Framing: chest-up portrait (from upper chest to top of head), centered, no full-body. 9:16 8K
 
 NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any fantasy makeup, any face markings, any graphic eyeliner, any mole removal, any skin-smoothing that erases pores or beauty marks.`
+  } else if (creativeType === 'bridgerton') {
+    prompt = `INPUT IMAGES:
+- Image 1 (SELFIE) = the ONLY identity + pose + camera reference. Use it to match the exact camera angle, head tilt, facial expression, and perspective.
+- (Optional) Image 2 (STYLE REF) = ONLY for background/mood/color palette (flowers/arch/garden). Do NOT borrow face, hairline, or any identity features from it.
+
+MAIN RULE (NON-NEGOTIABLE):
+Recreate the selfie’s geometry 1:1:
+- Keep the EXACT camera angle and perspective from the selfie (same viewpoint, same rotation, same distance feel).
+- Keep the EXACT head tilt/turn, eye gaze direction, and facial expression from the selfie.
+- Keep the subject’s face and identity perfectly recognizable: same facial proportions, eyes, eyebrows, nose, lips, skin tone, and all distinctive marks (moles/freckles). Do NOT beautify into a different person.
+
+FRAMING:
+Upper-body portrait cropped slightly below the bust (just below chest), like an editorial portrait, but KEEP the selfie’s pose and camera perspective.
+
+WARDROBE (REGENCY / BRIDGERTON VIBE):
+Transform the outfit into an elegant Regency-era off-shoulder gown:
+- Off-shoulder neckline, structured bodice, luxurious satin/silk texture, subtle embroidery, refined seamwork.
+- Color palette “tone 8” cold icy blue for the dress (cool blue).
+
+HAIR:
+Regency-inspired updo with soft loose curls and a few delicate tendrils; gentle breeze moves only a few strands (subtle, not messy). Keep hair color consistent with the selfie.
+
+ENVIRONMENT:
+Outdoor grand palace garden in full bloom:
+- A large floral arch directly behind/around the subject, EXTREMELY abundant flowers (dense, pompous, premium).
+- Flowers in cool palette: icy blues + whites + hints of lavender, lush greenery, elegant estate garden atmosphere.
+- Background softly blurred (bokeh), subject sharp.
+
+LIGHTING / CAMERA LOOK:
+High-end cinematic daylight, soft and flattering; realistic skin texture (no plastic skin), sharp focus on eyes, shallow depth of field, premium editorial color grading leaning cool/blue while remaining natural.
+
+DO NOT:
+- Do NOT change pose, head angle, face angle, eye direction, or expression.
+- Do NOT change the selfie’s camera viewpoint/perspective (no “new” angle, no reposing).
+- No extra people, no text, no logos, no watermark, no cartoon/anime look.
+- No face swapping with the style reference.
+
+OUTPUT:
+Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
   }
   
   if (!prompt) {
@@ -1864,6 +1935,8 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
     modelKey = 'nano_banana_2k';
   } else if (creativeType === 'hearts') {
     modelKey = 'seedream_4k';
+  } else if (creativeType === 'bridgerton') {
+    modelKey = 'seedream_4k';
   } else {
     modelKey = 'nano_banana_4k';
   }
@@ -1871,7 +1944,8 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
 
   const creativeNames = {
     love_is: '💌 День Закоханих',
-    hearts: '❤️ Льодяник'
+    hearts: '❤️ Льодяник',
+    bridgerton: '👑 Bridgerton'
   };
 
   if (!model) {
@@ -1883,7 +1957,7 @@ NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any 
 
   const creativeCost = creativeType === 'love_is'
     ? CREATIVE_COST_2K
-    : (creativeType === 'hearts' ? CREATIVE_COST_SEEDREAM_4K : CREATIVE_COST);
+    : (creativeType === 'hearts' || creativeType === 'bridgerton' ? CREATIVE_COST_SEEDREAM_4K : CREATIVE_COST);
 
   const statusMsg = await ctx.reply(
       `🎨 <b>Генерую ${creativeNames[creativeType]}...</b>\n\n` +
