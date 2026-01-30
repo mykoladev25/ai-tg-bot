@@ -55,12 +55,6 @@ const OFFICIAL_PRICING = {
     source: 'https://replicate.com/google/nano-banana-pro'
   },
 
-  'bytedance/seedream-4.5-2k': {
-    pricePerRun: 0.04,  // $0.04 per image (однакова ціна для всіх resolution)
-    model: 'seedream_2k',
-    lastChecked: '2026-01-25',
-    source: 'https://replicate.com/bytedance/seedream-4.5'
-  },
   'bytedance/seedream-4.5-4k': {
     pricePerRun: 0.04,  // $0.04 per image (однакова ціна для всіх resolution)
     model: 'seedream_4k',
@@ -145,7 +139,6 @@ const MODEL_MAPPING = {
   'nano_banana': 'google/nano-banana',
   'nano_banana_2k': 'google/nano-banana-pro-2k',
   'nano_banana_4k': 'google/nano-banana-pro-4k',
-  'seedream_2k': 'bytedance/seedream-4.5-2k',
   'seedream_4k': 'bytedance/seedream-4.5-4k',
   'ideogram': 'ideogram-ai/ideogram-v3',
   'clarity': 'philz1337x/clarity-upscaler',

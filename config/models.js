@@ -215,9 +215,6 @@ module.exports = {
       },
 
       // seedream $0.04 -> 7
-      { name: '🌊 Seedream 2K', key: 'seedream_2k', cost: 7, apiCost: 0.04, size: '2K', maxImages: 14, available: true },
-
-      // seedream $0.04 -> 7
       { name: '🌊 Seedream 4K', key: 'seedream_4k', cost: 7, apiCost: 0.04, size: '4K', maxImages: 14, available: true },
 
       // clarity $0.02 -> 4

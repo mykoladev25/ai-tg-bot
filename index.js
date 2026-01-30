@@ -299,7 +299,6 @@ const IMAGE_MODELS = [
   'nano_banana',
   'nano_banana_2k',
   'nano_banana_4k',
-  'seedream_2k',
   'seedream_4k',
   'ideogram',
   'clarity',
@@ -311,7 +310,6 @@ const MODELS_WITH_ASPECT_RATIO = [
   'nano_banana',
   'nano_banana_2k',
   'nano_banana_4k',
-  'seedream_2k',
   'seedream_4k',
   'stable_diffusion',
   'ideogram'
@@ -329,7 +327,6 @@ const MODELS_WITH_STATE = [
 ];
 
 const ASPECT_RATIO_OPTIONS = {
-  seedream_2k: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
   seedream_4k: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
   nano_banana: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   nano_banana_2k: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
@@ -365,7 +362,14 @@ const RATIO_NOTES = {
   '16:9': 'Горизонтальний widescreen (YouTube, презентації).'
 };
 
-const TEXT_ASPECT_RATIO_MODELS = new Set(['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'ideogram', 'stable_diffusion']);
+const TEXT_ASPECT_RATIO_MODELS = new Set([
+  'nano_banana',
+  'nano_banana_2k',
+  'nano_banana_4k',
+  'seedream_4k',
+  'ideogram',
+  'stable_diffusion'
+]);
 
 function getAspectRatiosForModel(modelKey, hasImageInput = true) {
   const ratios = ASPECT_RATIO_OPTIONS[modelKey] || ['1:1', 'match_input_image'];
@@ -1435,6 +1439,9 @@ bot.hears('🎨 Креативи', async (ctx) => {
   const creativesKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('💌 До Дня Закоханих', 'creative_love_is')],
     [Markup.button.callback('❤️ Льодяник', 'creative_hearts')],
+    [Markup.button.callback('✨ Порцелянова фігурка', 'creative_porcelain_figure')],
+    [Markup.button.callback('🐱 Котики', 'creative_kittens')],
+    [Markup.button.callback('🌊 Підводний макро-портрет', 'creative_underwater_macro')],
     [Markup.button.callback('🏠 Головне меню', 'main_menu')]
   ]);
 
@@ -1774,6 +1781,99 @@ bot.action('creative_hearts', async (ctx) => {
   );
 });
 
+// ✨ Порцелянова фігурка - 3D collectible-figure портрет
+bot.action('creative_porcelain_figure', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_SEEDREAM_4K))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST_SEEDREAM_4K);
+    return;
+  }
+
+  userState.set(userId, {
+    creative: 'porcelain_figure',
+    step: 'waiting_photo',
+    model: 'seedream_4k'
+  });
+
+  userCurrentModel.set(userId, 'porcelain_figure');
+
+  await ctx.reply(
+      `✨ <b>Готовий креатив: Порцелянова фігурка</b>\n\n` +
+      `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST_SEEDREAM_4K}⚡\n` +
+      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `👉 Надішліть своє селфі зараз`,
+      {
+        parse_mode: 'HTML',
+        ...keyboard.createBackButton('main_menu')
+      }
+  );
+});
+
+// 🐱 Котики - cozy editorial портрет з кошенятами
+bot.action('creative_kittens', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_SEEDREAM_4K))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST_SEEDREAM_4K);
+    return;
+  }
+
+  userState.set(userId, {
+    creative: 'kittens',
+    step: 'waiting_photo',
+    model: 'seedream_4k'
+  });
+
+  userCurrentModel.set(userId, 'kittens');
+
+  await ctx.reply(
+      `🐱 <b>Готовий креатив: Котики</b>\n\n` +
+      `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST_SEEDREAM_4K}⚡\n` +
+      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `👉 Надішліть своє селфі зараз`,
+      {
+        parse_mode: 'HTML',
+        ...keyboard.createBackButton('main_menu')
+      }
+  );
+});
+
+// 🌊 Підводний макро-портрет - ultra-detailed underwater close-up
+bot.action('creative_underwater_macro', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_SEEDREAM_4K))) {
+    await showInsufficientTokens(ctx, CREATIVE_COST_SEEDREAM_4K);
+    return;
+  }
+
+  userState.set(userId, {
+    creative: 'underwater_macro',
+    step: 'waiting_photo',
+    model: 'seedream_4k'
+  });
+
+  userCurrentModel.set(userId, 'underwater_macro');
+
+  await ctx.reply(
+      `🌊 <b>Готовий креатив: Підводний макро-портрет</b>\n\n` +
+      `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
+      `💰 <b>Вартість:</b> ${CREATIVE_COST_SEEDREAM_4K}⚡\n` +
+      `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `👉 Надішліть своє селфі зараз`,
+      {
+        parse_mode: 'HTML',
+        ...keyboard.createBackButton('main_menu')
+      }
+  );
+});
+
 // 👑 Bridgerton - Regency portrait у стилі серіалу
 bot.action('creative_bridgerton', async (ctx) => {
   await ctx.answerCbQuery();
@@ -1882,6 +1982,31 @@ Remove lipstick kiss marks. Add a small amount of glossy heart stickers: cluster
 Framing: chest-up portrait (from upper chest to top of head), centered, no full-body. 9:16 8K
 
 NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any fantasy makeup, any face markings, any graphic eyeliner, any mole removal, any skin-smoothing that erases pores or beauty marks.`
+  } else if (creativeType === 'porcelain_figure') {
+    prompt = `Create a hyper-stylized 3D version of the person from the reference image, preserving their unique facial structure, proportions, and recognizable features. The face shape, eyes, nose, lips, jawline, and overall expression should closely match the reference while being translated into a cute, softly exaggerated 3D aesthetic. Maintain the original hairstyle, hair length, parting, and general volume, adapted into smooth, stylized strands without altering identity.
+
+The character should be floating against a clean, solid white background. Body proportions must remain logical, cohesive, and clearly readable, with gentle stylization (slightly rounded forms, softened edges) but no distortion of anatomy or facial likeness.
+
+Style & Materials: Render in a polished, collectible-figure style with a glossy porcelain-vinyl surface, subtle iridescent glow, and soft specular highlights. The surface should be smooth, clean, and lightly reflective, resembling a premium designer figurine.
+
+Color & Finish: Use a bright, saturated, cartoon-like color palette while keeping natural skin tones and balanced harmony. Avoid extreme stylization that would obscure facial identity.
+
+Lighting & Camera: Soft studio lighting with gentle highlights and minimal shadows. Use a 3/4 camera angle, slightly from above, to emphasize volume, depth, and facial features.
+
+Composition: The character appears lightly floating in mid-air. No props, no environment, no background elements — only the figure on a pure white backdrop. Ensure a clean silhouette, strong readability, and a refined, finished look.`
+  } else if (creativeType === 'kittens') {
+    prompt = `A cozy dreamy high-fashion editorial portrait of the person from the reference photo. The person is fully surrounded by dozens of ultra-fluffy kittens, filling the entire frame like a soft living cloud. Extremely long, dense, airy fur with plush texture, maximum volume and soft halos. Baby-like kittens with big round eyes and faces in white, cream, beige, gray and soft ginger tones, hyper-realistic fur details.
+
+The person lies calmly in the center, relaxed as if resting near a fireplace, eyes gently closed or with a soft peaceful smile, deep cozy holiday mood. Wearing a warm red New Year-inspired cozy sweater: oversized chunky knit, soft wool or cashmere texture, thick yarn, rich deep red color, relaxed fit, no logos.
+
+Warm amber fireplace lighting, gentle shadows, cinematic warmth, soft fur highlights. Delicate Christmas garlands with warm fairy lights, creamy bokeh, magical winter atmosphere. Top-down symmetrical composition, cinematic editorial photography, shallow depth of field, high resolution.
+
+Face preservation: strictly preserve the original face from the reference photo. Do not change gender, facial structure, proportions, expression or identity. Keep natural skin texture and realistic features exactly as in the reference.
+Negative: gender swap, face morphing, altered facial proportions, feminized or masculinized features, different identity.`
+  } else if (creativeType === 'underwater_macro') {
+    prompt = `Hyper-realistic, ultra-detailed close-up portrait submerged in water, one eye in sharp focus, positioned on the far left of the frame, light rays creating caustic patterns on the skin, suspended water droplets and bubbles adding depth, cinematic lighting with soft shadows and sharp highlights, photorealistic textures including skin pores, wet lips, eyelashes, and subtle subsurface scattering, surreal and dreamlike atmosphere, shallow depth of field, underwater macro.
+
+Exactly the same face from the reference image. Do not change gender, facial structure, proportions, expression, or identity. Preserve natural skin texture and realistic features exactly as in the reference.`
   } else if (creativeType === 'bridgerton') {
     prompt = `PROMPT (NanoBanana Pro / copy-paste) — “Bridgerton vibe, STRICT pose & camera lock”
 
@@ -1938,6 +2063,12 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
     modelKey = 'nano_banana_2k';
   } else if (creativeType === 'hearts') {
     modelKey = 'seedream_4k';
+  } else if (creativeType === 'porcelain_figure') {
+    modelKey = 'seedream_4k';
+  } else if (creativeType === 'kittens') {
+    modelKey = 'seedream_4k';
+  } else if (creativeType === 'underwater_macro') {
+    modelKey = 'seedream_4k';
   } else if (creativeType === 'bridgerton') {
     modelKey = 'seedream_4k';
   } else {
@@ -1948,6 +2079,9 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
   const creativeNames = {
     love_is: '💌 День Закоханих',
     hearts: '❤️ Льодяник',
+  porcelain_figure: '✨ Порцелянова фігурка',
+  kittens: '🐱 Котики',
+  underwater_macro: '🌊 Підводний макро-портрет',
     bridgerton: '👑 Bridgerton'
   };
 
@@ -1960,7 +2094,7 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
 
   const creativeCost = creativeType === 'love_is'
     ? CREATIVE_COST_2K
-    : (creativeType === 'hearts' || creativeType === 'bridgerton' ? CREATIVE_COST_SEEDREAM_4K : CREATIVE_COST);
+  : (creativeType === 'hearts' || creativeType === 'bridgerton' || creativeType === 'porcelain_figure' || creativeType === 'kittens' || creativeType === 'underwater_macro' ? CREATIVE_COST_SEEDREAM_4K : CREATIVE_COST);
 
   const statusMsg = await ctx.reply(
       `🎨 <b>Генерую ${creativeNames[creativeType]}...</b>\n\n` +
@@ -1988,6 +2122,15 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
       if (creativeType === 'hearts') {
         // Hearts використовує Seedream 4K з aspect ratio 9:16
         result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
+      } else if (creativeType === 'porcelain_figure') {
+        // Porcelain figure використовує Seedream 4K з aspect ratio 1:1
+        result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '1:1');
+      } else if (creativeType === 'kittens') {
+        // Kittens використовує Seedream 4K з aspect ratio 1:1
+        result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '1:1');
+      } else if (creativeType === 'underwater_macro') {
+        // Underwater macro використовує Seedream 4K з aspect ratio 16:9
+        result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '16:9');
       } else if (creativeType === 'bridgerton') {
         // Bridgerton використовує Seedream 4K з aspect ratio 9:16
         result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
@@ -2190,7 +2333,7 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|4:5|5:4|9:16|10:16|16:10|4:
 });
 
 // Design Models
-bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_2k|seedream_4k|clarity|recraft_upscale|ideogram)$/, async (ctx) => {
+bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
 
@@ -4914,7 +5057,6 @@ bot.on('text', async (ctx) => {
     nano_banana: () => handleImageGeneration(ctx, text, 'nano_banana'),
     nano_banana_2k: () => handleImageGeneration(ctx, text, 'nano_banana_2k'),
     nano_banana_4k: () => handleImageGeneration(ctx, text, 'nano_banana_4k'),
-    seedream_2k: () => handleImageGeneration(ctx, text, 'seedream_2k'),
     seedream_4k: () => handleImageGeneration(ctx, text, 'seedream_4k'),
     ideogram: () => handleImageGeneration(ctx, text, 'ideogram'),
     kling: () => handleVideoGeneration(ctx, text, 'kling'),
@@ -5374,6 +5516,30 @@ bot.on('photo', async (ctx) => {
     if (handled) return;
   }
 
+  // ✨ Порцелянова фігурка креатив
+  if (currentModel === 'porcelain_figure') {
+    console.log(`✨ Porcelain figure creative selected, handling creative photo`);
+    const imageUrl = await getImageUrl(ctx);
+    const handled = await handleCreativePhoto(ctx, imageUrl);
+    if (handled) return;
+  }
+
+  // 🐱 Котики креатив
+  if (currentModel === 'kittens') {
+    console.log(`🐱 Kittens creative selected, handling creative photo`);
+    const imageUrl = await getImageUrl(ctx);
+    const handled = await handleCreativePhoto(ctx, imageUrl);
+    if (handled) return;
+  }
+
+  // 🌊 Підводний макро-портрет креатив
+  if (currentModel === 'underwater_macro') {
+    console.log(`🌊 Underwater macro creative selected, handling creative photo`);
+    const imageUrl = await getImageUrl(ctx);
+    const handled = await handleCreativePhoto(ctx, imageUrl);
+    if (handled) return;
+  }
+
   const mediaGroupId = ctx.message.media_group_id;
 
   if (mediaGroupId) {
@@ -5402,7 +5568,7 @@ bot.on('photo', async (ctx) => {
 
   // Обробка одного фото
   const videoModels = ['kling', 'kling_v2_6', 'runway_gen4'];
-  const imageModels = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_2k', 'seedream_4k', 'ideogram', 'recraft_upscale'];
+  const imageModels = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_4k', 'ideogram', 'recraft_upscale'];
 
   // Отримуємо caption як промпт
   let prompt = ctx.message.caption || '';
@@ -5755,7 +5921,6 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         nano_banana: () => replicate.generateWithNanoBananaBase(generationData.prompt, generationData.imageInput, generationData.aspectRatio),
         nano_banana_2k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
         nano_banana_4k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
-        seedream_2k: () => replicate.generateWithSeedream(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
         seedream_4k: () => replicate.generateWithSeedream(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
         ideogram: () => replicate.generateWithIdeogram(generationData.prompt, generationData.imageInput, 0.5, generationData.aspectRatio),
         clarity: () => {
