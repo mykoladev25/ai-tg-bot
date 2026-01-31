@@ -1442,6 +1442,7 @@ bot.hears('🎨 Креативи', async (ctx) => {
     [Markup.button.callback('✨ Порцелянова фігурка', 'creative_porcelain_figure')],
     [Markup.button.callback('🐱 Котики', 'creative_kittens')],
     [Markup.button.callback('🌊 Підводний макро-портрет', 'creative_underwater_macro')],
+    [Markup.button.callback('👑 Bridgerton', 'creative_bridgerton')],
     [Markup.button.callback('🏠 Головне меню', 'main_menu')]
   ]);
 
