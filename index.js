@@ -8064,73 +8064,25 @@ async function startBot() {
       }
     });
 
+    const botUsername = process.env.BOT_USERNAME || 'neuro_lab_ai_bot';
+    const botRedirectUrl = `https://t.me/${botUsername}`;
+
     app.all('/payment/success', (req, res) => {
-      console.log(`✅ Payment success page accessed via ${req.method}`);
-      res.sendFile(__dirname + '/public/payment-success.html');
+      console.log(`✅ Payment success redirect via ${req.method}`);
+      res.redirect(botRedirectUrl);
     });
 
     // ✅ Payment failed page (for declined WayForPay payments)
     app.all('/payment/failed', (req, res) => {
-      console.log(`❌ Payment failed page accessed via ${req.method}`);
-      res.sendFile(__dirname + '/public/payment-failed.html');
+      console.log(`❌ Payment failed redirect via ${req.method}`);
+      res.redirect(botRedirectUrl);
     });
 
     // ✅ Payment cancel page
     app.get('/payment/cancel', (req, res) => {
       const sessionId = req.query.session_id;
       console.log(`❌ Payment cancelled for session: ${sessionId}`);
-
-      res.send(`
-        <!DOCTYPE html>
-        <html lang="uk">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>❌ Платіж скасовано</title>
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              min-height: 100vh;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              padding: 20px;
-            }
-            .container {
-              background: white;
-              border-radius: 12px;
-              box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-              max-width: 500px;
-              width: 100%;
-              padding: 40px;
-              text-align: center;
-            }
-            h1 { color: #c33; font-size: 28px; margin-bottom: 20px; }
-            p { color: #666; font-size: 16px; margin-bottom: 30px; line-height: 1.5; }
-            .button {
-              display: inline-block;
-              padding: 14px 32px;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              color: white;
-              text-decoration: none;
-              border-radius: 8px;
-              font-weight: 600;
-              transition: transform 0.2s;
-            }
-            .button:hover { transform: translateY(-2px); }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <h1>❌ Платіж скасовано</h1>
-            <p>Ви скасували платіж. Спробуйте знову, коли будете готові.</p>
-            <a href="javascript:history.back()" class="button">← Повернутись</a>
-          </div>
-        </body>
-        </html>
-      `);
+      res.redirect(botRedirectUrl);
     });
 
     // ✅ Legal pages - Terms of Service
