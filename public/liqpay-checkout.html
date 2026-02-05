@@ -484,7 +484,11 @@
                 loadingEl.innerHTML = '<div class="spinner"></div>Завантаження планів...';
             }
 
-            const response = await fetch('/api/plans');
+            const plansUserId = userId || tg_id;
+            const plansUrl = plansUserId
+                ? `/api/plans?userId=${encodeURIComponent(plansUserId)}`
+                : '/api/plans';
+            const response = await fetch(plansUrl);
             const data = await response.json();
 
             console.log('📊 API response:', data);

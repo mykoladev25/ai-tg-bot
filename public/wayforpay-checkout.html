@@ -183,7 +183,10 @@
 
     async function loadPlans() {
         try {
-            const response = await fetch('/api/plans');
+            const plansUrl = userId
+                ? `/api/plans?userId=${encodeURIComponent(userId)}`
+                : '/api/plans';
+            const response = await fetch(plansUrl);
             const data = await response.json();
 
             if (!data.success || !data.plans) {

@@ -262,6 +262,7 @@ module.exports = {
       tokensWayForPay: 10,
       priceUSD: 0.1,
       price: 10,
+      priceWayForPayUAH: 4,
       adminOnly: true,
       features: ['🧪 Тестовий пакет', '⚡ 10 токенів', '🔒 Тільки для адміна']
     },

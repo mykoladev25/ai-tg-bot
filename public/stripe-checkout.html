@@ -417,7 +417,11 @@
 
         async function loadPlans() {
             try {
-                const response = await fetch('/api/plans');
+                const plansUserId = userId || telegramId;
+                const plansUrl = plansUserId
+                    ? `/api/plans?userId=${encodeURIComponent(plansUserId)}`
+                    : '/api/plans';
+                const response = await fetch(plansUrl);
                 const data = await response.json();
 
                 if (data.success) {

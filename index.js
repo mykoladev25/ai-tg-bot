@@ -7030,7 +7030,7 @@ async function startBot() {
 
         // Отримуємо реальну ціну в UAH
         const rate = await exchangeRate.getRate();
-        const amount = Math.round(sub.priceUSD * rate);
+        const amount = sub.priceWayForPayUAH ?? Math.round(sub.priceUSD * rate);
 
         // Генеруємо унікальний ID замовлення: userId_planKey_timestamp
         const orderReference = `${userId}_${plan}_${Date.now()}`;
@@ -7465,6 +7465,8 @@ async function startBot() {
       try {
         const startTime = Date.now();
         const subscriptions = models.subscriptions;
+        const requestUserId = parseInt(req.query.userId || req.query.tg_id || '0', 10);
+        const isAdminRequest = requestUserId && requestUserId === getAdminTelegramId();
         const plans = {};
 
         // Отримуємо актуальний курс USD/UAH (з кешем для швидкості)
@@ -7480,12 +7482,24 @@ async function startBot() {
         // TOKEN PRICE CALCULATION PER PLAN
         // Formula: tokenPriceUSD = priceUSD / tokensWayForPay (LiqPay дає більше токенів)
         // ============================================================
-        const tokenPriceUSDByPlan = {
-          starter: subscriptions.starter ? +(subscriptions.starter.priceUSD / subscriptions.starter.tokensWayForPay).toFixed(5) : 0,
-          basic: subscriptions.basic ? +(subscriptions.basic.priceUSD / subscriptions.basic.tokensWayForPay).toFixed(5) : 0,
-          pro: subscriptions.pro ? +(subscriptions.pro.priceUSD / subscriptions.pro.tokensWayForPay).toFixed(5) : 0,
-          premium: subscriptions.premium ? +(subscriptions.premium.priceUSD / subscriptions.premium.tokensWayForPay).toFixed(5) : 0
-        };
+        const planKeys = ['starter', 'basic', 'pro', 'premium'];
+        if (isAdminRequest) {
+          Object.entries(subscriptions).forEach(([key, sub]) => {
+            if (sub?.adminOnly && !planKeys.includes(key)) {
+              planKeys.push(key);
+            }
+          });
+        }
+
+        const tokenPriceUSDByPlan = planKeys.reduce((acc, key) => {
+          const sub = subscriptions[key];
+          if (sub?.priceUSD && sub?.tokensWayForPay) {
+            acc[key] = +(sub.priceUSD / sub.tokensWayForPay).toFixed(5);
+          } else {
+            acc[key] = 0;
+          }
+          return acc;
+        }, {});
 
         // Default tokenPriceUSD = premium plan (найкращий для клієнта, найгірший для нас)
         // Використовується для backwards compatibility та UI calculations
@@ -7501,14 +7515,14 @@ async function startBot() {
           return +margin.toFixed(1);
         };
 
-        ['starter', 'basic', 'pro', 'premium'].forEach(planKey => {
+        planKeys.forEach(planKey => {
           const sub = subscriptions[planKey];
           if (sub) {
             // Розраховуємо TG Stars динамічно: priceUSD / tgStarRate
             const priceStarsDynamic = Math.round(sub.priceUSD / tgStarRate);
 
             // Розраховуємо LiqPay ціну: priceUSD * реальний курс
-            const priceUAHDynamic = Math.round(sub.priceUSD * rate);
+            const priceUAHDynamic = sub.priceWayForPayUAH ?? Math.round(sub.priceUSD * rate);
 
             plans[planKey] = {
               name: sub.name,
