@@ -256,6 +256,16 @@ module.exports = {
       features: ['🚀 700⚡ токенів', '💎 Доступ до всіх моделей', '⏰ Токени НЕ згорають', '✨ Комбінуйте як завгодно!']
     },
 
+    starter_test: {
+      name: 'STARTER TEST',
+      tokens: 100,
+      tokensWayForPay: 10,
+      priceUSD: 0.1,
+      price: 10,
+      adminOnly: true,
+      features: ['🧪 Тестовий пакет', '⚡ 10 токенів', '🔒 Тільки для адміна']
+    },
+
     basic: {
       name: 'BASIC',
       tokens: 1500,

@@ -1467,7 +1467,7 @@ bot.hears('📝 Feedback', async (ctx) => {
 });
 
 bot.hears('💰 Поповнити баланс', async (ctx) => {
-  await ctx.reply(`⚡ Купити токени\n\n Виберіть пакет 👇`, keyboard.createSubscriptionsMenu());
+  await ctx.reply(`⚡ Купити токени\n\n Виберіть пакет 👇`, keyboard.createSubscriptionsMenu(ctx.from.id));
 });
 
 // Отримуємо ціни моделей
@@ -2354,7 +2354,7 @@ bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_d
     await ctx.answerCbQuery();
     await ctx.reply(
       trialCheck.message,
-      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu() }
+      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu(ctx.from.id) }
     );
     return;
   }
@@ -2578,7 +2578,7 @@ bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|sora_2|
   if (!trialCheck.allowed) {
     await ctx.reply(
       trialCheck.message,
-      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu() }
+      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu(ctx.from.id) }
     );
     return;
   }
@@ -3273,7 +3273,7 @@ bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
   if (!trialCheck.allowed) {
     await ctx.reply(
       trialCheck.message,
-      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu() }
+      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu(ctx.from.id) }
     );
     return;
   }
@@ -4536,7 +4536,7 @@ bot.action('video_menu', async (ctx) => {
 // Tokens purchase
 bot.action('buy_subscription', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.reply(`⚡ Купити токени\n\n Виберіть пакет 👇`, keyboard.createSubscriptionsMenu());
+  await ctx.reply(`⚡ Купити токени\n\n Виберіть пакет 👇`, keyboard.createSubscriptionsMenu(ctx.from.id));
 });
 
 bot.action('community', async (ctx) => {
@@ -4571,7 +4571,7 @@ bot.action('legal_info', async (ctx) => {
   await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createLegalMenu() });
 });
 
-bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
+bot.action(/^sub_(starter|basic|pro|premium|starter_test)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   const planKey = ctx.match[1];
@@ -4581,6 +4581,11 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
 
   if (!sub) {
     await ctx.reply('❌ План не знайдено');
+    return;
+  }
+
+  if (sub.adminOnly && userId !== getAdminTelegramId()) {
+    await ctx.reply('❌ Доступ заборонений');
     return;
   }
 
@@ -4614,7 +4619,7 @@ bot.action(/^sub_(starter|basic|pro|premium)$/, async (ctx) => {
   await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createPaymentMenu(sub.price, planKey, userId, telegramId) });
 });
 
-bot.action(/^pay_stars_(starter|basic|pro|premium)$/, async (ctx) => {
+bot.action(/^pay_stars_(starter|basic|pro|premium|starter_test)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   const planKey = ctx.match[1];
@@ -4622,6 +4627,11 @@ bot.action(/^pay_stars_(starter|basic|pro|premium)$/, async (ctx) => {
 
   if (!sub) {
     await ctx.reply('❌ План не знайдено');
+    return;
+  }
+
+  if (sub.adminOnly && ctx.from.id !== getAdminTelegramId()) {
+    await ctx.reply('❌ Доступ заборонений');
     return;
   }
 
@@ -6830,6 +6840,13 @@ async function startBot() {
         });
       }
 
+      if (sub.adminOnly && userIdNum !== getAdminTelegramId()) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden'
+        });
+      }
+
       // ✅ Токени та ціна з серверної конфігурації
       const tokens = sub.tokens; // Для Stripe - без бонусу LiqPay
       const amount = sub.priceUSD * 100; // В центах для Stripe
@@ -6901,6 +6918,14 @@ async function startBot() {
             success: false,
             error: 'Invalid plan'
           });
+        }
+
+        if (sub.adminOnly && userIdNum !== getAdminTelegramId()) {
+          return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+
+        if (sub.adminOnly && userIdNum !== getAdminTelegramId()) {
+          return res.status(403).json({ success: false, error: 'Forbidden' });
         }
 
         // Отримуємо реальний курс USD/UAH

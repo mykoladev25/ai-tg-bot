@@ -174,15 +174,24 @@ function createConfirmationMenu(action) {
 /**
  * Створити меню підписок динамічно
  */
-function createSubscriptionsMenu() {
+function createSubscriptionsMenu(userId = null) {
   const models = require('../config/models');
   const subscriptions = models.subscriptions;
   
+  const adminId = parseInt(process.env.ADMIN_TELEGRAM_ID || '0');
+  const isAdmin = Number.isFinite(adminId) && userId && Number(userId) === adminId;
+
   const paidPlans = ['starter', 'basic', 'pro', 'premium'];
-  const emojis = { starter: '🚀', basic: '💎', pro: '🔥', premium: '👑' };
+  const emojis = { starter: '🚀', basic: '💎', pro: '🔥', premium: '👑', starter_test: '🧪' };
 
   // По 2 кнопки в ряд
-  const buttons = [
+  const buttons = [];
+
+  if (isAdmin && subscriptions.starter_test?.adminOnly) {
+    buttons.push([Markup.button.callback(`${emojis.starter_test} TEST 10⭐`, 'sub_starter_test')]);
+  }
+
+  buttons.push(
     [
       Markup.button.callback(`${emojis.starter} STARTER`, 'sub_starter'),
       Markup.button.callback(`${emojis.basic} BASIC`, 'sub_basic')
@@ -192,7 +201,7 @@ function createSubscriptionsMenu() {
       Markup.button.callback(`${emojis.premium} PREMIUM`, 'sub_premium')
     ],
     [Markup.button.callback('← Назад', 'main_menu')]
-  ];
+  );
 
   return Markup.inlineKeyboard(buttons);
 }
