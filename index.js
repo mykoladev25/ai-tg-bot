@@ -9,6 +9,7 @@ const adminNotifier = require('./utils/adminNotifier');
 const claude = require('./services/claude');
 const midjourney = require('./services/midjourney');
 const replicate = require('./services/replicate');
+const kieAI = require('./services/kie-ai');
 const payment = require('./services/payment');
 const exchangeRate = require('./services/exchangeRate');
 
@@ -32,6 +33,7 @@ const User = require('./database/models/User');
 // Імпортуємо конфігурацію
 const models = require('./config/models');
 const { TRIAL_TOKENS, WORST_CASE_TOKEN_USD } = require('./config/constants');
+const accessControl = require('./config/access');
 
 // Ініціалізація бота
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -50,6 +52,10 @@ const broadcastStates = new Map(); // adminId -> { step: 'awaiting_content', par
 // Стан генерації зображень (новий флоу)
 // userId -> { model: string, prompt?: string, photos?: Array, step: 'waiting_photos'|'prompt' }
 const imageGenState = new Map();
+
+// Вибір провайдера для користувачів (тільки для адміна поки що)
+// userId -> 'replicate' | 'kie-ai'
+const userProviderChoice = new Map();
 
 // Rate limiting для заблокованих користувачів (щоб не спамили)
 const blockedUserLastNotified = new Map(); // userId -> timestamp
@@ -1416,6 +1422,161 @@ bot.hears('👤 Профіль', async (ctx) => {
   await showProfile(ctx);
 });
 
+/**
+ * Меню вибору провайдера (тільки для адміна)
+ */
+bot.command('provider', async (ctx) => {
+  const userId = ctx.from.id;
+
+  // Перевіряємо доступ через централізований модуль
+  if (!accessControl.canUseProviderChoice(userId)) {
+    return ctx.reply('⛔ Ця команда не доступна для вас.\n\n💡 Запитайте у адміністратора для активації.');
+  }
+
+  if (!kieAI.isKieAIEnabled) {
+    return ctx.reply('❌ KIE.AI не увімкнена. Додайте KIE_AI_API_KEY в .env файл.');
+  }
+
+  const currentChoice = userProviderChoice.get(userId) || 'auto';
+
+  const providerMenu = `⚙️ <b>Вибір провайдера для генерацій</b>
+
+Который провайдер використовувати для генерацій?
+
+<b>Поточний вибір:</b> ${currentChoice === 'auto' ? '🤖 Автоматичний (KIE.AI)' : currentChoice === 'kie-ai' ? '🔵 KIE.AI' : '🟣 Replicate'}
+
+<b>Описання:</b>
+🔵 <b>KIE.AI</b> - часто швидше, альтернативний провайдер
+🟣 <b>Replicate</b> - базовий провайдер, більш стабільний
+🤖 <b>Автоматичний</b> - KIE.AI (якщо увімкнена), інакше Replicate
+
+💡 За замовчуванням використовується KIE.AI якщо увімкнена.`;
+
+  const providerKeyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('🔵 KIE.AI', 'provider_kie-ai')],
+    [Markup.button.callback('🟣 Replicate', 'provider_replicate')],
+    [Markup.button.callback('🤖 Автоматичний', 'provider_auto')],
+    [Markup.button.callback('🏠 Назад', 'main_menu')]
+  ]);
+
+  await ctx.reply(providerMenu, {
+    parse_mode: 'HTML',
+    ...providerKeyboard
+  });
+});
+
+/**
+ * Callback handlers для вибору провайдера
+ */
+bot.action('provider_kie-ai', async (ctx) => {
+  const userId = ctx.from.id;
+
+  if (!accessControl.canUseProviderChoice(userId)) {
+    return ctx.answerCbQuery('⛔ Немає доступу', 1);
+  }
+
+  userProviderChoice.set(userId, 'kie-ai');
+
+  await ctx.editMessageText(
+    '✅ <b>KIE.AI вибрана</b>\n\n' +
+    '🔵 Тепер все генерації будуть використовувати KIE.AI\n\n' +
+    '💡 Командa: /provider для зміни вибору',
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([[Markup.button.callback('🏠 Назад', 'main_menu')]])
+    }
+  );
+
+  await ctx.answerCbQuery('✅ KIE.AI обрана!');
+});
+
+bot.action('provider_replicate', async (ctx) => {
+  const userId = ctx.from.id;
+
+  if (!accessControl.canUseProviderChoice(userId)) {
+    return ctx.answerCbQuery('⛔ Немає доступу', 1);
+  }
+
+  userProviderChoice.set(userId, 'replicate');
+
+  await ctx.editMessageText(
+    '✅ <b>Replicate вибрана</b>\n\n' +
+    '🟣 Тепер все генерації будуть використовувати Replicate\n\n' +
+    '💡 Командa: /provider для зміни вибору',
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([[Markup.button.callback('🏠 Назад', 'main_menu')]])
+    }
+  );
+
+  await ctx.answerCbQuery('✅ Replicate обрана!');
+});
+
+bot.action('provider_auto', async (ctx) => {
+  const userId = ctx.from.id;
+
+  if (!accessControl.canUseProviderChoice(userId)) {
+    return ctx.answerCbQuery('⛔ Немає доступу', 1);
+  }
+
+  userProviderChoice.delete(userId);  // видаляємо вибір, щоб використовувати автоматичний
+
+  await ctx.editMessageText(
+    '✅ <b>Автоматичний режим</b>\n\n' +
+    '🤖 Система автоматично обиратиме найкращий провайдер\n\n' +
+    '💡 Командa: /provider для зміни вибору',
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([[Markup.button.callback('🏠 Назад', 'main_menu')]])
+    }
+  );
+
+  await ctx.answerCbQuery('✅ Автоматичний режим включений!');
+});
+
+/**
+ * Callback для кнопки "Вибір провайдера" з меню профіля
+ */
+bot.action('provider_menu', async (ctx) => {
+  const userId = ctx.from.id;
+
+  // Перевіряємо доступ
+  if (!accessControl.canUseProviderChoice(userId)) {
+    return ctx.answerCbQuery('⛔ Немає доступу', 1);
+  }
+
+  if (!kieAI.isKieAIEnabled) {
+    return ctx.answerCbQuery('❌ KIE.AI не увімкнена', 1);
+  }
+
+  const currentChoice = userProviderChoice.get(userId) || 'auto';
+
+  const providerMenu = `⚙️ <b>Вибір провайдера для генерацій</b>
+
+Який провайдер використовувати для генерацій?
+
+<b>Поточний:</b> ${currentChoice === 'auto' ? '🤖 Автоматичний (KIE.AI)' : currentChoice === 'kie-ai' ? '🔵 KIE.AI' : '🟣 Replicate'}
+
+<b>Описання:</b>
+🔵 <b>KIE.AI</b> - часто швидше
+🟣 <b>Replicate</b> - більш стабільний
+🤖 <b>Автоматичний</b> - KIE.AI якщо доступна`;
+
+  const providerKeyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('🔵 KIE.AI', 'provider_kie-ai')],
+    [Markup.button.callback('🟣 Replicate', 'provider_replicate')],
+    [Markup.button.callback('🤖 Автоматичний', 'provider_auto')],
+    [Markup.button.callback('🏠 Профіль', 'profile_menu')]
+  ]);
+
+  await ctx.editMessageText(providerMenu, {
+    parse_mode: 'HTML',
+    ...providerKeyboard
+  });
+
+  await ctx.answerCbQuery('⚙️ Меню провайдера');
+});
+
 bot.hears('❓ Допомога', async (ctx) => {
   await ctx.reply(
     '❓ Використовуйте /help для перегляду команд\n' +
@@ -2118,43 +2279,79 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
     try {
       let result;
 
+      // Перевіряємо чи можемо використовувати KIE.AI для адміна
+      // Перевіряємо чи можемо використовувати KIE.AI
+      // Враховуємо вибір користувача з userProviderChoice та централізовану систему доступу
+      const userChosenProvider = userProviderChoice.get(userId);
+      const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
+
+      // Логіка вибору провайдера
+      let useKieAI = false;
+      if (userChosenProvider === 'kie-ai') {
+        useKieAI = true;
+      } else if (userChosenProvider === 'replicate') {
+        useKieAI = false;
+      } else {
+        // Автоматичний режим
+        useKieAI = canUseKieAI;
+      }
+
+      const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
+      console.log(`🎯 Creative generation using ${providerName}: ${creativeType}`);
+
       // Вибираємо правильну функцію генерації в залежності від креативу
       // По дефолту використовуємо 9:16 для всіх креативів
       if (creativeType === 'hearts') {
         // Hearts використовує Seedream 4K з aspect ratio 9:16
-        result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
+        result = useKieAI
+          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '9:16', 0.5)
+          : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
       } else if (creativeType === 'porcelain_figure') {
         // Porcelain figure використовує Seedream 4K з aspect ratio 1:1
-        result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '1:1');
+        result = useKieAI
+          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '1:1', 0.5)
+          : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '1:1');
       } else if (creativeType === 'kittens') {
         // Kittens використовує Seedream 4K з aspect ratio 1:1
-        result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '1:1');
+        result = useKieAI
+          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '1:1', 0.5)
+          : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '1:1');
       } else if (creativeType === 'underwater_macro') {
         // Underwater macro використовує Seedream 4K з aspect ratio 16:9
-        result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '16:9');
+        result = useKieAI
+          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '16:9', 0.5)
+          : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '16:9');
       } else if (creativeType === 'bridgerton') {
         // Bridgerton використовує Seedream 4K з aspect ratio 9:16
-        result = await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
+        result = useKieAI
+          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '9:16', 0.5)
+          : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
       } else if (creativeType === 'love_is') {
         // Love is... використовує NanoBanana 2K з aspect ratio 9:16
-        result = await replicate.generateWithNanoBanana(prompt, imageUrl, '2K', '9:16');
+        result = useKieAI
+          ? await kieAI.generateWithNanoBananaKieAI(prompt, imageUrl, '2K', '9:16', 0.5)
+          : await replicate.generateWithNanoBanana(prompt, imageUrl, '2K', '9:16');
       } else {
         // Fallback для інших креативів - теж 9:16
         const resolution = modelKey === 'nano_banana_2k' ? '2K' : '4K';
-        result = await replicate.generateWithNanoBanana(prompt, imageUrl, resolution, '9:16');
+        result = useKieAI
+          ? (resolution === '2K'
+              ? await kieAI.generateWithNanoBananaKieAI(prompt, imageUrl, '2K', '9:16', 0.5)
+              : await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '9:16', 0.5))
+          : await replicate.generateWithNanoBanana(prompt, imageUrl, resolution, '9:16');
       }
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(
           bot,
           new Error(result.error),
-          { userId, username, action: `creative_${creativeType}`, model: model.name }
+          { userId, username, action: `creative_${creativeType}`, model: model.name, provider: providerName }
         );
         await bot.telegram.editMessageText(
           chatId,
           statusMsg.message_id,
           null,
-          `❌ Помилка генерації.\n\nСпробуйте ще раз або оберіть іншу модель.`
+          `❌ Помилка генерації (${providerName}).\n\nСпробуйте ще раз або оберіть іншу модель.`
         );
 
         const isTrial = await isTrialUser(userId);
@@ -4533,6 +4730,11 @@ bot.action('video_menu', async (ctx) => {
   await ctx.reply('🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇', keyboard.createInlineMenu(models.video.models, 1));
 });
 
+bot.action('profile_menu', async (ctx) => {
+  await ctx.answerCbQuery();
+  await showProfile(ctx);
+});
+
 // Tokens purchase
 bot.action('buy_subscription', async (ctx) => {
   await ctx.answerCbQuery();
@@ -5921,18 +6123,66 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   (async () => {
     let finished = false;
     try {
+      // Перевіряємо чи можемо використовувати KIE.AI
+      // Враховуємо вибір користувача з userProviderChoice та централізовану систему доступу
+      const userChosenProvider = userProviderChoice.get(userId);
+      const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
+
+      // Логіка: якщо користувач явно вибрав KIE.AI -> використовуємо KIE.AI
+      // Якщо користувач явно вибрав Replicate -> використовуємо Replicate
+      // Інакше - автоматичний вибір
+      let useKieAI = false;
+      if (userChosenProvider === 'kie-ai') {
+        useKieAI = true;
+      } else if (userChosenProvider === 'replicate') {
+        useKieAI = false;
+      } else {
+        // Автоматичний режим: використовуємо KIE.AI якщо доступна
+        useKieAI = canUseKieAI;
+      }
+
       const replicateFunctions = {
         flux: () => replicate.generateWithFlux(generationData.prompt),
-        stable_diffusion: () => replicate.generateWithStableDiffusion(
-          generationData.prompt,
-          generationData.imageInput,
-          0.8,
-          generationData.aspectRatio
-        ),
+        stable_diffusion: useKieAI
+          ? () => kieAI.generateWithStableDiffusionKieAI(
+              generationData.prompt,
+              generationData.imageInput,
+              generationData.aspectRatio
+            )
+          : () => replicate.generateWithStableDiffusion(
+              generationData.prompt,
+              generationData.imageInput,
+              0.8,
+              generationData.aspectRatio
+            ),
         nano_banana: () => replicate.generateWithNanoBananaBase(generationData.prompt, generationData.imageInput, generationData.aspectRatio),
-        nano_banana_2k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
-        nano_banana_4k: () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
-        seedream_4k: () => replicate.generateWithSeedream(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
+        nano_banana_2k: useKieAI
+          ? () => kieAI.generateWithNanoBananaKieAI(
+              generationData.prompt,
+              generationData.imageInput,
+              '2K',
+              generationData.aspectRatio,
+              0.5
+            )
+          : () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
+        nano_banana_4k: useKieAI
+          ? () => kieAI.generateWithNanoBananaKieAI(
+              generationData.prompt,
+              generationData.imageInput,
+              '4K',
+              generationData.aspectRatio,
+              0.5
+            )
+          : () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
+        seedream_4k: useKieAI
+          ? () => kieAI.generateWithSeedreamKieAI(
+              generationData.prompt,
+              generationData.imageInput,
+              '4K',
+              generationData.aspectRatio,
+              0.5
+            )
+          : () => replicate.generateWithSeedream(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
         ideogram: () => replicate.generateWithIdeogram(generationData.prompt, generationData.imageInput, 0.5, generationData.aspectRatio),
         clarity: () => {
           const clarityImage = Array.isArray(generationData.imageInput)
@@ -5968,11 +6218,14 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         return;
       }
 
+      const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
+      console.log(`🎯 Using provider: ${providerName} for model ${generationData.modelKey}`);
+
       const result = await generator();
 
       if (!result.success) {
-        await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_generation`, model: model.name, prompt, hasImage: !!imageInput });
-        await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, `❌ Помилка генерації.\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`);
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_generation`, model: model.name, prompt, hasImage: !!imageInput, provider: providerName });
+        await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, `❌ Помилка генерації (${providerName}).\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`);
 
         const isTrial = await isTrialUser(userId);
         await monitoringLoggers.logUsageEvent({
@@ -6624,6 +6877,10 @@ async function startBot() {
     }
 
     console.log('🤖 Starting bot...');
+
+    // Виводимо поточні налаштування доступу
+    accessControl.printConfig();
+
     console.log('✅ Bot started successfully!');
     console.log('📱 Bot username: @neuro_lab_ai_bot');
 

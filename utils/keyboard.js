@@ -228,6 +228,7 @@ function createLegalMenu() {
 function createProfileMenu() {
   return Markup.inlineKeyboard([
     [Markup.button.callback('💰 Купити токени', 'buy_subscription')],
+    [Markup.button.callback('⚙️ Вибір провайдера', 'provider_menu')],
     [Markup.button.callback('👥 Спільнота', 'community')],
     [Markup.button.callback('📋 Юридична інформація', 'legal_info')],
     [Markup.button.callback('🏠 Головне меню', 'main_menu')]
