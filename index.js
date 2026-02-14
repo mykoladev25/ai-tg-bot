@@ -6255,9 +6255,12 @@ bot.on('text', async (ctx) => {
     const durationButtons = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(d =>
       Markup.button.callback(`${d}с`, `kling_3_scene_dur_${d}`)
     );
+    const nextSceneHint = sceneIndex < sceneCount
+      ? `\n\n👉 Після вибору тривалості опишіть <b>сцену ${sceneIndex + 1}</b> текстом.`
+      : '';
     await ctx.reply(
       `✅ Сцена ${sceneIndex}: «${text.slice(0, 60)}${text.length > 60 ? '…' : ''}»\n\n` +
-      `Тривалість цієї сцени (1–12 сек):`,
+      `Тривалість цієї сцени (1–12 сек):${nextSceneHint}`,
       {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
