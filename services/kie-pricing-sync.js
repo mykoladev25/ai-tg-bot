@@ -71,6 +71,7 @@ function parseOurModels(pricing) {
     stable_diffusion: findModel(pricing.image, 'stable diffusion', '3.5'),
 
     // VIDEO
+    kling_2_5: findModels(pricing.video, 'kling 2.5'),
     kling_2_6: findModels(pricing.video, 'kling 2.6'),
     kling_3_0: findModels(pricing.video, 'Kling 3.0'),
     kling_motion: findModels(pricing.video, 'motion control'),
@@ -226,6 +227,31 @@ function getModelPrice(cache, modelKey, options = {}) {
         });
         return kling30 ? parseFloat(kling30.usdPrice) : null;
 
+      case 'kling':
+        // Kling 2.5: per video, є 5.0s та 10.0s
+        const kling25 = parsed.kling_2_5?.find(m => {
+          const desc = m.modelDescription.toLowerCase();
+          return desc.includes(`${duration}s`) || desc.includes(`${duration}.0s`);
+        });
+        return kling25?.usdPrice || null;
+
+      case 'runway_turbo': {
+        const dur = duration || 5;
+        const rw = parsed.runway?.find(m => {
+          const d = (m.modelDescription || '').toLowerCase();
+          return d.includes('runway') && (d.includes(`${dur}.0s`) || d.includes(`${dur}s`)) && d.includes('720p');
+        });
+        return rw?.usdPrice || null;
+      }
+
+      case 'kling_motion':
+        const res = (resolution || '720p').toLowerCase();
+        const motion = parsed.kling_motion?.find(m => {
+          const d = (m.modelDescription || '').toLowerCase();
+          return d.includes('motion') && d.includes(res);
+        });
+        return motion?.usdPrice || null;
+
       default:
         return null;
     }
@@ -282,6 +308,43 @@ function getKling3TokenCostPerSecondSync(options = {}) {
 /** Моделі зображень, для яких є KIE-ціна в кеші */
 const KIE_IMAGE_MODELS = ['nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'stable_diffusion'];
 
+/** Опорна тривалість для переведення Veo "per video" → "per second" (мін. тривалість у боті). */
+const VEO_REF_DURATION_SEC = 4;
+
+/**
+ * Veo: вартість у токенах за секунду з KIE-кешу.
+ * В кеші ціни "per video" (Fast $0.30, Quality $1.25). Fast → без аудіо, Quality → з аудіо.
+ * @returns {{ costPerSecondNoAudio: number, costPerSecondAudio: number } | null}
+ */
+function getVeoTokenCostPerSecondSync() {
+  try {
+    const fs = require('fs');
+    const cacheData = fs.readFileSync(CACHE_FILE, 'utf-8');
+    const cache = JSON.parse(cacheData);
+    const list = cache.parsed?.veo;
+    if (!Array.isArray(list) || list.length === 0) return null;
+
+    const desc = (m) => (m.modelDescription || '').toLowerCase();
+    const fast = list.find(m => desc(m).includes('text-to-video') && desc(m).includes('fast'));
+    const quality = list.find(m => desc(m).includes('text-to-video') && desc(m).includes('quality'));
+    if (!fast?.usdPrice || !quality?.usdPrice) return null;
+
+    const usdFast = parseFloat(fast.usdPrice);
+    const usdQuality = parseFloat(quality.usdPrice);
+    if (Number.isNaN(usdFast) || Number.isNaN(usdQuality)) return null;
+
+    const usdPerSecNoAudio = usdFast / VEO_REF_DURATION_SEC;
+    const usdPerSecAudio = usdQuality / VEO_REF_DURATION_SEC;
+
+    return {
+      costPerSecondNoAudio: kieAiModels.usdToTokens(usdPerSecNoAudio),
+      costPerSecondAudio: kieAiModels.usdToTokens(usdPerSecAudio)
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 /**
  * Вартість у токенах при виборі провайдера KIE (для показу та списання).
  * Тільки для користувачів з userProviderChoice === 'kie-ai'. Replicate не змінюється.
@@ -315,14 +378,48 @@ function getKieTokenCostSync(modelKey, options = {}) {
       };
     }
 
-    // Kling 2.5: якщо в кеші є — per second (поки не парсимо kling 2.5 в parseOurModels, повертаємо null)
+    // Kling 2.5: per video у кеші (5.0s, 10.0s) → переводимо в costPerSecond
     if (modelKey === 'kling') {
-      return null;
+      const usd5 = getModelPriceSync('kling', { duration: 5 });
+      if (usd5 == null) return null;
+      const u = parseFloat(usd5);
+      if (Number.isNaN(u)) return null;
+      const perSec = u / 5;
+      return { costPerSecond: kieAiModels.usdToTokens(perSec) };
     }
 
-    // Veo: в кеші тільки "per video", немає розділення audio/noAudio — поки використовуємо Replicate
+    // Runway Turbo: per video за тривалістю (5s, 10s)
+    if (modelKey === 'runway_turbo') {
+      const d = options.duration || 5;
+      const usd = getModelPriceSync('runway_turbo', { duration: d });
+      if (usd == null) return null;
+      const u = parseFloat(usd);
+      if (Number.isNaN(u)) return null;
+      return { cost: kieAiModels.usdToTokens(u), costPerSecond: kieAiModels.usdToTokens(u / d) };
+    }
+
+    // Kling Motion: 720P (std) та 1080P (pro) за секунду; конвенція image 5s, video 10s
+    if (modelKey === 'kling_motion') {
+      const usd720 = getModelPriceSync('kling_motion', { resolution: '720p' });
+      const usd1080 = getModelPriceSync('kling_motion', { resolution: '1080p' });
+      if (usd720 == null && usd1080 == null) return null;
+      const sec720 = usd720 != null ? parseFloat(usd720) : 0.03;
+      const sec1080 = usd1080 != null ? parseFloat(usd1080) : 0.045;
+      return {
+        costs: {
+          std_image: kieAiModels.usdToTokens(sec720 * 5),
+          std_video: kieAiModels.usdToTokens(sec720 * 10),
+          pro_image: kieAiModels.usdToTokens(sec1080 * 5),
+          pro_video: kieAiModels.usdToTokens(sec1080 * 10)
+        }
+      };
+    }
+
+    // Veo: в кеші "per video" (Fast / Quality). Переводимо в токени/сек за опорною тривалістю 4 сек.
+    // Fast → без аудіо, Quality → з аудіо (конвенція, бо в KIE немає окремого audio/noAudio).
     if (modelKey === 'veo') {
-      return null;
+      const veoRates = getVeoTokenCostPerSecondSync();
+      return veoRates;
     }
 
     // Sora 2: фіксована вартість за відео (з kie-ai-models)
@@ -331,11 +428,6 @@ function getKieTokenCostSync(modelKey, options = {}) {
       const usd = kieAiModels.getKieAIPrice.call(kieAiModels, 'sora_2', { type });
       if (usd == null || usd === 0) return null;
       return { cost: kieAiModels.usdToTokens(usd) };
-    }
-
-    // Kling Motion: поки без кешу — null
-    if (modelKey === 'kling_motion') {
-      return null;
     }
 
     return null;

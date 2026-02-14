@@ -59,11 +59,65 @@ function canSeeKieOnlyVideoModels(userId) {
 }
 
 /**
- * Список відео-моделей для меню: Kling 3.0 та Sora 2 тільки для користувачів з доступом KIE.
+ * Список відео-моделей для меню з ефективними цінами (KIE/Replicate за провайдером).
  */
 function getVideoModelsForUser(userId) {
-  if (canSeeKieOnlyVideoModels(userId)) return models.video.models;
-  return models.video.models.filter(m => !KIE_ONLY_VIDEO_MODELS.includes(m.key));
+  const list = canSeeKieOnlyVideoModels(userId)
+    ? models.video.models
+    : models.video.models.filter(m => !KIE_ONLY_VIDEO_MODELS.includes(m.key));
+  return list.map(m => {
+    if (m.key === 'veo') {
+      return {
+        ...m,
+        costPerSecondNoAudio: getEffectiveVeoCostPerSecond(userId, false),
+        costPerSecondAudio: getEffectiveVeoCostPerSecond(userId, true)
+      };
+    }
+    if (m.key === 'kling') {
+      return { ...m, costPerSecond: getEffectiveKlingCostPerSecond(userId) };
+    }
+    if (m.key === 'kling_v2_6') {
+      const model = m;
+      return {
+        ...m,
+        costPerSecond: getEffectiveKlingV2_6CostPerSecond(userId, model, false),
+        costPerSecondAudio: getEffectiveKlingV2_6CostPerSecond(userId, model, true)
+      };
+    }
+    if (m.key === 'kling_motion') {
+      const costs = getEffectiveKlingMotionCosts(userId);
+      const vals = Object.values(costs);
+      return {
+        ...m,
+        costs,
+        cost: Math.min(...vals),
+        maxCost: Math.max(...vals)
+      };
+    }
+    if (m.key === 'kling_3') {
+      return {
+        ...m,
+        costPerSecondNoAudio: getEffectiveKling3CostPerSecond(userId, 'pro', false),
+        costPerSecondAudio: getEffectiveKling3CostPerSecond(userId, 'pro', true)
+      };
+    }
+    if (m.key === 'runway_turbo') {
+      const costPerSecond = getEffectiveRunwayTurboCostPerSecond(userId);
+      const durations = m.durations || [5];
+      const minD = Math.min(...durations);
+      return {
+        ...m,
+        costPerSecond,
+        cost: minD * costPerSecond
+      };
+    }
+    if (m.key === 'sora_2') {
+      const durations = m.durations || [4, 8, 12];
+      const minCost = Math.min(...durations.map(d => getEffectiveSora2Cost(userId, m, d)));
+      return { ...m, cost: minCost };
+    }
+    return m;
+  });
 }
 
 /**
@@ -93,6 +147,73 @@ function getEffectiveKlingV2_6CostPerSecond(userId, model, withAudio) {
   }
   const v = withAudio ? (k.costPerSecondAudio ?? model?.costPerSecondAudio) : (k.costPerSecondNoAudio ?? model?.costPerSecondNoAudio ?? model?.costPerSecond);
   return v ?? (withAudio ? 6 : 6);
+}
+
+/**
+ * Ціна Veo за обраним провайдером (токенів за секунду).
+ */
+function getEffectiveVeoCostPerSecond(userId, withAudio) {
+  const model = models.video.models.find(m => m.key === 'veo');
+  const fallbackNo = model?.costPerSecondNoAudio ?? 33;
+  const fallbackAud = model?.costPerSecondAudio ?? 66;
+  if (userProviderChoice.get(userId) !== 'kie-ai') return withAudio ? fallbackAud : fallbackNo;
+  if (!kieAI.isKieAIImplemented('veo')) return withAudio ? fallbackAud : fallbackNo;
+  const k = kiePricingSync.getKieTokenCostSync('veo');
+  if (!k || typeof k !== 'object') return withAudio ? fallbackAud : fallbackNo;
+  return withAudio ? (k.costPerSecondAudio ?? fallbackAud) : (k.costPerSecondNoAudio ?? fallbackNo);
+}
+
+/**
+ * Ціна Kling 2.5 за обраним провайдером (токенів за секунду).
+ */
+function getEffectiveKlingCostPerSecond(userId) {
+  const model = models.video.models.find(m => m.key === 'kling');
+  const fallback = model?.costPerSecond ?? 12;
+  if (userProviderChoice.get(userId) !== 'kie-ai') return fallback;
+  if (!kieAI.isKieAIImplemented('kling')) return fallback;
+  const k = kiePricingSync.getKieTokenCostSync('kling');
+  if (!k || typeof k !== 'object' || typeof k.costPerSecond !== 'number') return fallback;
+  return k.costPerSecond;
+}
+
+/**
+ * Ціна Runway Turbo за обраним провайдером: токени за секунду або за run.
+ */
+function getEffectiveRunwayTurboCostPerSecond(userId) {
+  const model = models.video.models.find(m => m.key === 'runway_turbo');
+  const fallback = model?.costPerSecond ?? 9;
+  if (userProviderChoice.get(userId) !== 'kie-ai') return fallback;
+  if (!kieAI.isKieAIImplemented('runway_turbo')) return fallback;
+  const k = kiePricingSync.getKieTokenCostSync('runway_turbo', { duration: 5 });
+  if (!k || typeof k !== 'object' || typeof k.costPerSecond !== 'number') return fallback;
+  return k.costPerSecond;
+}
+
+/**
+ * Ціна Kling Motion за обраним провайдером: { std_image, std_video, pro_image, pro_video }.
+ */
+function getEffectiveKlingMotionCosts(userId) {
+  const model = models.video.models.find(m => m.key === 'kling_motion');
+  const fallback = model?.costs ?? { std_image: 83, std_video: 165, pro_image: 165, pro_video: 330 };
+  if (userProviderChoice.get(userId) !== 'kie-ai') return fallback;
+  if (!kieAI.isKieAIImplemented('kling_motion')) return fallback;
+  const k = kiePricingSync.getKieTokenCostSync('kling_motion');
+  if (!k || typeof k !== 'object' || !k.costs) return fallback;
+  return k.costs;
+}
+
+/**
+ * Ціна Kling 3.0 за обраним провайдером (токенів за секунду; mode: 'std'|'pro').
+ */
+function getEffectiveKling3CostPerSecond(userId, mode, withAudio) {
+  const model = models.video.models.find(m => m.key === 'kling_3');
+  const fallbackNo = model?.costPerSecondNoAudio ?? 23;
+  const fallbackAud = model?.costPerSecondAudio ?? 45;
+  if (userProviderChoice.get(userId) !== 'kie-ai') return withAudio ? fallbackAud : fallbackNo;
+  if (!kieAI.isKieAIImplemented('kling_3')) return withAudio ? fallbackAud : fallbackNo;
+  const r = kiePricingSync.getKling3TokenCostPerSecondSync({ mode: mode || 'pro' });
+  if (!r) return withAudio ? fallbackAud : fallbackNo;
+  return withAudio ? (r.costPerSecondAudio ?? fallbackAud) : (r.costPerSecondNoAudio ?? fallbackNo);
 }
 
 /**
@@ -3127,15 +3248,28 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
   }
 
   let requiredCost = model.cost;
-  if (modelKey === 'runway_turbo' && model.costPerSecond) {
+  if (modelKey === 'runway_turbo') {
     const durations = model.durations || [5];
     const minDuration = Math.min(...durations);
-    requiredCost = minDuration * model.costPerSecond;
+    requiredCost = minDuration * getEffectiveRunwayTurboCostPerSecond(ctx.from.id);
   }
-  if (modelKey === 'sora_2' && model.costPerSecond) {
+  if (modelKey === 'kling_motion') {
+    const costs = getEffectiveKlingMotionCosts(ctx.from.id);
+    requiredCost = Math.min(...Object.values(costs));
+  }
+  if (modelKey === 'kling_3') {
+    const durations = model.durations || [3, 5, 8, 10, 15];
+    const minDuration = Math.min(...durations);
+    requiredCost = minDuration * getEffectiveKling3CostPerSecond(ctx.from.id, 'pro', false);
+  }
+  if (modelKey === 'sora_2') {
     const durations = model.durations || [4, 8, 12];
     const minDuration = Math.min(...durations);
-    requiredCost = minDuration * model.costPerSecond;
+    requiredCost = getEffectiveSora2Cost(ctx.from.id, model, minDuration);
+  }
+  if (modelKey === 'veo') {
+    const minDuration = model.minSeconds || (model.durations?.length ? Math.min(...model.durations) : 4);
+    requiredCost = minDuration * getEffectiveVeoCostPerSecond(ctx.from.id, false);
   }
 
   if (!(await userBalance.hasTokens(ctx.from.id, requiredCost))) {
@@ -3145,10 +3279,10 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
 
   userCurrentModel.set(ctx.from.id, modelKey);
 
-  // Для Kling Motion показуємо спеціальне меню з вибором mode та orientation
   if (modelKey === 'kling_motion') {
-    const minCost = model.cost || 52;
-    const maxCost = model.maxCost || 208;
+    const motionCosts = getEffectiveKlingMotionCosts(ctx.from.id);
+    const minCost = Math.min(...Object.values(motionCosts));
+    const maxCost = Math.max(...Object.values(motionCosts));
 
     await ctx.reply(
       `🔥 <b>Kling Motion Control</b>\n\n` +
@@ -3186,14 +3320,10 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
     }
 
     const durations = model.durations || [3, 5, 8, 10, 15];
-    const noAudioSec = !accessControl.KIE_AI_USE_CACHE_PRICING
-      ? (model.costPerSecondNoAudio || 23)
-      : (kiePricingSync.getKling3TokenCostPerSecondSync({ mode: 'pro' })?.costPerSecondNoAudio ?? model.costPerSecondNoAudio);
-    const audioSec = !accessControl.KIE_AI_USE_CACHE_PRICING
-      ? (model.costPerSecondAudio || 45)
-      : (kiePricingSync.getKling3TokenCostPerSecondSync({ mode: 'pro' })?.costPerSecondAudio ?? model.costPerSecondAudio);
-    const minCost = Math.min(...durations) * (noAudioSec || 23);
-    const maxCost = Math.max(...durations) * (audioSec || 45);
+    const noAudioSec = getEffectiveKling3CostPerSecond(ctx.from.id, 'pro', false);
+    const audioSec = getEffectiveKling3CostPerSecond(ctx.from.id, 'pro', true);
+    const minCost = Math.min(...durations) * noAudioSec;
+    const maxCost = Math.max(...durations) * audioSec;
 
     userState.set(ctx.from.id, {
       action: 'kling_3_generation',
@@ -3227,13 +3357,13 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
     const durations = model.durations || [5];
     const minDuration = Math.min(...durations);
     const maxDuration = Math.max(...durations);
-    const costPerSecNo = modelKey === 'kling_v2_6' ? getEffectiveKlingV2_6CostPerSecond(ctx.from.id, model, false) : model.costPerSecond;
-    const costPerSecAud = modelKey === 'kling_v2_6' ? getEffectiveKlingV2_6CostPerSecond(ctx.from.id, model, true) : model.costPerSecond;
+    const costPerSecNo = modelKey === 'kling_v2_6' ? getEffectiveKlingV2_6CostPerSecond(ctx.from.id, model, false) : getEffectiveKlingCostPerSecond(ctx.from.id);
+    const costPerSecAud = modelKey === 'kling_v2_6' ? getEffectiveKlingV2_6CostPerSecond(ctx.from.id, model, true) : getEffectiveKlingCostPerSecond(ctx.from.id);
     const minCost = minDuration * costPerSecNo;
     const maxCost = maxDuration * costPerSecAud;
     const durationButtons = durations.map(d =>
       Markup.button.callback(
-        modelKey === 'kling_v2_6' ? `${d} сек (${d * costPerSecNo}—${d * costPerSecAud}⚡)` : `${d} сек (${d * model.costPerSecond}⚡)`,
+        modelKey === 'kling_v2_6' ? `${d} сек (${d * costPerSecNo}—${d * costPerSecAud}⚡)` : `${d} сек (${d * costPerSecNo}⚡)`,
         `kling_duration_${d}`
       )
     );
@@ -3267,7 +3397,7 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
     const durations = model.durations || [5];
     const minDuration = Math.min(...durations);
     const maxDuration = Math.max(...durations);
-    const costPerSec = model.costPerSecond || (model.cost / minDuration);
+    const costPerSec = getEffectiveRunwayTurboCostPerSecond(ctx.from.id);
     const minCost = minDuration * costPerSec;
     const maxCost = maxDuration * costPerSec;
     const aspectRatios = model.aspectRatios || ['16:9'];
@@ -3307,9 +3437,8 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
       [Markup.button.callback('← Назад', 'video_menu')]
     ]);
 
-    // Розрахунок діапазону цін
-    const minCost = 4 * model.costPerSecondNoAudio;  // 4 сек без аудіо
-    const maxCost = 8 * model.costPerSecondAudio;    // 8 сек з аудіо
+    const minCost = 4 * getEffectiveVeoCostPerSecond(ctx.from.id, false);
+    const maxCost = 8 * getEffectiveVeoCostPerSecond(ctx.from.id, true);
 
     await ctx.reply(
       `🌟 <b>Google Veo 3.1 💎</b>\n\n` +
@@ -3400,9 +3529,11 @@ bot.action(/^kling_3_mode_(std|pro)$/, async (ctx) => {
 
   const model = models.video.models.find(m => m.key === 'kling_3');
   const durations = model.durations || [3, 5, 8, 10, 15];
+  const costNoAud = getEffectiveKling3CostPerSecond(userId, mode, false);
+  const costAud = getEffectiveKling3CostPerSecond(userId, mode, true);
   const durationButtons = durations.map(d => {
-    const costNoAudio = d * model.costPerSecondNoAudio;
-    const costAudio = d * model.costPerSecondAudio;
+    const costNoAudio = d * costNoAud;
+    const costAudio = d * costAud;
     return Markup.button.callback(`${d}с (${costNoAudio}—${costAudio}⚡)`, `kling_3_duration_${d}`);
   });
 
@@ -3433,8 +3564,8 @@ bot.action('kling_3_shot_single', async (ctx) => {
   if (!state || state.action !== 'kling_3_generation' || state.step !== 'select_shot_type') return;
 
   const model = models.video.models.find(m => m.key === 'kling_3');
-  const costNo = getKling3CostPerSecond(model, state.mode, false);
-  const costAud = getKling3CostPerSecond(model, state.mode, true);
+  const costNo = getEffectiveKling3CostPerSecond(userId, state.mode, false);
+  const costAud = getEffectiveKling3CostPerSecond(userId, state.mode, true);
   const durations = model.durations || [3, 5, 8, 10, 15];
   const durationButtons = durations.map(d => {
     const costNoAudio = d * costNo;
@@ -3600,8 +3731,8 @@ bot.action(/^kling_3_aspect_(.+)$/, async (ctx) => {
   }
 
   const model = models.video.models.find(m => m.key === 'kling_3');
-  const costPerSecAud = getKling3CostPerSecond(model, state.mode, true);
-  const costPerSecNo = getKling3CostPerSecond(model, state.mode, false);
+  const costPerSecAud = getEffectiveKling3CostPerSecond(userId, state.mode, true);
+  const costPerSecNo = getEffectiveKling3CostPerSecond(userId, state.mode, false);
   const costWithAudio = state.duration * costPerSecAud;
   const costNoAudio = state.duration * costPerSecNo;
 
@@ -3636,7 +3767,7 @@ bot.action(/^kling_3_audio_(on|off)$/, async (ctx) => {
   }
 
   const model = models.video.models.find(m => m.key === 'kling_3');
-  const costPerSec = getKling3CostPerSecond(model, state.mode, sound);
+  const costPerSec = getEffectiveKling3CostPerSecond(userId, state.mode, sound);
   const kling3Cost = state.duration * costPerSec;
 
   userState.set(userId, {
@@ -3722,8 +3853,7 @@ bot.action('kling_3_skip_elements', async (ctx) => {
 
   if (state.multiShots && state.multiPrompt?.length) {
     const totalDuration = state.multiPrompt.reduce((s, x) => s + (x.duration || 0), 0);
-    const k3Model = models.video.models.find(m => m.key === 'kling_3');
-    const costPerSec = k3Model ? getKling3CostPerSecond(k3Model, state.mode, state.generateAudio) : (state.generateAudio ? 45 : 23);
+    const costPerSec = getEffectiveKling3CostPerSecond(userId, state.mode, state.generateAudio);
     const kling3Cost = state.kling3Cost || (totalDuration * costPerSec);
     userState.set(userId, { ...state, step: 'ready_multi', currentElement: null, kling3Cost });
     await ctx.reply(
@@ -3800,10 +3930,8 @@ bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
     lastFrame: null
   });
 
-  // Функція розрахунку ціни Veo
-  const veoModel = models.video.models.find(m => m.key === 'veo');
   const calcVeoCost = (dur, audio) => {
-    const costPerSec = audio ? veoModel.costPerSecondAudio : veoModel.costPerSecondNoAudio;
+    const costPerSec = getEffectiveVeoCostPerSecond(userId, audio);
     return dur * costPerSec;
   };
 
@@ -3848,10 +3976,8 @@ bot.action(/^veo_duration_(\d+)$/, async (ctx) => {
     step: 'select_audio'
   });
 
-  // Розрахунок цін
-  const veoModel = models.video.models.find(m => m.key === 'veo');
-  const costWithAudio = duration * veoModel.costPerSecondAudio;
-  const costNoAudio = duration * veoModel.costPerSecondNoAudio;
+  const costWithAudio = duration * getEffectiveVeoCostPerSecond(ctx.from.id, true);
+  const costNoAudio = duration * getEffectiveVeoCostPerSecond(ctx.from.id, false);
 
   // Меню вибору аудіо з цінами
   await ctx.reply(
@@ -3883,9 +4009,7 @@ bot.action(/^veo_audio_(on|off)$/, async (ctx) => {
     return;
   }
 
-  // Розрахунок фінальної ціни
-  const veoModel = models.video.models.find(m => m.key === 'veo');
-  const costPerSec = generateAudio ? veoModel.costPerSecondAudio : veoModel.costPerSecondNoAudio;
+  const costPerSec = getEffectiveVeoCostPerSecond(ctx.from.id, generateAudio);
   const finalCost = state.duration * costPerSec;
 
   userState.set(userId, {
@@ -4260,7 +4384,8 @@ bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
   const state = userState.get(userId);
   const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'kling';
   const model = models.video.models.find(m => m.key === modelKey) || models.video.models.find(m => m.key === 'kling');
-  const klingCost = duration * (model?.costPerSecond || 6);
+  const costPerSecKling = modelKey === 'kling_v2_6' ? getEffectiveKlingV2_6CostPerSecond(userId, model, false) : getEffectiveKlingCostPerSecond(userId);
+  const klingCost = duration * costPerSecKling;
 
   // ✅ TRIAL CHECK: 10 секунд заблоковано для Trial
   const trialCheck = await checkTrialRestrictions(userId, modelKey, { duration });
@@ -4662,7 +4787,8 @@ bot.action(/^motion_orient_(image|video)$/, async (ctx) => {
   }
 
   const costKey = `${state.mode}_${orientation}`;
-  const motionCost = model.costs[costKey];
+  const motionCosts = getEffectiveKlingMotionCosts(userId);
+  const motionCost = motionCosts[costKey] ?? model.costs?.[costKey];
   const maxDuration = orientation === 'image' ? 10 : 30;
 
   userState.set(userId, {
@@ -4932,9 +5058,9 @@ async function generateKlingVideo(ctx, state) {
   const supportsEndImage = model.supportsEndImage !== false;
   const duration = state.duration || model.durations?.[0] || 5;
   const useAudio = state.generateAudio === true;
-  const costPerSec = useAudio
-    ? (model.costPerSecondAudio || model.costPerSecond || 6)
-    : (model.costPerSecond || model.costPerSecondNoAudio || 6);
+  const costPerSec = modelKey === 'kling_v2_6'
+    ? getEffectiveKlingV2_6CostPerSecond(userId, model, useAudio)
+    : getEffectiveKlingCostPerSecond(userId);
   const apiCostPerSec = useAudio
     ? (model.apiCostPerSecondAudio || model.apiCostPerSecond || 0.07)
     : (model.apiCostPerSecond || model.apiCostPerSecondNoAudio || 0.07);
@@ -5110,16 +5236,9 @@ async function generateKlingVideo(ctx, state) {
 // ==================== KLING 3.0 (KIE.AI) GENERATION FUNCTION ====================
 
 /** Вартість Kling 3.0 за секунду (токени): з кешу KIE + 30% націнка, якщо KIE_AI_USE_CACHE_PRICING не 'false'. */
+/** Ціна Kling 3.0 за секунду; використовуйте getEffectiveKling3CostPerSecond(userId, mode, withAudio) замість цієї функції. */
 function getKling3CostPerSecond(model, mode = 'pro', withAudio = false) {
-  if (!accessControl.KIE_AI_USE_CACHE_PRICING) {
-    return withAudio ? model.costPerSecondAudio : model.costPerSecondNoAudio;
-  }
-  const fromCache = kiePricingSync.getKling3TokenCostPerSecondSync({ mode });
-  if (fromCache) {
-    const v = withAudio ? fromCache.costPerSecondAudio : fromCache.costPerSecondNoAudio;
-    if (v != null) return v;
-  }
-  return withAudio ? model.costPerSecondAudio : model.costPerSecondNoAudio;
+  return withAudio ? (model?.costPerSecondAudio ?? 45) : (model?.costPerSecondNoAudio ?? 23);
 }
 
 async function generateKling3Video(ctx, state) {
@@ -5140,7 +5259,7 @@ async function generateKling3Video(ctx, state) {
   const aspectRatio = state.aspectRatio || '16:9';
   const mode = state.mode || 'pro';
   const generateAudio = state.generateAudio === true;
-  const costPerSec = getKling3CostPerSecond(model, mode, generateAudio);
+  const costPerSec = getEffectiveKling3CostPerSecond(userId, mode, generateAudio);
   const kling3Cost = state.kling3Cost || (duration * costPerSec);
   const imageUrls = state.startImage ? [state.startImage] : [];
   const elements = state.elements || [];
@@ -5276,7 +5395,7 @@ async function generateRunwayTurboVideo(ctx, state) {
 
   const duration = state.duration || 5;
   const aspectRatio = state.aspectRatio || '16:9';
-  const costPerSec = model.costPerSecond || (model.cost / 5);
+  const costPerSec = getEffectiveRunwayTurboCostPerSecond(userId);
   const runwayCost = duration * costPerSec;
   const apiCostPerSec = model.apiCostPerSecond || (model.apiCost / 5);
   const apiCost = duration * apiCostPerSec;
@@ -5405,10 +5524,9 @@ async function generateVeoVideo(ctx, state) {
     return;
   }
 
-  // Динамічний розрахунок ціни
   const duration = state.duration || 8;
   const generateAudio = state.generateAudio !== false;
-  const costPerSec = generateAudio ? model.costPerSecondAudio : model.costPerSecondNoAudio;
+  const costPerSec = getEffectiveVeoCostPerSecond(userId, generateAudio);
   const veoCost = state.veoCost || (duration * costPerSec);
   const apiCostPerSec = generateAudio ? model.apiCostPerSecondAudio : model.apiCostPerSecondNoAudio;
   const apiCost = duration * apiCostPerSec;
