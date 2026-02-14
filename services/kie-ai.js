@@ -1408,12 +1408,23 @@ module.exports = {
     kieAIOnly: [
       'kling_3'           // ⚠️ Kling 3.0 - немає на Replicate
     ],
-    // Моделі які НЕ підтримуються на KIE.AI - використовуй Replicate
+    // Моделі які НЕ підтримуються на KIE.AI — ціна та запуск через Replicate
     notSupported: [
       'stable_diffusion', // ❌ Немає на KIE.AI
       'clarity',          // ❌ Немає на KIE.AI
-      'sora_2'            // ❓ Потрібно перевірити
+      'sora_2'            // ❌ Поки тільки Replicate
     ]
+  },
+
+  /**
+   * Чи є реалізація моделі на KIE.AI (ціна KIE + виклик KIE).
+   * Якщо false — показуємо/списуємо ціну Replicate і запускаємо Replicate.
+   */
+  isKieAIImplemented(modelKey) {
+    const img = this.SUPPORTED_MODELS.image.includes(modelKey);
+    const vid = this.SUPPORTED_MODELS.video.includes(modelKey);
+    const not = this.SUPPORTED_MODELS.notSupported.includes(modelKey);
+    return (img || vid) && !not;
   },
 
   // Маппінг наших ключів моделей на KIE.AI моделі

@@ -334,9 +334,11 @@ module.exports = {
         const resKey = `${resolution}_${audio ? 'audio' : 'no_audio'}`;
         return (this.kling_3_0.kie_pricing[resKey]?.usd_per_sec || 0) * duration;
 
-      case 'sora_2':
-        // За замовчуванням text-to-video 15s
-        return this.sora_2.kie_pricing['text_to_video_15s'].usd;
+      case 'sora_2': {
+        const type = options.type || 'text_to_video_15s';
+        const p = this.sora_2.kie_pricing[type];
+        return p ? p.usd : this.sora_2.kie_pricing['text_to_video_15s'].usd;
+      }
 
       default:
         return 0;

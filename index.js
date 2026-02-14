@@ -36,6 +36,53 @@ const models = require('./config/models');
 const { TRIAL_TOKENS, WORST_CASE_TOKEN_USD } = require('./config/constants');
 const accessControl = require('./config/access');
 
+/**
+ * Ціна за обраним провайдером: KIE → ціна KIE, Replicate → Replicate.
+ * Якщо обрано KIE, але в KIE немає реалізації для моделі — ціна Replicate і запуск Replicate.
+ */
+function getEffectiveImageCost(userId, model, modelKey) {
+  if (userProviderChoice.get(userId) !== 'kie-ai') return model.cost;
+  if (!kieAI.isKieAIImplemented(modelKey)) return model.cost;
+  const kieCost = kiePricingSync.getKieTokenCostSync(modelKey);
+  return typeof kieCost === 'number' ? kieCost : model.cost;
+}
+
+/**
+ * Ціна за обраним провайдером; якщо KIE без реалізації — Replicate.
+ */
+function getEffectiveKlingV2_6CostPerSecond(userId, model, withAudio) {
+  if (userProviderChoice.get(userId) !== 'kie-ai') {
+    return withAudio ? (model?.costPerSecondAudio ?? model?.costPerSecond ?? 6) : (model?.costPerSecond ?? model?.costPerSecondNoAudio ?? 6);
+  }
+  if (!kieAI.isKieAIImplemented('kling_v2_6')) {
+    return withAudio ? (model?.costPerSecondAudio ?? 6) : (model?.costPerSecondNoAudio ?? model?.costPerSecond ?? 6);
+  }
+  const k = kiePricingSync.getKieTokenCostSync('kling_v2_6');
+  if (!k || typeof k !== 'object') {
+    return withAudio ? (model?.costPerSecondAudio ?? 6) : (model?.costPerSecondNoAudio ?? model?.costPerSecond ?? 6);
+  }
+  const v = withAudio ? (k.costPerSecondAudio ?? model?.costPerSecondAudio) : (k.costPerSecondNoAudio ?? model?.costPerSecondNoAudio ?? model?.costPerSecond);
+  return v ?? (withAudio ? 6 : 6);
+}
+
+/**
+ * Ціна за обраним провайдером; якщо KIE без реалізації (напр. Sora) — Replicate ціна і запуск Replicate.
+ */
+function getEffectiveSora2Cost(userId, model, duration = 15, options = {}) {
+  if (userProviderChoice.get(userId) !== 'kie-ai') {
+    return Math.ceil(duration * (model?.costPerSecond || 0));
+  }
+  if (!kieAI.isKieAIImplemented('sora_2')) {
+    return Math.ceil(duration * (model?.costPerSecond || 0));
+  }
+  const soraType = options.soraType || (duration >= 15 ? 'text_to_video_15s' : duration >= 10 ? 'image_to_video_10s' : null);
+  if (soraType) {
+    const k = kiePricingSync.getKieTokenCostSync('sora_2', { soraType });
+    if (k && typeof k === 'object' && typeof k.cost === 'number') return k.cost;
+  }
+  return Math.ceil(duration * (model?.costPerSecond || 0));
+}
+
 // Ініціалізація бота
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
@@ -2558,15 +2605,15 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
       const userChosenProvider = userProviderChoice.get(userId);
       const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 
-      // Логіка вибору провайдера
+      // Логіка: провайдер за вибором; якщо KIE без реалізації — Replicate
+      const creativeModelKey = 'seedream_4k';
       let useKieAI = false;
       if (userChosenProvider === 'kie-ai') {
-        useKieAI = true;
+        useKieAI = kieAI.isKieAIImplemented(creativeModelKey);
       } else if (userChosenProvider === 'replicate') {
         useKieAI = false;
       } else {
-        // Автоматичний режим
-        useKieAI = canUseKieAI;
+        useKieAI = canUseKieAI && kieAI.isKieAIImplemented(creativeModelKey);
       }
 
       const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
@@ -2836,8 +2883,9 @@ bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_d
 
   await ctx.answerCbQuery();
 
-  if (model.cost > 0 && !(await userBalance.hasTokens(ctx.from.id, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
+  const effectiveCost = getEffectiveImageCost(ctx.from.id, model, modelKey);
+  if (model.cost > 0 && !(await userBalance.hasTokens(ctx.from.id, effectiveCost))) {
+    await showInsufficientTokens(ctx, effectiveCost);
     return;
   }
 
@@ -2849,7 +2897,7 @@ bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_d
       `✨ <b>${model.name}</b>\n\n` +
       `🔎 Розумне підвищення якості (upscale)\n\n` +
       `📷 <b>Крок 1:</b> Надішліть зображення\n\n` +
-      `💰 Вартість: ${model.cost}⚡\n` +
+      `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~20-40 секунд`,
       { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
     );
@@ -2870,46 +2918,46 @@ bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_d
     `✍️ <b>Крок 2:</b> Введіть промпт\n\n` +
     `Натисніть <b>"Далі до промпту"</b> якщо без референсів.\n\n`;
 
-  // Інструкції для різних моделей
+  // Інструкції для різних моделей (effectiveCost — для KIE-користувачів реальна вартість)
   const messages = {
     clarity: `✨ <b>${model.name}</b>\n\n` +
       `🔮 Покращення якості зображень\n\n` +
       refsStep +
       `💬 Можете додати опис для кращого результату\n\n` +
-      `💰 Вартість: ${model.cost}⚡\n` +
+      `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~30-60 секунд`,
     recraft_upscale: `✨ <b>${model.name}</b>\n\n` +
       `🔎 Розроблений для підвищення чіткості та чистоти зображень, Crisp Upscale покращує загальну якість, роблячи візуальні елементи придатними для використання в Інтернеті або друку.\n\n` +
       `📝 <b>Крок 1:</b> Надішліть зображення\n` +
       `✍️ <b>Крок 2:</b> (опціонально) короткий опис\n\n` +
       `Натисніть <b>"Далі до промпту"</b> після фото.\n\n` +
-      `💰 Вартість: ${model.cost}⚡\n` +
+      `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~20-40 секунд`,
 
     stable_diffusion: `🌀 <b>${model.name}</b>\n\n` +
       refsStep +
       `Опишіть детально що хочете згенерувати.\n\n` +
       `💡 Приклад: "A beautiful sunset over mountains, photorealistic, 8k"\n\n` +
-      `💰 Вартість: ${model.cost}⚡\n` +
+      `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~30-40 секунд`,
 
     ideogram: `✏️ <b>${model.name}</b>\n\n` +
       refsStep +
       `Опишіть детально що хочете згенерувати.\n` +
       `💡 Ideogram чудово працює з текстом на зображеннях!\n\n` +
-      `💰 Вартість: ${model.cost}⚡\n` +
+      `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~30-40 секунд`,
 
     nano_banana: `🍌 <b>${model.name}</b>\n\n` +
       refsStep +
       `Опишіть детально що хочете згенерувати.\n` +
-      `💰 Вартість: ${model.cost}⚡\n` +
+      `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~20-30 секунд`,
 
     seedream: `🌊 <b>${model.name}</b>\n\n` +
       refsStep +
       `Опишіть детально що хочете згенерувати.\n` +
-      `💰 Вартість: ${model.cost}⚡\n` +
+      `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~20-40 секунд`
   };
 
@@ -2921,7 +2969,7 @@ bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_d
   const defaultMessage = `🎨 <b>${model.name}</b>\n\n` +
     refsStep +
     `Опишіть що хочете згенерувати.\n\n` +
-    `💰 Вартість: ${model.cost}⚡`;
+    `💰 Вартість: ${effectiveCost}⚡`;
 
   await ctx.reply(
     messages[messageKey] || defaultMessage,
@@ -3159,10 +3207,15 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
     const durations = model.durations || [5];
     const minDuration = Math.min(...durations);
     const maxDuration = Math.max(...durations);
-    const minCost = minDuration * model.costPerSecond;
-    const maxCost = maxDuration * model.costPerSecond;
+    const costPerSecNo = modelKey === 'kling_v2_6' ? getEffectiveKlingV2_6CostPerSecond(ctx.from.id, model, false) : model.costPerSecond;
+    const costPerSecAud = modelKey === 'kling_v2_6' ? getEffectiveKlingV2_6CostPerSecond(ctx.from.id, model, true) : model.costPerSecond;
+    const minCost = minDuration * costPerSecNo;
+    const maxCost = maxDuration * costPerSecAud;
     const durationButtons = durations.map(d =>
-      Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `kling_duration_${d}`)
+      Markup.button.callback(
+        modelKey === 'kling_v2_6' ? `${d} сек (${d * costPerSecNo}—${d * costPerSecAud}⚡)` : `${d} сек (${d * model.costPerSecond}⚡)`,
+        `kling_duration_${d}`
+      )
     );
 
     userState.set(ctx.from.id, {
@@ -3266,10 +3319,10 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
     const durations = model.durations || [4, 8, 12];
     const minDuration = Math.min(...durations);
     const maxDuration = Math.max(...durations);
-    const minCost = minDuration * model.costPerSecond;
-    const maxCost = maxDuration * model.costPerSecond;
+    const minCost = durations.reduce((acc, d) => Math.min(acc, getEffectiveSora2Cost(ctx.from.id, model, d)), Infinity);
+    const maxCost = durations.reduce((acc, d) => Math.max(acc, getEffectiveSora2Cost(ctx.from.id, model, d)), 0);
     const durationButtons = durations.map(d => ([
-      Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `sora_duration_${d}`)
+      Markup.button.callback(`${d} сек (${getEffectiveSora2Cost(ctx.from.id, model, d)}⚡)`, `sora_duration_${d}`)
     ]));
 
     userState.set(ctx.from.id, {
@@ -4200,8 +4253,10 @@ bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
   }
 
   if (modelKey === 'kling_v2_6') {
-    const noAudioCost = duration * (model?.costPerSecond || 6);
-    const audioCost = duration * (model?.costPerSecondAudio || (model?.costPerSecond || 6));
+    const costPerSecNo = getEffectiveKlingV2_6CostPerSecond(userId, model, false);
+    const costPerSecAud = getEffectiveKlingV2_6CostPerSecond(userId, model, true);
+    const noAudioCost = duration * costPerSecNo;
+    const audioCost = duration * costPerSecAud;
 
     userState.set(userId, {
       action: 'kling_generation',
@@ -4272,9 +4327,7 @@ bot.action(/^kling_audio_(on|off)$/, async (ctx) => {
   }
 
   const duration = state.duration || 5;
-  const costPerSec = audioOn
-    ? (model?.costPerSecondAudio || model?.costPerSecond || 6)
-    : (model?.costPerSecond || 6);
+  const costPerSec = getEffectiveKlingV2_6CostPerSecond(userId, model, audioOn);
   const klingCost = duration * costPerSec;
 
   userState.set(userId, {
@@ -4721,15 +4774,14 @@ async function generateKlingMotionVideo(ctx, state) {
       const userChosenProvider = userProviderChoice.get(userId);
       const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 
-      // Логіка вибору провайдера
+      const motionModelKey = 'kling_motion';
       let useKieAI = false;
       if (userChosenProvider === 'kie-ai') {
-        useKieAI = true;
+        useKieAI = kieAI.isKieAIImplemented(motionModelKey);
       } else if (userChosenProvider === 'replicate') {
         useKieAI = false;
       } else {
-        // Автоматичний режим
-        useKieAI = canUseKieAI;
+        useKieAI = canUseKieAI && kieAI.isKieAIImplemented(motionModelKey);
       }
 
       const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
@@ -4908,11 +4960,11 @@ async function generateKlingVideo(ctx, state) {
 
       let useKieAI = false;
       if (userChosenProvider === 'kie-ai') {
-        useKieAI = true;
+        useKieAI = kieAI.isKieAIImplemented(modelKey);
       } else if (userChosenProvider === 'replicate') {
         useKieAI = false;
       } else {
-        useKieAI = canUseKieAI;
+        useKieAI = canUseKieAI && kieAI.isKieAIImplemented(modelKey);
       }
 
       const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
@@ -5380,11 +5432,11 @@ async function generateVeoVideo(ctx, state) {
 
       let useKieAI = false;
       if (userChosenProvider === 'kie-ai') {
-        useKieAI = true;
+        useKieAI = kieAI.isKieAIImplemented('veo');
       } else if (userChosenProvider === 'replicate') {
         useKieAI = false;
       } else {
-        useKieAI = canUseKieAI;
+        useKieAI = canUseKieAI && kieAI.isKieAIImplemented('veo');
       }
 
       const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
@@ -5510,11 +5562,12 @@ async function generateSoraVideo(ctx, state) {
 
   const duration = state.duration || 4;
   const aspectRatio = state.aspectRatio || 'portrait';
-  const costPerSec = model.costPerSecond || 0;
-  const soraCost = duration * costPerSec;
+  const hasReference = !!state.inputReference;
+  const soraCost = getEffectiveSora2Cost(userId, model, duration, {
+    soraType: hasReference ? (duration >= 15 ? 'image_to_video_15s' : 'image_to_video_10s') : (duration >= 15 ? 'text_to_video_15s' : duration >= 10 ? 'image_to_video_10s' : null)
+  });
   const apiCostPerSec = model.apiCostPerSecond || 0;
   const apiCost = duration * apiCostPerSec;
-  const hasReference = !!state.inputReference;
 
   if (!(await userBalance.hasTokens(userId, soraCost))) {
     await showInsufficientTokens(ctx, soraCost);
@@ -7218,8 +7271,9 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
 
   imageInput = normalizeReferenceOrder(imageInput);
 
-  if (!(await userBalance.hasTokens(userId, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
+  const effectiveImageCost = getEffectiveImageCost(userId, model, modelKey);
+  if (!(await userBalance.hasTokens(userId, effectiveImageCost))) {
+    await showInsufficientTokens(ctx, effectiveImageCost);
     return;
   }
 
@@ -7276,7 +7330,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
     prompt,
     modelKey,
     modelName: model.name,
-    modelCost: model.cost,
+    modelCost: effectiveImageCost,
     modelApiCost: model.apiCost,
     imageInput,
     aspectRatio,
@@ -7292,17 +7346,14 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       const userChosenProvider = userProviderChoice.get(userId);
       const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 
-      // Логіка: якщо користувач явно вибрав KIE.AI -> використовуємо KIE.AI
-      // Якщо користувач явно вибрав Replicate -> використовуємо Replicate
-      // Інакше - автоматичний вибір
+      // Провайдер за вибором; якщо KIE обрано але реалізації немає — Replicate
       let useKieAI = false;
       if (userChosenProvider === 'kie-ai') {
-        useKieAI = true;
+        useKieAI = kieAI.isKieAIImplemented(generationData.modelKey);
       } else if (userChosenProvider === 'replicate') {
         useKieAI = false;
       } else {
-        // Автоматичний режим: використовуємо KIE.AI якщо доступна
-        useKieAI = canUseKieAI;
+        useKieAI = canUseKieAI && kieAI.isKieAIImplemented(generationData.modelKey);
       }
 
       const replicateFunctions = {

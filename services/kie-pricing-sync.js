@@ -201,6 +201,13 @@ function getModelPrice(cache, modelKey, options = {}) {
       case 'nano_banana_4k':
         return parsed.nano_banana_4k?.usdPrice || '0.12';
 
+      case 'seedream_2k':
+      case 'seedream_4k':
+        return parsed.seedream_4k?.usdPrice || null;
+
+      case 'stable_diffusion':
+        return parsed.stable_diffusion?.usdPrice || null;
+
       case 'kling_v2_6':
         const kling26 = parsed.kling_2_6?.find(m => {
           const desc = m.modelDescription.toLowerCase();
@@ -267,6 +274,71 @@ function getKling3TokenCostPerSecondSync(options = {}) {
       ? { costPerSecondAudio: usdAudio ?? null, costPerSecondNoAudio: usdNoAudio ?? null }
       : null;
     return kieAiModels.getKling3TokenCostPerSecond.call(kieAiModels, mode, usdFromCache);
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Моделі зображень, для яких є KIE-ціна в кеші */
+const KIE_IMAGE_MODELS = ['nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'stable_diffusion'];
+
+/**
+ * Вартість у токенах при виборі провайдера KIE (для показу та списання).
+ * Тільки для користувачів з userProviderChoice === 'kie-ai'. Replicate не змінюється.
+ * @param {string} modelKey - ключ моделі
+ * @param {Object} options - для відео: duration, audio, mode, orientation тощо
+ * @returns {number | { costPerSecond, costPerSecondAudio, costPerSecondNoAudio } | { cost } | null} null = використовувати Replicate
+ */
+function getKieTokenCostSync(modelKey, options = {}) {
+  try {
+    const { duration, audio, resolution } = options;
+
+    // Зображення: одна ціна за генерацію
+    if (KIE_IMAGE_MODELS.includes(modelKey)) {
+      const usd = getModelPriceSync(modelKey);
+      if (usd == null) return null;
+      const n = typeof usd === 'string' ? parseFloat(usd) : usd;
+      if (Number.isNaN(n)) return null;
+      return kieAiModels.usdToTokens(n);
+    }
+
+    // Kling 2.6: за секунду (з кешу за 5s/10s)
+    if (modelKey === 'kling_v2_6') {
+      const usd5No = getModelPriceSync('kling_v2_6', { duration: 5, audio: false });
+      const usd5Aud = getModelPriceSync('kling_v2_6', { duration: 5, audio: true });
+      if (usd5No == null && usd5Aud == null) return null;
+      const perSecNo = usd5No != null ? parseFloat(usd5No) / 5 : null;
+      const perSecAud = usd5Aud != null ? parseFloat(usd5Aud) / 5 : null;
+      return {
+        costPerSecondNoAudio: perSecNo != null ? kieAiModels.usdToTokens(perSecNo) : null,
+        costPerSecondAudio: perSecAud != null ? kieAiModels.usdToTokens(perSecAud) : null
+      };
+    }
+
+    // Kling 2.5: якщо в кеші є — per second (поки не парсимо kling 2.5 в parseOurModels, повертаємо null)
+    if (modelKey === 'kling') {
+      return null;
+    }
+
+    // Veo: в кеші тільки "per video", немає розділення audio/noAudio — поки використовуємо Replicate
+    if (modelKey === 'veo') {
+      return null;
+    }
+
+    // Sora 2: фіксована вартість за відео (з kie-ai-models)
+    if (modelKey === 'sora_2') {
+      const type = options.soraType || 'text_to_video_15s';
+      const usd = kieAiModels.getKieAIPrice.call(kieAiModels, 'sora_2', { type });
+      if (usd == null || usd === 0) return null;
+      return { cost: kieAiModels.usdToTokens(usd) };
+    }
+
+    // Kling Motion: поки без кешу — null
+    if (modelKey === 'kling_motion') {
+      return null;
+    }
+
+    return null;
   } catch (e) {
     return null;
   }
@@ -340,6 +412,8 @@ module.exports = {
   getModelPrice,
   getModelPriceSync,
   getKling3TokenCostPerSecondSync,
+  getKieTokenCostSync,
+  KIE_IMAGE_MODELS,
   logPriceComparison,
   showPricingReport,
   CACHE_FILE,
