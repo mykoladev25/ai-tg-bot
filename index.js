@@ -1,4 +1,6 @@
 require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
 const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
 const express = require('express');
@@ -56,6 +58,14 @@ function canSeeKieOnlyVideoModels(userId) {
   if (!accessControl.canUseKieAI(userId) || !kieAI.isKieAIEnabled) return false;
   const choice = userProviderChoice.get(userId);
   return choice !== 'replicate'; // показуємо при kie-ai або auto
+}
+
+/** Чи показувати ціну KIE в меню: при виборі KIE або при "auto" + є доступ до KIE. При виборі Replicate — завжди Replicate. */
+function useKiePriceForDisplay(userId) {
+  const choice = userProviderChoice.get(userId);
+  if (choice === 'replicate') return false;
+  if (choice === 'kie-ai') return true;
+  return accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 }
 
 /**
@@ -125,7 +135,7 @@ function getVideoModelsForUser(userId) {
  * Якщо обрано KIE, але в KIE немає реалізації для моделі — ціна Replicate і запуск Replicate.
  */
 function getEffectiveImageCost(userId, model, modelKey) {
-  if (userProviderChoice.get(userId) !== 'kie-ai') return model.cost;
+  if (!useKiePriceForDisplay(userId)) return model.cost;
   if (!kieAI.isKieAIImplemented(modelKey)) return model.cost;
   const kieCost = kiePricingSync.getKieTokenCostSync(modelKey);
   return typeof kieCost === 'number' ? kieCost : model.cost;
@@ -135,7 +145,7 @@ function getEffectiveImageCost(userId, model, modelKey) {
  * Ціна за обраним провайдером; якщо KIE без реалізації — Replicate.
  */
 function getEffectiveKlingV2_6CostPerSecond(userId, model, withAudio) {
-  if (userProviderChoice.get(userId) !== 'kie-ai') {
+  if (!useKiePriceForDisplay(userId)) {
     return withAudio ? (model?.costPerSecondAudio ?? model?.costPerSecond ?? 6) : (model?.costPerSecond ?? model?.costPerSecondNoAudio ?? 6);
   }
   if (!kieAI.isKieAIImplemented('kling_v2_6')) {
@@ -156,7 +166,7 @@ function getEffectiveVeoCostPerSecond(userId, withAudio) {
   const model = models.video.models.find(m => m.key === 'veo');
   const fallbackNo = model?.costPerSecondNoAudio ?? 33;
   const fallbackAud = model?.costPerSecondAudio ?? 66;
-  if (userProviderChoice.get(userId) !== 'kie-ai') return withAudio ? fallbackAud : fallbackNo;
+  if (!useKiePriceForDisplay(userId)) return withAudio ? fallbackAud : fallbackNo;
   if (!kieAI.isKieAIImplemented('veo')) return withAudio ? fallbackAud : fallbackNo;
   const k = kiePricingSync.getKieTokenCostSync('veo');
   if (!k || typeof k !== 'object') return withAudio ? fallbackAud : fallbackNo;
@@ -169,7 +179,7 @@ function getEffectiveVeoCostPerSecond(userId, withAudio) {
 function getEffectiveKlingCostPerSecond(userId) {
   const model = models.video.models.find(m => m.key === 'kling');
   const fallback = model?.costPerSecond ?? 12;
-  if (userProviderChoice.get(userId) !== 'kie-ai') return fallback;
+  if (!useKiePriceForDisplay(userId)) return fallback;
   if (!kieAI.isKieAIImplemented('kling')) return fallback;
   const k = kiePricingSync.getKieTokenCostSync('kling');
   if (!k || typeof k !== 'object' || typeof k.costPerSecond !== 'number') return fallback;
@@ -182,7 +192,7 @@ function getEffectiveKlingCostPerSecond(userId) {
 function getEffectiveRunwayTurboCostPerSecond(userId) {
   const model = models.video.models.find(m => m.key === 'runway_turbo');
   const fallback = model?.costPerSecond ?? 9;
-  if (userProviderChoice.get(userId) !== 'kie-ai') return fallback;
+  if (!useKiePriceForDisplay(userId)) return fallback;
   if (!kieAI.isKieAIImplemented('runway_turbo')) return fallback;
   const k = kiePricingSync.getKieTokenCostSync('runway_turbo', { duration: 5 });
   if (!k || typeof k !== 'object' || typeof k.costPerSecond !== 'number') return fallback;
@@ -195,7 +205,7 @@ function getEffectiveRunwayTurboCostPerSecond(userId) {
 function getEffectiveKlingMotionCosts(userId) {
   const model = models.video.models.find(m => m.key === 'kling_motion');
   const fallback = model?.costs ?? { std_image: 83, std_video: 165, pro_image: 165, pro_video: 330 };
-  if (userProviderChoice.get(userId) !== 'kie-ai') return fallback;
+  if (!useKiePriceForDisplay(userId)) return fallback;
   if (!kieAI.isKieAIImplemented('kling_motion')) return fallback;
   const k = kiePricingSync.getKieTokenCostSync('kling_motion');
   if (!k || typeof k !== 'object' || !k.costs) return fallback;
@@ -209,7 +219,7 @@ function getEffectiveKling3CostPerSecond(userId, mode, withAudio) {
   const model = models.video.models.find(m => m.key === 'kling_3');
   const fallbackNo = model?.costPerSecondNoAudio ?? 23;
   const fallbackAud = model?.costPerSecondAudio ?? 45;
-  if (userProviderChoice.get(userId) !== 'kie-ai') return withAudio ? fallbackAud : fallbackNo;
+  if (!useKiePriceForDisplay(userId)) return withAudio ? fallbackAud : fallbackNo;
   if (!kieAI.isKieAIImplemented('kling_3')) return withAudio ? fallbackAud : fallbackNo;
   const r = kiePricingSync.getKling3TokenCostPerSecondSync({ mode: mode || 'pro' });
   if (!r) return withAudio ? fallbackAud : fallbackNo;
@@ -220,7 +230,7 @@ function getEffectiveKling3CostPerSecond(userId, mode, withAudio) {
  * Ціна за обраним провайдером; якщо KIE без реалізації (напр. Sora) — Replicate ціна і запуск Replicate.
  */
 function getEffectiveSora2Cost(userId, model, duration = 15, options = {}) {
-  if (userProviderChoice.get(userId) !== 'kie-ai') {
+  if (!useKiePriceForDisplay(userId)) {
     return Math.ceil(duration * (model?.costPerSecond || 0));
   }
   if (!kieAI.isKieAIImplemented('sora_2')) {
@@ -255,6 +265,35 @@ const imageGenState = new Map();
 // Вибір провайдера для користувачів (тільки для адміна поки що)
 // userId -> 'replicate' | 'kie-ai'
 const userProviderChoice = new Map();
+const PROVIDER_CHOICE_FILE = path.join(__dirname, 'config', 'provider-choice.json');
+
+function loadProviderChoice() {
+  try {
+    if (fs.existsSync(PROVIDER_CHOICE_FILE)) {
+      const raw = fs.readFileSync(PROVIDER_CHOICE_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      if (data && typeof data === 'object') {
+        for (const [uid, choice] of Object.entries(data)) {
+          if (choice === 'kie-ai' || choice === 'replicate') userProviderChoice.set(Number(uid), choice);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Provider choice load failed:', e.message);
+  }
+}
+
+function saveProviderChoice() {
+  try {
+    const data = {};
+    for (const [uid, choice] of userProviderChoice) data[String(uid)] = choice;
+    fs.writeFileSync(PROVIDER_CHOICE_FILE, JSON.stringify(data, null, 0), 'utf8');
+  } catch (e) {
+    console.warn('Provider choice save failed:', e.message);
+  }
+}
+
+loadProviderChoice();
 
 // Rate limiting для заблокованих користувачів (щоб не спамили)
 const blockedUserLastNotified = new Map(); // userId -> timestamp
@@ -1923,6 +1962,7 @@ bot.action('provider_kie-ai', async (ctx) => {
   }
 
   userProviderChoice.set(userId, 'kie-ai');
+  saveProviderChoice();
 
   await ctx.editMessageText(
     '✅ <b>KIE.AI вибрана</b>\n\n' +
@@ -1945,6 +1985,7 @@ bot.action('provider_replicate', async (ctx) => {
   }
 
   userProviderChoice.set(userId, 'replicate');
+  saveProviderChoice();
 
   await ctx.editMessageText(
     '✅ <b>Replicate вибрана</b>\n\n' +
@@ -1967,6 +2008,7 @@ bot.action('provider_auto', async (ctx) => {
   }
 
   userProviderChoice.delete(userId);  // видаляємо вибір, щоб використовувати автоматичний
+  saveProviderChoice();
 
   await ctx.editMessageText(
     '✅ <b>Автоматичний режим</b>\n\n' +
@@ -7666,15 +7708,19 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       console.error(`${modelKey} generation failed:`, error);
       await adminNotifier.notifyAdmin(bot, error, { userId, username, action: `${modelKey}_generation`, model: model.name, prompt });
 
+      const isTimeout = error?.message?.includes('Timeout waiting for');
+      const userMessage = isTimeout
+        ? '⏱ Генерація зайняла надто багато часу (таймаут). Спробуйте ще раз або оберіть іншу модель.'
+        : '❌ Помилка генерації. Спробуйте іншу модель.';
+
       try {
-        await bot.telegram.editMessageText(
-          chatId,
-          generationData.statusMsgId,
-          null,
-          '❌ Помилка генерації. Спробуйте іншу модель.'
-        );
+        await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, userMessage);
       } catch (e) {
-        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації. Спробуйте іншу модель.', keyboard.createBackButton('design_menu'));
+        try {
+          await bot.telegram.sendMessage(chatId, userMessage, keyboard.createBackButton('design_menu'));
+        } catch (sendErr) {
+          console.error('Could not notify user of generation error:', sendErr.message);
+        }
       }
 
       if (!finished) {

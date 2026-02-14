@@ -21,43 +21,57 @@ function isAdminUser(userId) {
 }
 
 /**
- * Polling для отримання результату від KIE.AI API
- *
- * Документація: https://docs.kie.ai/api-reference/query-task
- * KIE асинхронна: результат тільки через polling або webhook (https://docs.kie.ai/#7-asynchronous-task-model)
- * Статуси: pending, processing, success, fail
+ * Офіційний endpoint для отримання статусу таску (Get Task Details).
+ * Документація: https://docs.kie.ai/market/common/get-task-detail
+ * Статуси: waiting, queuing, generating, success, fail
+ */
+async function fetchTaskRecordInfo(taskId) {
+  const response = await axios.get(
+    `${KIE_API_BASE}/jobs/recordInfo`,
+    {
+      params: { taskId },
+      headers: {
+        'Authorization': `Bearer ${KIE_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    }
+  );
+  return response.data?.data || null;
+}
+
+/**
+ * Polling для отримання результату від KIE.AI API (Market models: Nano Banana, Seedream, Ideogram, Recraft тощо).
+ * Використовує офіційний GET /jobs/recordInfo?taskId= (не /jobs/status/).
+ * Статуси за документацією: waiting, queuing, generating, success, fail
  */
 async function pollJobStatus(taskId, maxAttempts = 400, interval = 3000, modelName = 'KIE.AI') {
   let attempts = 0;
 
   while (attempts < maxAttempts) {
     try {
-      const response = await axios.get(
-        `${KIE_API_BASE}/jobs/status/${taskId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${KIE_API_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+      const job = await fetchTaskRecordInfo(taskId);
+      if (!job) {
+        console.warn(`⚠️ ${modelName} recordInfo empty for ${taskId}`);
+        await new Promise(resolve => setTimeout(resolve, interval));
+        attempts++;
+        continue;
+      }
 
-      const job = response.data.data;
-      const state = job.state || job.status;
+      const state = (job.state || job.status || '').toLowerCase();
 
       console.log(`📊 ${modelName} status (attempt ${attempts + 1}): ${state}`);
 
       if (state === 'success' || state === 'completed') {
         return job;
-      } else if (state === 'fail' || state === 'failed' || state === 'error') {
-        const errorMsg = job.failMsg || job.error || 'Unknown error';
+      }
+      if (state === 'fail' || state === 'failed' || state === 'error') {
+        const errorMsg = job.failMsg || job.failCode || job.error || 'Unknown error';
         throw new Error(`Task failed: ${errorMsg}`);
       }
-      // pending, processing - продовжуємо polling
+      // waiting, queuing, generating (або running) — продовжуємо polling
 
       await new Promise(resolve => setTimeout(resolve, interval));
       attempts++;
-
     } catch (error) {
       if (error.response?.status === 404) {
         console.warn(`⚠️ Task ${taskId} not found, retrying...`);
@@ -72,13 +86,11 @@ async function pollJobStatus(taskId, maxAttempts = 400, interval = 3000, modelNa
     }
   }
 
-  // Остання спроба: іноді таск встигає завершитись одразу після нашого останнього запиту
+  // Остання спроба: затримка + ще один запит
+  await new Promise(resolve => setTimeout(resolve, interval));
   try {
-    const last = await axios.get(`${KIE_API_BASE}/jobs/status/${taskId}`, {
-      headers: { 'Authorization': `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' }
-    });
-    const job = last.data?.data;
-    const state = job?.state || job?.status;
+    const job = await fetchTaskRecordInfo(taskId);
+    const state = (job?.state || job?.status || '').toLowerCase();
     if (state === 'success' || state === 'completed') {
       console.log(`📊 ${modelName} got result on final check`);
       return job;
@@ -276,8 +288,8 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    // Очікуємо на результат (polling): до ~20 хв (KIE асинхронна — тільки polling або webhook)
-    const result = await pollJobStatus(taskId, 400, 3000, 'Nano Banana Pro (KIE.AI)');
+    // Очікуємо на результат (polling): до ~50 хв (KIE асинхронна; іноді статус довго "running")
+    const result = await pollJobStatus(taskId, 600, 5000, 'Nano Banana Pro (KIE.AI)');
 
     // Отримуємо URL зображення з результату
     const imageUrl = extractImageUrl(result);
@@ -1359,32 +1371,27 @@ async function pollVeoStatus(taskId, maxAttempts = 600, interval = 5000, modelNa
 
   while (attempts < maxAttempts) {
     try {
-      // Спробуємо спочатку стандартний endpoint
-      const response = await axios.get(
-        `${KIE_API_BASE}/jobs/status/${taskId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${KIE_API_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+      const job = await fetchTaskRecordInfo(taskId);
+      if (!job) {
+        await new Promise(resolve => setTimeout(resolve, interval));
+        attempts++;
+        continue;
+      }
 
-      const job = response.data.data;
-      const state = job.state || job.status;
+      const state = (job.state || job.status || '').toLowerCase();
 
       console.log(`📊 ${modelName} status (attempt ${attempts + 1}): ${state}`);
 
       if (state === 'success' || state === 'completed') {
         return job;
-      } else if (state === 'fail' || state === 'failed' || state === 'error') {
-        const errorMsg = job.failMsg || job.error || 'Unknown error';
+      }
+      if (state === 'fail' || state === 'failed' || state === 'error') {
+        const errorMsg = job.failMsg || job.failCode || job.error || 'Unknown error';
         throw new Error(`Task failed: ${errorMsg}`);
       }
 
       await new Promise(resolve => setTimeout(resolve, interval));
       attempts++;
-
     } catch (error) {
       if (error.response?.status === 404) {
         console.warn(`⚠️ Task ${taskId} not found, retrying...`);
@@ -1401,11 +1408,8 @@ async function pollVeoStatus(taskId, maxAttempts = 600, interval = 5000, modelNa
 
   // Остання спроба перед таймаутом
   try {
-    const last = await axios.get(`${KIE_API_BASE}/jobs/status/${taskId}`, {
-      headers: { 'Authorization': `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' }
-    });
-    const job = last.data?.data;
-    const state = job?.state || job?.status;
+    const job = await fetchTaskRecordInfo(taskId);
+    const state = (job?.state || job?.status || '').toLowerCase();
     if (state === 'success' || state === 'completed') {
       console.log(`📊 ${modelName} got result on final check`);
       return job;
@@ -1500,13 +1504,13 @@ module.exports = {
     veo: { model: 'veo3_fast', quality: 'veo3', endpoint: '/veo/generate' }
   },
 
-  // Endpoints для різних моделей
+  // Endpoints для різних моделей (статус — офіційно GET /jobs/recordInfo?taskId=)
   SPECIAL_ENDPOINTS: {
     runway: '/runway/generate',
     runway_status: '/runway/record-detail',
     veo: '/veo/generate',
     jobs: '/jobs/createTask',
-    jobs_status: '/jobs/status'
+    jobs_recordInfo: '/jobs/recordInfo'
   }
 };
 
