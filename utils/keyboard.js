@@ -185,8 +185,8 @@ function createSubscriptionsMenu(userId = null) {
   const models = require('../config/models');
   const subscriptions = models.subscriptions;
   
-  const adminId = parseInt(process.env.ADMIN_TELEGRAM_ID || '0');
-  const isAdmin = Number.isFinite(adminId) && userId && Number(userId) === adminId;
+  const accessControl = require('../config/access');
+  const isAdmin = userId && accessControl.isAdmin(userId);
 
   const paidPlans = ['starter', 'basic', 'pro', 'premium'];
   const emojis = { starter: '🚀', basic: '💎', pro: '🔥', premium: '👑', starter_test: '🧪' };

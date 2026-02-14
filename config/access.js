@@ -50,9 +50,18 @@ const BLACKLIST_USERS = (process.env.BLACKLIST_USERS || '')
   .filter(id => id.length > 0);
 
 /**
- * Адміністратор
+ * Список ID адміністраторів (ADMIN_TELEGRAM_ID, ADMIN_TELEGRAM_ID_2, ...)
  */
-const ADMIN_ID = process.env.ADMIN_TELEGRAM_ID || '';
+const ADMIN_IDS = [
+  process.env.ADMIN_TELEGRAM_ID,
+  process.env.ADMIN_TELEGRAM_ID_2
+]
+  .filter(Boolean)
+  .map(id => String(id).trim())
+  .filter(id => id.length > 0);
+
+/** Перший адмін (для зворотної сумісності) */
+const ADMIN_ID = ADMIN_IDS[0] || '';
 
 // ==================== PERMISSION CHECKS ====================
 
@@ -60,7 +69,14 @@ const ADMIN_ID = process.env.ADMIN_TELEGRAM_ID || '';
  * Перевіряємо чи користувач є адміністратором
  */
 function isAdmin(userId) {
-  return String(userId) === String(ADMIN_ID);
+  return ADMIN_IDS.includes(String(userId));
+}
+
+/**
+ * Повертає масив Telegram ID адмінів (для розсилки повідомлень)
+ */
+function getAdminIds() {
+  return [...ADMIN_IDS];
 }
 
 /**
@@ -154,7 +170,7 @@ function printConfig() {
 ║ PROVIDER_CHOICE_ACCESS: ${PROVIDER_CHOICE_ACCESS.padEnd(40)} ║
 ║ KIE_AI_ACCESS:         ${KIE_AI_ACCESS.padEnd(40)} ║
 ║ KIE ціна (Kling 3.0):  ${kiePricing.padEnd(40)} ║
-║ ADMIN_ID:              ${ADMIN_ID.padEnd(40)} ║
+║ ADMIN_IDS:             ${ADMIN_IDS.join(', ').padEnd(40)} ║
 ║ WHITELIST_USERS:       ${WHITELIST_USERS.length} користувачів       ${' '.repeat(29)} ║
 ║ BLACKLIST_USERS:       ${BLACKLIST_USERS.length} користувачів       ${' '.repeat(29)} ║
 ╚════════════════════════════════════════════════════════╝
@@ -171,6 +187,8 @@ module.exports = {
   WHITELIST_USERS,
   BLACKLIST_USERS,
   ADMIN_ID,
+  ADMIN_IDS,
+  getAdminIds,
 
   // Functions
   isAdmin,

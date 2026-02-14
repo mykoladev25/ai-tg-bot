@@ -9,6 +9,7 @@
 
 const aggregations = require('./aggregations');
 const { DEFAULT_ALERT_FAIL_RATE_PCT } = require('../config/constants');
+const { getAdminIds } = require('../config/access');
 
 // Пороги для алертів (з .env або дефолтні)
 const ALERT_COGS_USD_DAILY = parseFloat(process.env.ALERT_COGS_USD_DAILY) || 50;
@@ -33,8 +34,8 @@ function shouldSendAlert(type, dateKey) {
  * Check daily metrics and send alerts if thresholds exceeded
  */
 async function checkAndAlert(bot) {
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-  if (!adminId) {
+  const adminIds = getAdminIds();
+  if (adminIds.length === 0) {
     console.log('⚠️ [Alerts] ADMIN_TELEGRAM_ID not set, skipping alerts');
     return;
   }
@@ -95,12 +96,14 @@ async function checkAndAlert(bot) {
         alerts.join('\n\n') +
         `\n\n📊 <a href="${process.env.BOT_URL || 'https://neurolab.fun'}/admin/dashboard">View Dashboard</a>`;
 
-      await bot.telegram.sendMessage(adminId, message, {
-        parse_mode: 'HTML',
-        disable_web_page_preview: true
-      });
+      for (const adminId of adminIds) {
+        await bot.telegram.sendMessage(adminId, message, {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        });
+      }
 
-      console.log(`📢 [Alerts] Sent ${alerts.length} alert(s) to admin`);
+      console.log(`📢 [Alerts] Sent ${alerts.length} alert(s) to admin(s)`);
     } else {
       console.log('✅ [Alerts] All metrics within thresholds');
     }
@@ -116,8 +119,8 @@ async function checkAndAlert(bot) {
  * Generate daily report
  */
 async function generateDailyReport(bot) {
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-  if (!adminId) return;
+  const adminIds = getAdminIds();
+  if (adminIds.length === 0) return;
 
   try {
     // Yesterday's summary
@@ -171,10 +174,12 @@ async function generateDailyReport(bot) {
 
       `\n\n📊 <a href="${process.env.BOT_URL || 'https://neurolab.fun'}/admin/dashboard">Full Dashboard</a>`;
 
-    await bot.telegram.sendMessage(adminId, message, {
-      parse_mode: 'HTML',
-      disable_web_page_preview: true
-    });
+    for (const adminId of adminIds) {
+      await bot.telegram.sendMessage(adminId, message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      });
+    }
 
     console.log('📊 [Alerts] Daily report sent');
 

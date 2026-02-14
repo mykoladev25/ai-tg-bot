@@ -9,16 +9,15 @@ const axios = require('axios');
 
 const KIE_API_BASE = 'https://api.kie.ai/api/v1';
 const KIE_API_KEY = process.env.KIE_AI_API_KEY;
-const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
+const accessControl = require('../config/access');
 
 // ==================== HELPER FUNCTIONS ====================
 
 /**
- * Перевіряємо чи користувач є адміном
+ * Перевіряємо чи користувач є адміном (з config/access, підтримка кількох адмінів)
  */
 function isAdminUser(userId) {
-  if (!ADMIN_TELEGRAM_ID) return false;
-  return String(userId) === String(ADMIN_TELEGRAM_ID);
+  return accessControl.isAdmin(userId);
 }
 
 /**

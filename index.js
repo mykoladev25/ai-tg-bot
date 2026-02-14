@@ -37,6 +37,36 @@ const { TRIAL_TOKENS, WORST_CASE_TOKEN_USD } = require('./config/constants');
 const accessControl = require('./config/access');
 
 /**
+ * Список моделей дизайну з ефективною ціною для кнопок меню (KIE/Replicate за вибором юзера).
+ */
+function getDesignModelsWithEffectiveCost(userId) {
+  return models.design.models.map(m => ({
+    ...m,
+    cost: getEffectiveImageCost(userId, m, m.key)
+  }));
+}
+
+/** Моделі відео, що доступні тільки через KIE (Kling 3.0, Sora 2). */
+const KIE_ONLY_VIDEO_MODELS = ['kling_3', 'sora_2'];
+
+/**
+ * Чи може користувач бачити моделі "тільки KIE" (Kling 3.0, Sora 2).
+ */
+function canSeeKieOnlyVideoModels(userId) {
+  if (!accessControl.canUseKieAI(userId) || !kieAI.isKieAIEnabled) return false;
+  const choice = userProviderChoice.get(userId);
+  return choice !== 'replicate'; // показуємо при kie-ai або auto
+}
+
+/**
+ * Список відео-моделей для меню: Kling 3.0 та Sora 2 тільки для користувачів з доступом KIE.
+ */
+function getVideoModelsForUser(userId) {
+  if (canSeeKieOnlyVideoModels(userId)) return models.video.models;
+  return models.video.models.filter(m => !KIE_ONLY_VIDEO_MODELS.includes(m.key));
+}
+
+/**
  * Ціна за обраним провайдером: KIE → ціна KIE, Replicate → Replicate.
  * Якщо обрано KIE, але в KIE немає реалізації для моделі — ціна Replicate і запуск Replicate.
  */
@@ -621,9 +651,9 @@ async function sendFeedbackToAdmin(feedback, text, ctx, fileId = null) {
   feedback.message = text;
   feedback.timestamp = new Date();
 
-  // Відправляємо feedback адміну
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-  if (adminId) {
+  // Відправляємо feedback усім адмінам
+  const adminIds = accessControl.getAdminIds();
+  if (adminIds.length > 0) {
     // Формуємо рядок з username - показуємо тільки якщо він є
     const usernameDisplay = feedback.username && feedback.username !== 'unknown'
       ? `@${feedback.username}`
@@ -645,27 +675,27 @@ ${feedback.message}`;
     ]);
 
     try {
-      // Якщо є зображення/документ, пересилаємо його з текстом
-      if (fileId) {
-        if (ctx.message.photo) {
-          await bot.telegram.sendPhoto(adminId, fileId, {
-            caption: adminMessage,
+      for (const adminId of adminIds) {
+        if (fileId) {
+          if (ctx.message.photo) {
+            await bot.telegram.sendPhoto(adminId, fileId, {
+              caption: adminMessage,
+              parse_mode: 'HTML',
+              reply_markup: adminKeyboard.reply_markup
+            });
+          } else if (ctx.message.document) {
+            await bot.telegram.sendDocument(adminId, fileId, {
+              caption: adminMessage,
+              parse_mode: 'HTML',
+              reply_markup: adminKeyboard.reply_markup
+            });
+          }
+        } else {
+          await bot.telegram.sendMessage(adminId, adminMessage, {
             parse_mode: 'HTML',
-            reply_markup: adminKeyboard.reply_markup
-          });
-        } else if (ctx.message.document) {
-          await bot.telegram.sendDocument(adminId, fileId, {
-            caption: adminMessage,
-            parse_mode: 'HTML',
-            reply_markup: adminKeyboard.reply_markup
+            ...adminKeyboard
           });
         }
-      } else {
-        // Якщо немає зображення, просто надсилаємо текст
-        await bot.telegram.sendMessage(adminId, adminMessage, {
-          parse_mode: 'HTML',
-          ...adminKeyboard
-        });
       }
     } catch (error) {
       console.error('❌ Error sending feedback to admin:', error.message);
@@ -724,9 +754,7 @@ if (isDevelopment) {
   console.log('🛠️ Development mode - maintenance message enabled');
   
   bot.use(async (ctx, next) => {
-    const adminId = parseInt(process.env.ADMIN_TELEGRAM_ID || '0');
-    
-    if (ctx.from.id === adminId) {
+    if (accessControl.isAdmin(ctx.from.id)) {
       console.log(`✅ Admin ${ctx.from.id} bypassed maintenance`);
       return next();
     }
@@ -982,10 +1010,7 @@ bot.command('feedback', async (ctx) => {
 // ==================== ADMIN COMMANDS ====================
 
 bot.command('blocklist', async (ctx) => {
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-
-  // Тільки адмін має доступ
-  if (ctx.from.id.toString() !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
     return;
   }
@@ -1013,9 +1038,7 @@ bot.command('blocklist', async (ctx) => {
 
 // Перевірка цін KIE.AI (тільки для адміна)
 bot.command('kiepricing', async (ctx) => {
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-
-  if (ctx.from.id.toString() !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
     return;
   }
@@ -1084,9 +1107,7 @@ bot.command('kiepricing', async (ctx) => {
 
 // Форсувати оновлення цін (тільки для адміна)
 bot.command('kiepricingupdate', async (ctx) => {
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-
-  if (ctx.from.id.toString() !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
     return;
   }
@@ -1111,9 +1132,7 @@ bot.command('kiepricingupdate', async (ctx) => {
 
 // Детальний звіт про ціни (тільки для адміна)
 bot.command('kiepricingreport', async (ctx) => {
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-
-  if (ctx.from.id.toString() !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
     return;
   }
@@ -1189,9 +1208,7 @@ bot.command('kiepricingreport', async (ctx) => {
 
 // Порівняння цін для конкретної моделі (тільки для адміна)
 bot.command('kiecompare', async (ctx) => {
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-
-  if (ctx.from.id.toString() !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
     return;
   }
@@ -1279,11 +1296,9 @@ bot.command('kiecompare', async (ctx) => {
 });
 
 bot.command(/^unblock_(\d+)$/, async (ctx) => {
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
   const userId = parseInt(ctx.match[1]);
 
-  // Тільки адмін має доступ
-  if (ctx.from.id.toString() !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
     return;
   }
@@ -1325,11 +1340,11 @@ bot.command(/^unblock_(\d+)$/, async (ctx) => {
 // ==================== BROADCAST (ADMIN) ====================
 
 bot.command('broadcast', async (ctx) => {
-  const adminId = getAdminTelegramId();
-  if (!adminId || ctx.from.id !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
     return;
   }
+  const currentAdminId = ctx.from.id;
 
   const parts = ctx.message.text.trim().split(' ');
   const args = parts.slice(1);
@@ -1349,18 +1364,18 @@ bot.command('broadcast', async (ctx) => {
     ? `Priority IDs: [${priorityIds.join(', ')}]`
     : 'Priority IDs: Всім';
 
-  broadcastDrafts.delete(adminId);
-  broadcastStates.delete(adminId);
+  broadcastDrafts.delete(currentAdminId);
+  broadcastStates.delete(currentAdminId);
 
   if (inlineText) {
     await ctx.reply(priorityLabel);
     const draft = { type: 'text', text: inlineText, parseMode };
-    broadcastDrafts.set(adminId, draft);
+    broadcastDrafts.set(currentAdminId, draft);
     await sendBroadcastPreview(ctx, draft);
     return;
   }
 
-  broadcastStates.set(adminId, { step: 'awaiting_content', parseMode });
+  broadcastStates.set(currentAdminId, { step: 'awaiting_content', parseMode });
 
   const modeLabel = parseMode ? 'HTML' : 'без форматування';
   await ctx.reply(
@@ -1376,33 +1391,32 @@ bot.command('broadcast', async (ctx) => {
 });
 
 bot.command('broadcast_cancel', async (ctx) => {
-  const adminId = getAdminTelegramId();
-  if (!adminId || ctx.from.id !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
     return;
   }
-
-  broadcastStates.delete(adminId);
-  broadcastDrafts.delete(adminId);
+  const currentAdminId = ctx.from.id;
+  broadcastStates.delete(currentAdminId);
+  broadcastDrafts.delete(currentAdminId);
   await ctx.reply('✅ Розсилку скасовано.');
 });
 
 bot.action('broadcast_send', async (ctx) => {
   await ctx.answerCbQuery();
 
-  const adminId = getAdminTelegramId();
-  if (!adminId || ctx.from.id !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
     return;
   }
+  const currentAdminId = ctx.from.id;
 
-  const draft = broadcastDrafts.get(adminId);
+  const draft = broadcastDrafts.get(currentAdminId);
   if (!draft) {
     await ctx.reply('⚠️ Чернетку не знайдено. Запустіть /broadcast ще раз.');
     return;
   }
 
-  broadcastStates.delete(adminId);
+  broadcastStates.delete(currentAdminId);
 
   const priorityIds = getBroadcastPriorityIds();
   const priorityLabel = priorityIds.length ? `Priority IDs: [${priorityIds.join(', ')}]` : 'Priority IDs: Всім';
@@ -1410,7 +1424,7 @@ bot.action('broadcast_send', async (ctx) => {
 
   try {
     const stats = await broadcastPayload(draft);
-    broadcastDrafts.delete(adminId);
+    broadcastDrafts.delete(currentAdminId);
 
     await ctx.reply(
       `✅ Розсилка завершена:\n` +
@@ -1426,23 +1440,22 @@ bot.action('broadcast_send', async (ctx) => {
 bot.action('broadcast_cancel', async (ctx) => {
   await ctx.answerCbQuery();
 
-  const adminId = getAdminTelegramId();
-  if (!adminId || ctx.from.id !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
     return;
   }
-
-  broadcastStates.delete(adminId);
-  broadcastDrafts.delete(adminId);
+  const currentAdminId = ctx.from.id;
+  broadcastStates.delete(currentAdminId);
+  broadcastDrafts.delete(currentAdminId);
   await ctx.reply('✅ Розсилку скасовано.');
 });
 
 // Перехоплюємо контент для превʼю (тільки адмін)
 bot.on('message', async (ctx, next) => {
-  const adminId = getAdminTelegramId();
-  if (!adminId || ctx.from.id !== adminId) return next();
+  if (!accessControl.isAdmin(ctx.from.id)) return next();
+  const currentAdminId = ctx.from.id;
 
-  const state = broadcastStates.get(adminId);
+  const state = broadcastStates.get(currentAdminId);
   if (!state || state.step !== 'awaiting_content') return next();
 
   const text = ctx.message.text;
@@ -1477,8 +1490,8 @@ bot.on('message', async (ctx, next) => {
     return;
   }
 
-  broadcastDrafts.set(adminId, draft);
-  broadcastStates.delete(adminId);
+  broadcastDrafts.set(currentAdminId, draft);
+  broadcastStates.delete(currentAdminId);
 
   await sendBroadcastPreview(ctx, draft);
 });
@@ -1518,9 +1531,7 @@ bot.action(/^feedback_confirm_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   const userId = parseInt(ctx.match[1]);
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-
-  if (ctx.from.id.toString() !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.answerCbQuery('❌ Доступ заборонений', true);
     return;
   }
@@ -1560,9 +1571,7 @@ bot.action(/^feedback_decline_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   const userId = parseInt(ctx.match[1]);
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-
-  if (ctx.from.id.toString() !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.answerCbQuery('❌ Доступ заборонений', true);
     return;
   }
@@ -1602,16 +1611,13 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   const userId = parseInt(ctx.match[1]);
-  const adminId = process.env.ADMIN_TELEGRAM_ID;
-
-  if (ctx.from.id.toString() !== adminId) {
+  if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.answerCbQuery('❌ Доступ заборонений', true);
     return;
   }
 
-  // Перевіряємо що адмін не блокує себе
-  if (userId === parseInt(adminId)) {
-    await ctx.answerCbQuery('❌ Ви не можете заблокувати себе!', true);
+  if (accessControl.isAdmin(userId)) {
+    await ctx.answerCbQuery('❌ Не можна заблокувати адміна.', true);
     return;
   }
 
@@ -1641,7 +1647,7 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
     userId,
     username,
     firstName,
-    parseInt(adminId),
+    ctx.from.id,
     'Spam or inappropriate behavior',
     'Blocked via feedback system'
   );
@@ -1720,14 +1726,14 @@ bot.hears('🧠 Помічники', async (ctx) => {
 bot.hears('🎬 Відео', async (ctx) => {
   await ctx.reply(
     '🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇',
-    keyboard.createInlineMenu(models.video.models, 1)
+    keyboard.createInlineMenu(getVideoModelsForUser(ctx.from.id), 1)
   );
 });
 
 bot.hears('🖼️ Зображення', async (ctx) => {
   await ctx.reply(
     '🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇',
-    keyboard.createInlineMenu(models.design.models, 1)
+    keyboard.createInlineMenu(getDesignModelsWithEffectiveCost(ctx.from.id), 1)
   );
 });
 
@@ -2190,9 +2196,10 @@ const CUTE_DETAILS = [
 bot.action('creative_love_is', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
+  const effectiveCost2K = getEffectiveImageCost(userId, nanoBanana2kModel, 'nano_banana_2k');
 
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_2K))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST_2K);
+  if (!(await userBalance.hasTokens(userId, effectiveCost2K))) {
+    await showInsufficientTokens(ctx, effectiveCost2K);
     return;
   }
 
@@ -2222,7 +2229,7 @@ bot.action('creative_love_is', async (ctx) => {
   await ctx.reply(
       `💌 <b>Готовий креатив: День Закоханих "Love is..."</b>\n\n` +
       `📸 <b>Крок 1/1:</b> Надішліть фото пари\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST_2K}⚡\n` +
+      `💰 <b>Вартість:</b> ${effectiveCost2K}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
       `👉 Надішліть фото пари тепер`,
       {
@@ -2236,9 +2243,10 @@ bot.action('creative_love_is', async (ctx) => {
 bot.action('creative_hearts', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
+  const effectiveCost4K = getEffectiveImageCost(userId, seedream4kModel, 'seedream_4k');
 
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_SEEDREAM_4K))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST_SEEDREAM_4K);
+  if (!(await userBalance.hasTokens(userId, effectiveCost4K))) {
+    await showInsufficientTokens(ctx, effectiveCost4K);
     return;
   }
 
@@ -2253,7 +2261,7 @@ bot.action('creative_hearts', async (ctx) => {
   await ctx.reply(
       `❤️ <b>Готовий креатив: Льодяник</b>\n\n` +
       `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST_SEEDREAM_4K}⚡\n` +
+      `💰 <b>Вартість:</b> ${effectiveCost4K}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
       `👉 Надішліть своє селфі зараз`,
       {
@@ -2267,9 +2275,10 @@ bot.action('creative_hearts', async (ctx) => {
 bot.action('creative_porcelain_figure', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
+  const effectiveCost4K = getEffectiveImageCost(userId, seedream4kModel, 'seedream_4k');
 
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_SEEDREAM_4K))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST_SEEDREAM_4K);
+  if (!(await userBalance.hasTokens(userId, effectiveCost4K))) {
+    await showInsufficientTokens(ctx, effectiveCost4K);
     return;
   }
 
@@ -2284,7 +2293,7 @@ bot.action('creative_porcelain_figure', async (ctx) => {
   await ctx.reply(
       `✨ <b>Готовий креатив: Порцелянова фігурка</b>\n\n` +
       `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST_SEEDREAM_4K}⚡\n` +
+      `💰 <b>Вартість:</b> ${effectiveCost4K}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
       `👉 Надішліть своє селфі зараз`,
       {
@@ -2298,9 +2307,10 @@ bot.action('creative_porcelain_figure', async (ctx) => {
 bot.action('creative_kittens', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
+  const effectiveCost4K = getEffectiveImageCost(userId, seedream4kModel, 'seedream_4k');
 
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_SEEDREAM_4K))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST_SEEDREAM_4K);
+  if (!(await userBalance.hasTokens(userId, effectiveCost4K))) {
+    await showInsufficientTokens(ctx, effectiveCost4K);
     return;
   }
 
@@ -2315,7 +2325,7 @@ bot.action('creative_kittens', async (ctx) => {
   await ctx.reply(
       `🐱 <b>Готовий креатив: Котики</b>\n\n` +
       `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST_SEEDREAM_4K}⚡\n` +
+      `💰 <b>Вартість:</b> ${effectiveCost4K}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
       `👉 Надішліть своє селфі зараз`,
       {
@@ -2329,9 +2339,10 @@ bot.action('creative_kittens', async (ctx) => {
 bot.action('creative_underwater_macro', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
+  const effectiveCost4K = getEffectiveImageCost(userId, seedream4kModel, 'seedream_4k');
 
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_SEEDREAM_4K))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST_SEEDREAM_4K);
+  if (!(await userBalance.hasTokens(userId, effectiveCost4K))) {
+    await showInsufficientTokens(ctx, effectiveCost4K);
     return;
   }
 
@@ -2346,7 +2357,7 @@ bot.action('creative_underwater_macro', async (ctx) => {
   await ctx.reply(
       `🌊 <b>Готовий креатив: Підводний макро-портрет</b>\n\n` +
       `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST_SEEDREAM_4K}⚡\n` +
+      `💰 <b>Вартість:</b> ${effectiveCost4K}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
       `👉 Надішліть своє селфі зараз`,
       {
@@ -2360,9 +2371,10 @@ bot.action('creative_underwater_macro', async (ctx) => {
 bot.action('creative_bridgerton', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
+  const effectiveCost4K = getEffectiveImageCost(userId, seedream4kModel, 'seedream_4k');
 
-  if (!(await userBalance.hasTokens(userId, CREATIVE_COST_SEEDREAM_4K))) {
-    await showInsufficientTokens(ctx, CREATIVE_COST_SEEDREAM_4K);
+  if (!(await userBalance.hasTokens(userId, effectiveCost4K))) {
+    await showInsufficientTokens(ctx, effectiveCost4K);
     return;
   }
 
@@ -2379,7 +2391,7 @@ bot.action('creative_bridgerton', async (ctx) => {
   await ctx.reply(
       `👑 <b>Готовий креатив: Bridgerton</b>\n\n` +
       `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
-      `💰 <b>Вартість:</b> ${CREATIVE_COST_SEEDREAM_4K}⚡\n` +
+      `💰 <b>Вартість:</b> ${effectiveCost4K}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
       `👉 Надішліть своє селфі зараз`,
       {
@@ -2574,9 +2586,7 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
     return true;
   }
 
-  const creativeCost = creativeType === 'love_is'
-    ? CREATIVE_COST_2K
-  : (creativeType === 'hearts' || creativeType === 'bridgerton' || creativeType === 'porcelain_figure' || creativeType === 'kittens' || creativeType === 'underwater_macro' ? CREATIVE_COST_SEEDREAM_4K : CREATIVE_COST);
+  const creativeCost = getEffectiveImageCost(userId, model, modelKey);
 
   const statusMsg = await ctx.reply(
       `🎨 <b>Генерую ${creativeNames[creativeType]}...</b>\n\n` +
@@ -2605,8 +2615,8 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
       const userChosenProvider = userProviderChoice.get(userId);
       const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 
-      // Логіка: провайдер за вибором; якщо KIE без реалізації — Replicate
-      const creativeModelKey = 'seedream_4k';
+      // Логіка: провайдер за вибором; love_is → nano_banana_2k, інші → seedream_4k
+      const creativeModelKey = modelKey; // 'nano_banana_2k' | 'seedream_4k'
       let useKieAI = false;
       if (userChosenProvider === 'kie-ai') {
         useKieAI = kieAI.isKieAIImplemented(creativeModelKey);
@@ -3091,6 +3101,16 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
   }
 
   await ctx.answerCbQuery();
+
+  // Kling 3.0 та Sora 2 — тільки при доступі KIE (не показуємо в меню при Replicate, але перевіряємо і при прямому кліку)
+  if (KIE_ONLY_VIDEO_MODELS.includes(modelKey) && !canSeeKieOnlyVideoModels(ctx.from.id)) {
+    await ctx.reply(
+      '🔒 <b>Kling 3.0 / Sora 2</b> доступні тільки при виборі провайдера <b>KIE.AI</b>.\n\n' +
+      '👤 Профіль → Вибір провайдера → 🔵 KIE.AI',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
 
   // ✅ TRIAL CHECK: Перевірка обмежень для безкоштовних користувачів
   const trialCheck = await checkTrialRestrictions(ctx.from.id, modelKey);
@@ -5737,12 +5757,12 @@ bot.action('main_menu', async (ctx) => {
 
 bot.action('design_menu', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.reply('🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇', keyboard.createInlineMenu(models.design.models, 1));
+  await ctx.reply('🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇', keyboard.createInlineMenu(getDesignModelsWithEffectiveCost(ctx.from.id), 1));
 });
 
 bot.action('video_menu', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.reply('🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇', keyboard.createInlineMenu(models.video.models, 1));
+  await ctx.reply('🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇', keyboard.createInlineMenu(getVideoModelsForUser(ctx.from.id), 1));
 });
 
 bot.action('profile_menu', async (ctx) => {
@@ -6852,7 +6872,7 @@ bot.on('photo', async (ctx) => {
     await ctx.reply(
       '❌ Спочатку виберіть модель для обробки фото.\n\n' +
       '🎨 Оберіть один з розділів:',
-      keyboard.createInlineMenu(models.design.models, 1)
+      keyboard.createInlineMenu(getDesignModelsWithEffectiveCost(ctx.from.id), 1)
     );
     return;
   }
@@ -7905,8 +7925,9 @@ async function showInsufficientTokens(ctx, required) {
 }
 
 function getAdminTelegramId() {
-  const adminId = parseInt(process.env.ADMIN_TELEGRAM_ID || '0');
-  return Number.isFinite(adminId) ? adminId : 0;
+  const first = accessControl.ADMIN_ID;
+  const id = parseInt(first || '0');
+  return Number.isFinite(id) ? id : 0;
 }
 
 function getBroadcastPriorityIds() {
@@ -8132,9 +8153,10 @@ async function startBot() {
           const stats = await broadcastMessage(message, 'HTML');
           console.log(`📊 Broadcast stats: ${stats.success} успішно, ${stats.failed} помилок`);
           
-          const adminId = parseInt(process.env.ADMIN_USER_ID || '0');
-          if (adminId) {
-            await bot.telegram.sendMessage(adminId, `📊 Startup broadcast complete:\n✅ Sent: ${stats.success}\n❌ Failed: ${stats.failed}`);
+          const adminIds = accessControl.getAdminIds();
+          const report = `📊 Startup broadcast complete:\n✅ Sent: ${stats.success}\n❌ Failed: ${stats.failed}`;
+          for (const adminId of adminIds) {
+            await bot.telegram.sendMessage(adminId, report);
           }
         } catch (error) {
           console.error('Startup broadcast failed:', error);

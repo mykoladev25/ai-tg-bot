@@ -2,13 +2,14 @@
  * Відправка повідомлень адміну про помилки
  */
 
-const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
+const { getAdminIds } = require('../config/access');
 
 /**
- * Відправити помилку адміну
+ * Відправити помилку адмінам (усім з ADMIN_TELEGRAM_ID, ADMIN_TELEGRAM_ID_2, ...)
  */
 async function notifyAdmin(bot, error, context = {}) {
-    if (!ADMIN_TELEGRAM_ID) {
+    const adminIds = getAdminIds();
+    if (adminIds.length === 0) {
         console.error('⚠️ ADMIN_TELEGRAM_ID not configured');
         return;
     }
@@ -50,9 +51,11 @@ async function notifyAdmin(bot, error, context = {}) {
             message = message.substring(0, 3900) + '\n\n... (обрізано)';
         }
 
-        await bot.telegram.sendMessage(ADMIN_TELEGRAM_ID, message, {
-            parse_mode: 'HTML'
-        });
+        for (const adminId of adminIds) {
+            await bot.telegram.sendMessage(adminId, message, {
+                parse_mode: 'HTML'
+            });
+        }
 
     } catch (notifyError) {
         console.error('Failed to notify admin:', notifyError);
@@ -60,17 +63,18 @@ async function notifyAdmin(bot, error, context = {}) {
 }
 
 /**
- * Відправити інфо адміну
+ * Відправити інфо усім адмінам
  */
 async function notifyAdminInfo(bot, message) {
-    if (!ADMIN_TELEGRAM_ID) {
-        return;
-    }
+    const adminIds = getAdminIds();
+    if (adminIds.length === 0) return;
 
     try {
-        await bot.telegram.sendMessage(ADMIN_TELEGRAM_ID, message, {
-            parse_mode: 'HTML'
-        });
+        for (const adminId of adminIds) {
+            await bot.telegram.sendMessage(adminId, message, {
+                parse_mode: 'HTML'
+            });
+        }
     } catch (error) {
         console.error('Failed to notify admin:', error);
     }
