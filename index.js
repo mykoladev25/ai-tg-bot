@@ -3778,6 +3778,35 @@ bot.action(/^kling_3_aspect_(.+)$/, async (ctx) => {
   const costWithAudio = state.duration * costPerSecAud;
   const costNoAudio = state.duration * costPerSecNo;
 
+  // Multi-shot: API вимагає sound 'on', не питаємо — одразу далі з generateAudio: true
+  if (state.multiShots) {
+    userState.set(userId, {
+      ...state,
+      aspectRatio,
+      generateAudio: true,
+      kling3Cost: costWithAudio,
+      step: 'ask_start_image'
+    });
+    await ctx.reply(
+      `🎭 <b>Kling 3.0 Pro 💎</b>\n\n` +
+      `📐 Пропорції: <b>${aspectRatio}</b>\n\n` +
+      `🔊 Для кількох сцен звук завжди увімкнено.\n` +
+      `💰 Вартість: <b>${costWithAudio}⚡</b>\n\n` +
+      `🖼️ <b>Крок 5: Перший кадр</b> (оберіть кнопку):\n\n` +
+      `• <b>Завантажу зображення</b> — фото стане першим кадром, AI його анімує.\n` +
+      `• <b>Без зображення</b> — відео тільки за текстовим описом.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🖼️ Завантажу зображення', 'kling_3_add_start_image')],
+          [Markup.button.callback('⏭️ Без зображення', 'kling_3_skip_start_image')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
   userState.set(userId, { ...state, aspectRatio, step: 'select_audio' });
 
   await ctx.reply(

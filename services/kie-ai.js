@@ -776,10 +776,9 @@ async function generateKling3VideoKieAI(options = {}) {
       hasImages: imageUrls?.length || 0
     });
 
-    // ✅ Структура за документацією KIE.AI
-    // https://docs.kie.ai/market/kling/kling-3.0
+    // ✅ Структура за документацією KIE.AI (sound — рядок 'on'|'off'; при multi_shots обов'язково 'on')
     const input = {
-      sound: sound,
+      sound: multiShots ? 'on' : (sound ? 'on' : 'off'),
       duration: String(duration),
       mode: mode,
       multi_shots: multiShots
