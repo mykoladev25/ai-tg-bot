@@ -1,0 +1,387 @@
+/**
+ * Автоматичне оновлення цін з KIE.AI API
+ * Запускається раз на день через cron
+ */
+
+const axios = require('axios');
+const fs = require('fs').promises;
+const path = require('path');
+
+const KIE_PRICING_API = 'https://api.kie.ai/client/v1/model-pricing/page';
+const CACHE_FILE = path.join(__dirname, '../config/kie-ai-pricing-cache.json');
+const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // 24 години
+
+/**
+ * Отримати ціни з KIE.AI API
+ */
+async function fetchKieAIPricing() {
+  try {
+    console.log('📊 Fetching pricing from KIE.AI API...');
+
+    const types = ['', 'image', 'video', 'music', 'chat'];
+    const allPricing = {};
+
+    for (const type of types) {
+      let currentPage = 1;
+      let totalPages = 1;
+      const records = [];
+
+      do {
+        const response = await axios.post(KIE_PRICING_API, {
+          pageNum: currentPage,
+          pageSize: 100,
+          modelDescription: '',
+          interfaceType: type
+        });
+
+        const data = response.data.data;
+        records.push(...data.records);
+        totalPages = data.pages;
+        currentPage++;
+
+        await new Promise(resolve => setTimeout(resolve, 100)); // Rate limit
+      } while (currentPage <= totalPages);
+
+      if (type === '') {
+        allPricing.all = records;
+      } else {
+        allPricing[type] = records;
+      }
+
+      console.log(`  ✅ ${type || 'all'}: ${records.length} models`);
+    }
+
+    return allPricing;
+
+  } catch (error) {
+    console.error('❌ Failed to fetch KIE.AI pricing:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Парсити ціни для наших моделей
+ */
+function parseOurModels(pricing) {
+  const ourModels = {
+    // IMAGE
+    nano_banana_2k: findModel(pricing.image, 'nano banana pro', '1/2K'),
+    nano_banana_4k: findModel(pricing.image, 'nano banana pro', '4K'),
+    seedream_4k: findModel(pricing.image, 'seedream', '4K'),
+    stable_diffusion: findModel(pricing.image, 'stable diffusion', '3.5'),
+
+    // VIDEO
+    kling_2_6: findModels(pricing.video, 'kling 2.6'),
+    kling_3_0: findModels(pricing.video, 'Kling 3.0'),
+    kling_motion: findModels(pricing.video, 'motion control'),
+    veo: findModels(pricing.video, 'veo'),
+    sora_2: findModels(pricing.video, 'sora 2'),
+    runway: findModels(pricing.video, 'runway')
+  };
+
+  return ourModels;
+}
+
+/**
+ * Знайти модель за назвою
+ */
+function findModel(records, ...keywords) {
+  return records.find(r =>
+    keywords.every(kw =>
+      r.modelDescription.toLowerCase().includes(kw.toLowerCase())
+    )
+  );
+}
+
+/**
+ * Знайти всі варіанти моделі
+ */
+function findModels(records, keyword) {
+  return records.filter(r =>
+    r.modelDescription.toLowerCase().includes(keyword.toLowerCase())
+  );
+}
+
+/**
+ * Зберегти кеш
+ */
+async function savePricingCache(pricing) {
+  const cache = {
+    timestamp: Date.now(),
+    lastUpdate: new Date().toISOString(),
+    pricing,
+    parsed: parseOurModels(pricing)
+  };
+
+  await fs.writeFile(CACHE_FILE, JSON.stringify(cache, null, 2), 'utf-8');
+  console.log(`💾 Pricing cache saved to: ${CACHE_FILE}`);
+
+  return cache;
+}
+
+/**
+ * Завантажити кеш
+ */
+async function loadPricingCache() {
+  try {
+    const data = await fs.readFile(CACHE_FILE, 'utf-8');
+    const cache = JSON.parse(data);
+
+    const age = Date.now() - cache.timestamp;
+    const hours = Math.floor(age / (60 * 60 * 1000));
+
+    console.log(`📦 Loaded pricing cache (${hours}h old)`);
+
+    return cache;
+  } catch (error) {
+    console.log('⚠️ No pricing cache found');
+    return null;
+  }
+}
+
+/**
+ * Оновити ціни якщо потрібно
+ */
+async function updatePricingIfNeeded() {
+  const cache = await loadPricingCache();
+
+  // Перевіряємо чи потрібно оновлювати
+  if (cache) {
+    const age = Date.now() - cache.timestamp;
+    if (age < UPDATE_INTERVAL) {
+      const hoursLeft = Math.ceil((UPDATE_INTERVAL - age) / (60 * 60 * 1000));
+      console.log(`✅ Pricing is fresh (next update in ${hoursLeft}h)`);
+      return cache;
+    }
+  }
+
+  // Оновлюємо
+  console.log('🔄 Updating pricing from KIE.AI...');
+  const pricing = await fetchKieAIPricing();
+  return await savePricingCache(pricing);
+}
+
+/**
+ * Отримати актуальні ціни
+ */
+async function getCurrentPricing() {
+  let cache = await loadPricingCache();
+
+  if (!cache) {
+    console.log('⚠️ No cache, fetching pricing...');
+    const pricing = await fetchKieAIPricing();
+    cache = await savePricingCache(pricing);
+  }
+
+  return cache;
+}
+
+/**
+ * Форсувати оновлення
+ */
+async function forceUpdate() {
+  console.log('🔄 Force updating pricing from KIE.AI...');
+  const pricing = await fetchKieAIPricing();
+  return await savePricingCache(pricing);
+}
+
+/**
+ * Отримати ціну для моделі з актуального кешу
+ */
+function getModelPrice(cache, modelKey, options = {}) {
+  const { duration, audio, resolution } = options;
+
+  try {
+    const parsed = cache.parsed;
+
+    switch(modelKey) {
+      case 'nano_banana_2k':
+        return parsed.nano_banana_2k?.usdPrice || '0.09';
+
+      case 'nano_banana_4k':
+        return parsed.nano_banana_4k?.usdPrice || '0.12';
+
+      case 'kling_v2_6':
+        const kling26 = parsed.kling_2_6?.find(m => {
+          const desc = m.modelDescription.toLowerCase();
+          const hasDuration = desc.includes(`${duration}s`) || desc.includes(`${duration}.0s`);
+          const hasAudio = audio ? desc.includes('with audio') : desc.includes('without audio');
+          return hasDuration && hasAudio;
+        });
+        return kling26?.usdPrice || null;
+
+      case 'kling_3_0':
+        const kling30 = parsed.kling_3_0?.find(m => {
+          const desc = m.modelDescription.toLowerCase();
+          const hasRes = desc.includes(resolution?.toLowerCase() || '1080p');
+          const hasAudio = audio ? desc.includes('with audio') : desc.includes('without audio');
+          return hasRes && hasAudio;
+        });
+        return kling30 ? parseFloat(kling30.usdPrice) : null;
+
+      default:
+        return null;
+    }
+  } catch (error) {
+    console.error(`Error getting price for ${modelKey}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Той самий множник що в config/models.js (30% прибутку).
+ * Вартість у токенах рахується в config/kie-ai-models.js (usdToTokens, getKling3TokenCostPerSecond).
+ */
+const kieAiModels = require('../config/kie-ai-models');
+const TOKEN_USD = kieAiModels.TOKEN_USD;
+const PRICING_MULTIPLIER = kieAiModels.PRICING_MULTIPLIER;
+
+/**
+ * Отримати актуальну ціну для моделі в USD (синхронна версія для швидкого доступу)
+ */
+function getModelPriceSync(modelKey, options = {}) {
+  try {
+    const fs = require('fs');
+    const cacheData = fs.readFileSync(CACHE_FILE, 'utf-8');
+    const cache = JSON.parse(cacheData);
+    return getModelPrice(cache, modelKey, options);
+  } catch (error) {
+    // Якщо кеш недоступний - повертаємо fallback ціни
+    console.warn(`⚠️ KIE.AI pricing cache unavailable, using fallback prices`);
+    return null;
+  }
+}
+
+/**
+ * Вартість Kling 3.0 у токенах за секунду. USD беруться з кешу (якщо є), переведення в токени — у kie-ai-models.js.
+ * @param {Object} options - { mode: 'pro'|'std' }
+ * @returns {{ costPerSecondAudio: number, costPerSecondNoAudio: number } | null}
+ */
+function getKling3TokenCostPerSecondSync(options = {}) {
+  const { mode = 'pro' } = options;
+  const resolution = mode === 'pro' ? '1080p' : '720p';
+  try {
+    const usdAudio = getModelPriceSync('kling_3_0', { resolution, audio: true });
+    const usdNoAudio = getModelPriceSync('kling_3_0', { resolution, audio: false });
+    const usdFromCache = (usdAudio != null || usdNoAudio != null)
+      ? { costPerSecondAudio: usdAudio ?? null, costPerSecondNoAudio: usdNoAudio ?? null }
+      : null;
+    return kieAiModels.getKling3TokenCostPerSecond.call(kieAiModels, mode, usdFromCache);
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Логувати порівняння ціни KIE.AI vs Replicate
+ */
+async function logPriceComparison(modelKey, options = {}) {
+  try {
+    const cache = await getCurrentPricing();
+    const kiePrice = getModelPrice(cache, modelKey, options);
+
+    if (kiePrice) {
+      console.log(`💰 KIE.AI price for ${modelKey}: $${kiePrice}`);
+      return parseFloat(kiePrice);
+    }
+
+    return null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Показати звіт про ціни
+ */
+async function showPricingReport() {
+  const cache = await getCurrentPricing();
+  const parsed = cache.parsed;
+
+  console.log('\n📊 KIE.AI Pricing Report');
+  console.log('='.repeat(80));
+  console.log(`Last update: ${cache.lastUpdate}`);
+  console.log('');
+
+  // IMAGE
+  console.log('🎨 IMAGE MODELS:');
+  if (parsed.nano_banana_2k) {
+    console.log(`  Nano Banana 2K: ${parsed.nano_banana_2k.creditPrice} credits = $${parsed.nano_banana_2k.usdPrice}`);
+  }
+  if (parsed.nano_banana_4k) {
+    console.log(`  Nano Banana 4K: ${parsed.nano_banana_4k.creditPrice} credits = $${parsed.nano_banana_4k.usdPrice}`);
+  }
+  console.log('');
+
+  // VIDEO
+  console.log('🎬 VIDEO MODELS:');
+  if (parsed.kling_2_6?.length) {
+    console.log(`  Kling 2.6: ${parsed.kling_2_6.length} variants`);
+    parsed.kling_2_6.forEach(m => {
+      console.log(`    - ${m.modelDescription}: ${m.creditPrice} credits = $${m.usdPrice}`);
+    });
+  }
+  if (parsed.kling_3_0?.length) {
+    console.log(`  Kling 3.0: ${parsed.kling_3_0.length} variants`);
+    parsed.kling_3_0.forEach(m => {
+      console.log(`    - ${m.modelDescription}: ${m.creditPrice} credits = $${m.usdPrice}`);
+    });
+  }
+  console.log('');
+
+  console.log('='.repeat(80));
+}
+
+module.exports = {
+  fetchKieAIPricing,
+  updatePricingIfNeeded,
+  getCurrentPricing,
+  forceUpdate,
+  getModelPrice,
+  getModelPriceSync,
+  getKling3TokenCostPerSecondSync,
+  logPriceComparison,
+  showPricingReport,
+  CACHE_FILE,
+  PRICING_MULTIPLIER,
+  TOKEN_USD
+};
+
+// CLI команди
+if (require.main === module) {
+  const command = process.argv[2];
+
+  (async () => {
+    try {
+      switch(command) {
+        case 'fetch':
+          await fetchKieAIPricing();
+          break;
+
+        case 'update':
+          await forceUpdate();
+          console.log('✅ Pricing updated');
+          break;
+
+        case 'report':
+          await showPricingReport();
+          break;
+
+        case 'check':
+          await updatePricingIfNeeded();
+          break;
+
+        default:
+          console.log('Usage:');
+          console.log('  node services/kie-pricing-sync.js fetch   - Fetch pricing');
+          console.log('  node services/kie-pricing-sync.js update  - Force update');
+          console.log('  node services/kie-pricing-sync.js report  - Show report');
+          console.log('  node services/kie-pricing-sync.js check   - Update if needed');
+      }
+    } catch (error) {
+      console.error('❌ Error:', error.message);
+      process.exit(1);
+    }
+  })();
+}
+

@@ -10,6 +10,7 @@ const claude = require('./services/claude');
 const midjourney = require('./services/midjourney');
 const replicate = require('./services/replicate');
 const kieAI = require('./services/kie-ai');
+const kiePricingSync = require('./services/kie-pricing-sync');
 const payment = require('./services/payment');
 const exchangeRate = require('./services/exchangeRate');
 
@@ -490,6 +491,11 @@ bot.on('callback_query', async (ctx, next) => {
     return next();
   }
 
+  // ✅ Дозволяємо kling_3 state
+  if (state?.action === 'kling_3_generation') {
+    return next();
+  }
+
   userCurrentModel.delete(userId);
   userState.delete(userId);
   
@@ -712,10 +718,10 @@ const INSTRUCTION_HTML = `
 - Очікуйте результат <i>(~20–60 сек)</i>
 
 <b>3️⃣ Генерація відео</b>
-- Оберіть модель (<i>Kling, Veo, Runway тощо</i>)
-- Налаштуйте параметри (тривалість, пропорції)
-- Надішліть промпт або фото
-- Відео буде готове <i>за 1–5 хвилин</i>
+- Оберіть модель (<i>Kling, Kling 3.0, Veo, Runway тощо</i>).
+- <b>Kling 3.0</b>: після вибору моделі з’явиться покрокова підказка — режим якості, тривалість, формат відео, звук, опційно фото як перший кадр, потім текстовий опис відео. Просто йдіть кроками і вводьте те, що просить бот.
+- Інші моделі: налаштуйте параметри та надішліть опис або фото.
+- Відео буде готове <i>за 1–5 хвилин</i>.
 
 💰 <b>Токени ⚡</b>
 - <b>Кожна генерація списує токени</b>
@@ -944,7 +950,7 @@ bot.command('blocklist', async (ctx) => {
     return;
   }
 
-  let message = `🚫 <b>Список заблокованих користувачів</b> (${blockedUsers.length})\n\n`;
+  let message = `🚫 <b>Список забло��ованих користувачів</b> (${blockedUsers.length})\n\n`;
 
   for (let index = 0; index < blockedUsers.length; index++) {
     const user = blockedUsers[index];
@@ -956,6 +962,273 @@ bot.command('blocklist', async (ctx) => {
   }
 
   await ctx.reply(message, { parse_mode: 'HTML' });
+});
+
+// Перевірка цін KIE.AI (тільки для адміна)
+bot.command('kiepricing', async (ctx) => {
+  const adminId = process.env.ADMIN_TELEGRAM_ID;
+
+  if (ctx.from.id.toString() !== adminId) {
+    await ctx.reply('❌ Доступ заборонений');
+    return;
+  }
+
+  try {
+    const statusMsg = await ctx.reply('⏳ Перевіряю ціни KIE.AI...');
+
+    const cache = await kiePricingSync.getCurrentPricing();
+    const parsed = cache.parsed;
+
+    const age = Date.now() - cache.timestamp;
+    const hours = Math.floor(age / (60 * 60 * 1000));
+
+    let message = `💰 <b>KIE.AI Ціни</b>\n\n`;
+    message += `🕐 Оновлено: ${hours}h тому\n`;
+    message += `📅 ${cache.lastUpdate}\n\n`;
+
+    // IMAGE
+    message += `🎨 <b>ЗОБРАЖЕННЯ:</b>\n`;
+    if (parsed.nano_banana_2k) {
+      message += `  🍌 Nano 2K: $${parsed.nano_banana_2k.usdPrice} (${parsed.nano_banana_2k.creditPrice} cr)\n`;
+    }
+    if (parsed.nano_banana_4k) {
+      message += `  🍌🍌 Nano 4K: $${parsed.nano_banana_4k.usdPrice} (${parsed.nano_banana_4k.creditPrice} cr)\n`;
+    }
+    message += `\n`;
+
+    // VIDEO
+    message += `🎬 <b>ВІДЕО:</b>\n`;
+    if (parsed.kling_2_6?.length) {
+      message += `  Kling 2.6: ${parsed.kling_2_6.length} варіантів\n`;
+      parsed.kling_2_6.slice(0, 2).forEach(m => {
+        const desc = m.modelDescription.replace('kling 2.6, ', '').substring(0, 30);
+        message += `    • ${desc}: $${m.usdPrice}\n`;
+      });
+    }
+    if (parsed.kling_3_0?.length) {
+      message += `  Kling 3.0: ${parsed.kling_3_0.length} варіантів\n`;
+    }
+    if (parsed.sora_2?.length) {
+      message += `  Sora 2: ${parsed.sora_2.length} варіантів\n`;
+      const sora = parsed.sora_2[0];
+      if (sora) {
+        message += `    • ${sora.modelDescription.substring(0, 30)}: $${sora.usdPrice}\n`;
+      }
+    }
+    message += `\n`;
+
+    message += `💡 Команди:\n`;
+    message += `/kiepricingupdate - оновити ціни\n`;
+    message += `/kiepricingreport - детальний звіт`;
+
+    await ctx.telegram.editMessageText(
+      statusMsg.chat.id,
+      statusMsg.message_id,
+      null,
+      message,
+      { parse_mode: 'HTML' }
+    );
+
+  } catch (error) {
+    console.error('Error in /kiepricing:', error);
+    await ctx.reply(`❌ Помилка: ${error.message}`);
+  }
+});
+
+// Форсувати оновлення цін (тільки для адміна)
+bot.command('kiepricingupdate', async (ctx) => {
+  const adminId = process.env.ADMIN_TELEGRAM_ID;
+
+  if (ctx.from.id.toString() !== adminId) {
+    await ctx.reply('❌ Доступ заборонений');
+    return;
+  }
+
+  try {
+    const statusMsg = await ctx.reply('⏳ Оновлюю ціни з KIE.AI API...');
+
+    await kiePricingSync.forceUpdate();
+
+    await ctx.telegram.editMessageText(
+      statusMsg.chat.id,
+      statusMsg.message_id,
+      null,
+      '✅ Ціни KIE.AI успішно оновлені!\n\n/kiepricing - переглянути ціни'
+    );
+
+  } catch (error) {
+    console.error('Error in /kiepricingupdate:', error);
+    await ctx.reply(`❌ Помилка оновлення: ${error.message}`);
+  }
+});
+
+// Детальний звіт про ціни (тільки для адміна)
+bot.command('kiepricingreport', async (ctx) => {
+  const adminId = process.env.ADMIN_TELEGRAM_ID;
+
+  if (ctx.from.id.toString() !== adminId) {
+    await ctx.reply('❌ Доступ заборонений');
+    return;
+  }
+
+  try {
+    const statusMsg = await ctx.reply('⏳ Генерую звіт...');
+
+    const cache = await kiePricingSync.getCurrentPricing();
+    const parsed = cache.parsed;
+
+    let messages = [];
+    let currentMsg = `💰 <b>KIE.AI Pricing Report</b>\n`;
+    currentMsg += `📅 ${cache.lastUpdate}\n\n`;
+
+    // Kling 2.6
+    if (parsed.kling_2_6?.length) {
+      currentMsg += `🎬 <b>Kling 2.6 (${parsed.kling_2_6.length} варіантів):</b>\n`;
+      parsed.kling_2_6.forEach(m => {
+        const desc = m.modelDescription.replace('kling 2.6, ', '');
+        const line = `  • ${desc}\n    $${m.usdPrice} (${m.creditPrice} cr)\n`;
+        if ((currentMsg + line).length > 4000) {
+          messages.push(currentMsg);
+          currentMsg = '';
+        }
+        currentMsg += line;
+      });
+      currentMsg += `\n`;
+    }
+
+    // Kling 3.0
+    if (parsed.kling_3_0?.length) {
+      currentMsg += `🚀 <b>Kling 3.0 (${parsed.kling_3_0.length} варіантів):</b>\n`;
+      parsed.kling_3_0.forEach(m => {
+        const desc = m.modelDescription.replace('Kling 3.0, ', '');
+        const line = `  • ${desc}\n    $${m.usdPrice}/sec (${m.creditPrice} cr/sec)\n`;
+        if ((currentMsg + line).length > 4000) {
+          messages.push(currentMsg);
+          currentMsg = '';
+        }
+        currentMsg += line;
+      });
+      currentMsg += `\n`;
+    }
+
+    // Sora 2
+    if (parsed.sora_2?.length) {
+      currentMsg += `🔥 <b>OpenAI Sora 2 (${parsed.sora_2.length} варіантів):</b>\n`;
+      parsed.sora_2.forEach(m => {
+        const desc = m.modelDescription.replace('Open AI sora 2, ', '');
+        const discount = m.discountRate ? ` (${m.discountRate}% OFF!)` : '';
+        const line = `  • ${desc}\n    $${m.usdPrice} vs Fal $${m.falPrice}${discount}\n`;
+        if ((currentMsg + line).length > 4000) {
+          messages.push(currentMsg);
+          currentMsg = '';
+        }
+        currentMsg += line;
+      });
+    }
+
+    messages.push(currentMsg);
+
+    await ctx.telegram.deleteMessage(statusMsg.chat.id, statusMsg.message_id);
+
+    for (const msg of messages) {
+      await ctx.reply(msg, { parse_mode: 'HTML' });
+    }
+
+  } catch (error) {
+    console.error('Error in /kiepricingreport:', error);
+    await ctx.reply(`❌ Помилка: ${error.message}`);
+  }
+});
+
+// Порівняння цін для конкретної моделі (тільки для адміна)
+bot.command('kiecompare', async (ctx) => {
+  const adminId = process.env.ADMIN_TELEGRAM_ID;
+
+  if (ctx.from.id.toString() !== adminId) {
+    await ctx.reply('❌ Доступ заборонений');
+    return;
+  }
+
+  try {
+    const cache = await kiePricingSync.getCurrentPricing();
+    const parsed = cache.parsed;
+    const kieModels = require('./config/kie-ai-models');
+
+    let message = `💰 <b>Порівняння цін: KIE.AI vs Replicate</b>\n\n`;
+
+    // Nano Banana
+    message += `🎨 <b>ЗОБРАЖЕННЯ:</b>\n\n`;
+
+    if (parsed.nano_banana_2k) {
+      const kiePrice = parseFloat(parsed.nano_banana_2k.usdPrice);
+      const repPrice = kieModels.nano_banana_pro.replicate_pricing['2K'];
+      const savings = ((repPrice - kiePrice) / repPrice * 100).toFixed(1);
+      message += `🍌 <b>Nano Banana 2K:</b>\n`;
+      message += `  KIE.AI: $${kiePrice}\n`;
+      message += `  Replicate: $${repPrice}\n`;
+      message += `  ${savings >= 0 ? '💰 Економія' : '⚠️ Дорожче'}: ${Math.abs(savings)}%\n\n`;
+    }
+
+    if (parsed.nano_banana_4k) {
+      const kiePrice = parseFloat(parsed.nano_banana_4k.usdPrice);
+      const repPrice = kieModels.nano_banana_pro.replicate_pricing['4K'];
+      const savings = ((repPrice - kiePrice) / repPrice * 100).toFixed(1);
+      message += `🍌🍌 <b>Nano Banana 4K:</b>\n`;
+      message += `  KIE.AI: $${kiePrice}\n`;
+      message += `  Replicate: $${repPrice}\n`;
+      message += `  ${savings >= 0 ? '💰 Економія' : '⚠️ Дорожче'}: ${Math.abs(savings)}%\n\n`;
+    }
+
+    // Kling 2.6
+    message += `🎬 <b>ВІДЕО:</b>\n\n`;
+
+    const kling26_5s_no_audio = parsed.kling_2_6?.find(m =>
+      m.modelDescription.includes('5.0s') && m.modelDescription.includes('without audio')
+    );
+    if (kling26_5s_no_audio) {
+      const kiePrice = parseFloat(kling26_5s_no_audio.usdPrice);
+      const repPrice = 0.07 * 5; // Replicate: $0.07/sec * 5s
+      const savings = ((repPrice - kiePrice) / repPrice * 100).toFixed(1);
+      message += `🎭 <b>Kling 2.6 (5s без аудіо):</b>\n`;
+      message += `  KIE.AI: $${kiePrice}\n`;
+      message += `  Replicate: $${repPrice.toFixed(3)}\n`;
+      message += `  ${savings >= 0 ? '💰 Економія' : '⚠️ Дорожче'}: ${Math.abs(savings)}%\n\n`;
+    }
+
+    // Kling 3.0
+    const kling30_1080p_no_audio = parsed.kling_3_0?.find(m =>
+      m.modelDescription.includes('1080P') && m.modelDescription.includes('without audio')
+    );
+    if (kling30_1080p_no_audio) {
+      const kiePricePerSec = parseFloat(kling30_1080p_no_audio.usdPrice.replace(/[^0-9.]/g, ''));
+      const falPricePerSec = parseFloat(kling30_1080p_no_audio.falPrice);
+      const savings = ((falPricePerSec - kiePricePerSec) / falPricePerSec * 100).toFixed(1);
+      message += `🚀 <b>Kling 3.0 (1080p без аудіо):</b>\n`;
+      message += `  KIE.AI: $${kiePricePerSec}/sec\n`;
+      message += `  Fal.ai: $${falPricePerSec}/sec\n`;
+      message += `  💰 Економія: ${savings}%\n\n`;
+    }
+
+    // Sora 2
+    if (parsed.sora_2?.length) {
+      const sora = parsed.sora_2[0];
+      const kiePrice = parseFloat(sora.usdPrice);
+      const falPrice = parseFloat(sora.falPrice);
+      const savings = ((falPrice - kiePrice) / falPrice * 100).toFixed(1);
+      message += `🔥 <b>Sora 2 (${sora.modelDescription.replace('Open AI sora 2, ', '')}):</b>\n`;
+      message += `  KIE.AI: $${kiePrice}\n`;
+      message += `  Fal.ai: $${falPrice}\n`;
+      message += `  🎉 Економія: ${savings}%!\n\n`;
+    }
+
+    message += `\n📊 Всі ціни актуальні станом на:\n${cache.lastUpdate}`;
+
+    await ctx.reply(message, { parse_mode: 'HTML' });
+
+  } catch (error) {
+    console.error('Error in /kiecompare:', error);
+    await ctx.reply(`❌ Помилка: ${error.message}`);
+  }
 });
 
 bot.command(/^unblock_(\d+)$/, async (ctx) => {
@@ -2342,10 +2615,11 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
       }
 
       if (!result.success) {
+        const creativeName = creativeNames[creativeType] || creativeType;
         await adminNotifier.notifyAdmin(
           bot,
           new Error(result.error),
-          { userId, username, action: `creative_${creativeType}`, model: model.name, provider: providerName }
+          { userId, username, action: `creative_${creativeType}`, model: creativeName, provider: providerName }
         );
         await bot.telegram.editMessageText(
           chatId,
@@ -2759,7 +3033,7 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
 
 
 // Video Models
-bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|sora_2|luma)$/, async (ctx) => {
+bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo|sora_2|luma)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.video.models.find(m => m.key === modelKey);
 
@@ -2820,6 +3094,58 @@ bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|sora_2|
           [
             Markup.button.callback('⚡ STD', 'motion_mode_std'),
             Markup.button.callback('💎 PRO', 'motion_mode_pro')
+          ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // Для Kling 3.0 (KIE.AI) — тільки якщо є доступ до KIE та KIE увімкнена
+  if (modelKey === 'kling_3') {
+    if (!kieAI.isKieAIEnabled) {
+      await ctx.reply('❌ KIE.AI тимчасово вимкнена. Додайте KIE_AI_API_KEY в .env.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+    if (!accessControl.canUseKieAI(ctx.from.id)) {
+      await ctx.reply(
+        '🔒 Генерації через KIE.AI (Kling 3.0 тощо) поки доступні тільки адміністратору.\n\n' +
+        'Доступ керується змінною KIE_AI_ACCESS у .env (admin_only / all_users).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const durations = model.durations || [3, 5, 8, 10, 15];
+    const noAudioSec = !accessControl.KIE_AI_USE_CACHE_PRICING
+      ? (model.costPerSecondNoAudio || 23)
+      : (kiePricingSync.getKling3TokenCostPerSecondSync({ mode: 'pro' })?.costPerSecondNoAudio ?? model.costPerSecondNoAudio);
+    const audioSec = !accessControl.KIE_AI_USE_CACHE_PRICING
+      ? (model.costPerSecondAudio || 45)
+      : (kiePricingSync.getKling3TokenCostPerSecondSync({ mode: 'pro' })?.costPerSecondAudio ?? model.costPerSecondAudio);
+    const minCost = Math.min(...durations) * (noAudioSec || 23);
+    const maxCost = Math.max(...durations) * (audioSec || 45);
+
+    userState.set(ctx.from.id, {
+      action: 'kling_3_generation',
+      step: 'select_mode',
+      modelKey: 'kling_3'
+    });
+
+    await ctx.reply(
+      `🎭 <b>Kling 3.0 Pro 💎</b>\n\n` +
+      `Відео за описом: один опис або кілька сцен, опційно перший кадр і елементи @ім’я.\n\n` +
+      `📐 <b>Крок 1: Оберіть режим якості</b> (натисніть одну з кнопок):\n\n` +
+      `⚡ <b>STD</b> — швидше, дешевше\n` +
+      `💎 <b>PRO</b> — вища якість\n\n` +
+      `💰 Орієнтовно: ${minCost}—${maxCost}⚡`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('⚡ STD', 'kling_3_mode_std'),
+            Markup.button.callback('💎 PRO', 'kling_3_mode_pro')
           ],
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
@@ -2983,6 +3309,404 @@ bot.action(/^(kling|kling_v2_6|kling_motion|runway_gen4|runway_turbo|veo|sora_2|
     messages[modelKey] || `${model.name}\n\nНадішліть текстовий опис відео або зображення з підписом.\n\n⏱️ Генерація: 2-5 хвилин\n💰 Вартість: ${model.cost}⚡`,
     keyboard.createBackButton('video_menu')
   );
+});
+
+// ==================== KLING 3.0 (KIE.AI) CALLBACKS ====================
+
+// Крок 1: Режим (std / pro)
+bot.action(/^kling_3_mode_(std|pro)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const mode = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'select_mode') {
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Kling 3.0 Pro 💎');
+    return;
+  }
+
+  const model = models.video.models.find(m => m.key === 'kling_3');
+  const durations = model.durations || [3, 5, 8, 10, 15];
+  const durationButtons = durations.map(d => {
+    const costNoAudio = d * model.costPerSecondNoAudio;
+    const costAudio = d * model.costPerSecondAudio;
+    return Markup.button.callback(`${d}с (${costNoAudio}—${costAudio}⚡)`, `kling_3_duration_${d}`);
+  });
+
+  userState.set(userId, { ...state, mode, step: 'select_shot_type' });
+
+  await ctx.reply(
+    `🎭 <b>Kling 3.0 Pro 💎</b>\n\n` +
+    `Режим: <b>${mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n\n` +
+    `📽️ <b>Оберіть тип відео</b> (натисніть кнопку):\n\n` +
+    `• <b>Один опис</b> — одне відео за одним текстом.\n` +
+    `• <b>Кілька сцен</b> — відео з кількома частинами (у кожної свій опис і тривалість).`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('1️⃣ Один опис', 'kling_3_shot_single')],
+        [Markup.button.callback('🎬 Кілька сцен', 'kling_3_shot_multi')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Single-shot → вибір тривалості
+bot.action('kling_3_shot_single', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'select_shot_type') return;
+
+  const model = models.video.models.find(m => m.key === 'kling_3');
+  const costNo = getKling3CostPerSecond(model, state.mode, false);
+  const costAud = getKling3CostPerSecond(model, state.mode, true);
+  const durations = model.durations || [3, 5, 8, 10, 15];
+  const durationButtons = durations.map(d => {
+    const costNoAudio = d * costNo;
+    const costAudio = d * costAud;
+    return Markup.button.callback(`${d}с (${costNoAudio}—${costAudio}⚡)`, `kling_3_duration_${d}`);
+  });
+
+  userState.set(userId, { ...state, multiShots: false, step: 'select_duration' });
+
+  await ctx.reply(
+    `🎭 <b>Kling 3.0 Pro 💎</b> — один опис\n\n` +
+    `⏱️ <b>Крок 2: Скільки секунд матиме відео?</b>\n\n` +
+    `Оберіть тривалість від 3 до 15 секунд.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        durationButtons,
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Multi-shot → кількість сцен
+bot.action('kling_3_shot_multi', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'select_shot_type') return;
+
+  userState.set(userId, { ...state, multiShots: true, multiPrompt: [], sceneIndex: 0, step: 'select_scene_count' });
+
+  await ctx.reply(
+    `🎭 <b>Kling 3.0 Pro 💎</b> — кілька сцен\n\n` +
+    `Скільки сцен буде у відео? Кожна сцена матиме свій опис і тривалість (1–12 сек).`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('2', 'kling_3_scenes_2'),
+          Markup.button.callback('3', 'kling_3_scenes_3'),
+          Markup.button.callback('4', 'kling_3_scenes_4'),
+          Markup.button.callback('5', 'kling_3_scenes_5')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Multi: обрано кількість сцен
+bot.action(/^kling_3_scenes_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+  const sceneCount = parseInt(ctx.match[1], 10);
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'select_scene_count') return;
+
+  userState.set(userId, { ...state, sceneCount, step: 'waiting_scene_prompt' });
+
+  await ctx.reply(
+    `🎬 Сцен: <b>${sceneCount}</b>\n\n` +
+    `Опишіть <b>сцену 1</b> текстом (що має відбуватися в цій частині відео).`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Multi-shot: тривалість сцени (1–12)
+bot.action(/^kling_3_scene_dur_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+  const duration = parseInt(ctx.match[1], 10);
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'select_scene_duration') return;
+
+  const multiPrompt = [...(state.multiPrompt || []), { prompt: state.pendingScenePrompt || '', duration }];
+  const sceneIndex = (state.sceneIndex || 0) + 1;
+  const sceneCount = state.sceneCount || 2;
+
+  if (sceneIndex >= sceneCount) {
+    const totalDuration = multiPrompt.reduce((sum, s) => sum + (s.duration || 0), 0);
+    userState.set(userId, {
+      ...state,
+      multiPrompt,
+      sceneIndex,
+      duration: Math.min(15, Math.max(3, totalDuration)),
+      step: 'select_aspect'
+    });
+    await ctx.reply(
+      `🎬 Усі ${sceneCount} сцен задано.\n\n` +
+      `📐 <b>Пропорції відео</b>: 16:9, 9:16 або 1:1.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('🎬 16:9', 'kling_3_aspect_16:9'),
+            Markup.button.callback('📱 9:16', 'kling_3_aspect_9:16')
+          ],
+          [Markup.button.callback('⬜ 1:1', 'kling_3_aspect_1:1')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    multiPrompt,
+    sceneIndex,
+    pendingScenePrompt: null,
+    step: 'waiting_scene_prompt'
+  });
+  await ctx.reply(
+    `Опишіть <b>сцену ${sceneIndex + 1}</b> текстом.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Крок 2: Тривалість (single-shot)
+bot.action(/^kling_3_duration_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const duration = parseInt(ctx.match[1], 10);
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'select_duration') {
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Kling 3.0 Pro 💎');
+    return;
+  }
+
+  userState.set(userId, { ...state, duration, step: 'select_aspect' });
+
+  await ctx.reply(
+    `🎭 <b>Kling 3.0 Pro 💎</b>\n\n` +
+    `⏱️ Тривалість: <b>${duration} сек</b>\n\n` +
+    `📐 <b>Крок 3: Формат відео</b> (оберіть кнопку):\n\n` +
+    `16:9 — горизонтальне | 9:16 — вертикальне | 1:1 — квадрат`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🎬 16:9', 'kling_3_aspect_16:9'),
+          Markup.button.callback('📱 9:16', 'kling_3_aspect_9:16')
+        ],
+        [Markup.button.callback('⬜ 1:1', 'kling_3_aspect_1:1')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 3: Пропорції
+bot.action(/^kling_3_aspect_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const aspectRatio = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'select_aspect') {
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Kling 3.0 Pro 💎');
+    return;
+  }
+
+  const model = models.video.models.find(m => m.key === 'kling_3');
+  const costPerSecAud = getKling3CostPerSecond(model, state.mode, true);
+  const costPerSecNo = getKling3CostPerSecond(model, state.mode, false);
+  const costWithAudio = state.duration * costPerSecAud;
+  const costNoAudio = state.duration * costPerSecNo;
+
+  userState.set(userId, { ...state, aspectRatio, step: 'select_audio' });
+
+  await ctx.reply(
+    `🎭 <b>Kling 3.0 Pro 💎</b>\n\n` +
+    `📐 Пропорції: <b>${aspectRatio}</b>\n\n` +
+    `🔊 <b>Крок 4: Звук</b> (оберіть кнопку):\n\n` +
+    `З аудіо — звукові ефекти | Без аудіо — тільки картинка`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback(`🔊 З аудіо (${costWithAudio}⚡)`, 'kling_3_audio_on')],
+        [Markup.button.callback(`🔇 Без аудіо (${costNoAudio}⚡)`, 'kling_3_audio_off')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 4: Аудіо
+bot.action(/^kling_3_audio_(on|off)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+  const sound = ctx.match[1] === 'on';
+
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'select_audio') {
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Kling 3.0 Pro 💎');
+    return;
+  }
+
+  const model = models.video.models.find(m => m.key === 'kling_3');
+  const costPerSec = getKling3CostPerSecond(model, state.mode, sound);
+  const kling3Cost = state.duration * costPerSec;
+
+  userState.set(userId, {
+    ...state,
+    generateAudio: sound,
+    kling3Cost,
+    step: 'ask_start_image'
+  });
+
+  await ctx.reply(
+    `🎭 <b>Kling 3.0 Pro 💎</b>\n\n` +
+    `🔊 Звук: <b>${sound ? 'Так' : 'Ні'}</b>\n` +
+    `💰 Вартість: <b>${kling3Cost}⚡</b>\n\n` +
+    `🖼️ <b>Крок 5: Перший кадр</b> (оберіть кнопку):\n\n` +
+    `• <b>Завантажу зображення</b> — фото стане першим кадром, AI його анімує.\n` +
+    `• <b>Без зображення</b> — відео тільки за текстовим описом.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🖼️ Завантажу зображення', 'kling_3_add_start_image')],
+        [Markup.button.callback('⏭️ Без зображення', 'kling_3_skip_start_image')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 5: Стартове зображення — пропустити → переходимо до елементів (або промпту)
+bot.action('kling_3_skip_start_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'ask_start_image') {
+    return;
+  }
+
+  userState.set(userId, { ...state, elements: state.elements || [], step: 'ask_elements' });
+
+  await ctx.reply(
+    `🎭 <b>Kling 3.0 Pro 💎</b>\n\n` +
+      `🔗 <b>Елементи</b> (оберіть кнопку):\n\n` +
+      `• <b>Додати елемент</b> — додати фото/відео з ім’ям (наприклад @dog), щоб посилатись у описі.\n` +
+      `• <b>Пропустити</b> — перейти одразу до текстового опису відео.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('➕ Додати елемент', 'kling_3_add_element')],
+        [Markup.button.callback('⏭️ Пропустити → до опису', 'kling_3_skip_elements')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 5: Стартове зображення — чекаємо фото
+bot.action('kling_3_add_start_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'ask_start_image') {
+    return;
+  }
+
+  userState.set(userId, { ...state, step: 'waiting_start_image' });
+
+  await ctx.reply(
+    `🖼️ <b>Надішліть одне фото</b>\n\n` +
+    `Воно стане першим кадром. Після цього можна додати елементи та опис відео.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Елементи: пропустити → перехід до промпту (single) або ready_multi (multi-shot)
+bot.action('kling_3_skip_elements', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_3_generation') return;
+  if (state.step !== 'ask_elements' && state.step !== 'waiting_element_media') return;
+
+  if (state.multiShots && state.multiPrompt?.length) {
+    const totalDuration = state.multiPrompt.reduce((s, x) => s + (x.duration || 0), 0);
+    const k3Model = models.video.models.find(m => m.key === 'kling_3');
+    const costPerSec = k3Model ? getKling3CostPerSecond(k3Model, state.mode, state.generateAudio) : (state.generateAudio ? 45 : 23);
+    const kling3Cost = state.kling3Cost || (totalDuration * costPerSec);
+    userState.set(userId, { ...state, step: 'ready_multi', currentElement: null, kling3Cost });
+    await ctx.reply(
+      `🎬 <b>Кілька сцен</b> налаштовано.\n\n` +
+      `Сцен: ${state.multiPrompt.length}. Сумарна тривалість: ${totalDuration} сек. Вартість: ${kling3Cost}⚡.\n\n` +
+      `Натисніть «Старт», щоб почати генерацію.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('▶️ Старт генерації', 'kling_3_generate_multi')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  userState.set(userId, { ...state, step: 'waiting_prompt', currentElement: null });
+
+  const elementsHint = (state.elements || []).length > 0
+    ? `\n\nВи додали елементи: ${(state.elements || []).map(e => `@${e.name}`).join(', ')}. Використовуйте їх у описі, наприклад: «собака біжить @${state.elements[0].name}». `
+    : '';
+
+  await ctx.reply(
+    `🎭 <b>Kling 3.0 Pro 💎</b>\n\n` +
+    `✍️ <b>Опишіть відео текстом</b>\n\n` +
+    `Напишіть, що має відбуватися на екрані: рух, сцена, дії.${elementsHint}\nЧим детальніше — тим краще результат.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Елементи: додати елемент → просимо ім’я
+bot.action('kling_3_add_element', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_3_generation') return;
+  if (state.step !== 'ask_elements') return;
+
+  userState.set(userId, { ...state, step: 'waiting_element_name' });
+
+  await ctx.reply(
+    `🔗 <b>Ім’я елемента</b>\n\n` +
+    `Напишіть одне слово або коротке ім’я латиницею (наприклад: dog, cat, hero). У описі відео ви посилатиметесь на нього так: <b>@dog</b>.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Multi-shot: старт генерації
+bot.action('kling_3_generate_multi', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+  if (!state || state.action !== 'kling_3_generation' || state.step !== 'ready_multi') return;
+  runBackgroundTask(() => generateKling3Video(ctx, state), 'kling_3_generate_multi');
 });
 
 // ==================== VEO 3.1 CALLBACKS ====================
@@ -3959,6 +4683,7 @@ async function generateKlingMotionVideo(ctx, state) {
     return;
   }
 
+  const modelName = model.name;  // Зберігаємо для безпеки
   const motionCost = state.motionCost;
   const costKey = `${state.mode}_${state.orientation}`;
   const apiCost = model.apiCosts[costKey];
@@ -3992,18 +4717,45 @@ async function generateKlingMotionVideo(ctx, state) {
 
   (async () => {
     try {
-      const result = await replicate.generateVideoWithKlingMotion(
-        generationData.imageUrl,
-        generationData.videoUrl,
-        generationData.mode,
-        generationData.orientation,
-        generationData.prompt || '',
-        generationData.keepOriginalSound
-      );
+      // Перевіряємо чи можемо використовувати KIE.AI
+      const userChosenProvider = userProviderChoice.get(userId);
+      const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
+
+      // Логіка вибору провайдера
+      let useKieAI = false;
+      if (userChosenProvider === 'kie-ai') {
+        useKieAI = true;
+      } else if (userChosenProvider === 'replicate') {
+        useKieAI = false;
+      } else {
+        // Автоматичний режим
+        useKieAI = canUseKieAI;
+      }
+
+      const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
+      console.log(`🎯 Kling Motion using provider: ${providerName}`);
+
+      // Генеруємо через обраний провайдер
+      const result = useKieAI
+        ? await kieAI.generateKlingMotionKieAI(
+            generationData.prompt || '',
+            generationData.imageUrl,
+            generationData.videoUrl,
+            generationData.mode === 'pro' ? '1080p' : '720p',
+            generationData.orientation
+          )
+        : await replicate.generateVideoWithKlingMotion(
+            generationData.imageUrl,
+            generationData.videoUrl,
+            generationData.mode,
+            generationData.orientation,
+            generationData.prompt || '',
+            generationData.keepOriginalSound
+          );
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-          userId, username, action: 'kling_motion_generation', model: model.name
+          userId, username, action: 'kling_motion_generation', model: modelName
         });
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
@@ -4025,8 +4777,8 @@ async function generateKlingMotionVideo(ctx, state) {
         return;
       }
 
-      await userBalance.deductTokens(userId, motionCost, `${model.name} generation`, {
-        modelKey: 'kling_motion', modelName: model.name, apiCost: apiCost,
+      await userBalance.deductTokens(userId, motionCost, `${modelName} generation`, {
+        modelKey: 'kling_motion', modelName: modelName, apiCost: apiCost,
         mode: generationData.mode, orientation: generationData.orientation,
         keepOriginalSound: generationData.keepOriginalSound
       });
@@ -4150,26 +4902,57 @@ async function generateKlingVideo(ctx, state) {
 
   (async () => {
     try {
-      const generator = modelKey === 'kling_v2_6'
-        ? replicate.generateVideoWithKling26
-        : replicate.generateVideoWithKling;
+      // Перевіряємо чи можемо використовувати KIE.AI
+      const userChosenProvider = userProviderChoice.get(userId);
+      const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 
-      const result = modelKey === 'kling_v2_6'
-        ? await generator(
+      let useKieAI = false;
+      if (userChosenProvider === 'kie-ai') {
+        useKieAI = true;
+      } else if (userChosenProvider === 'replicate') {
+        useKieAI = false;
+      } else {
+        useKieAI = canUseKieAI;
+      }
+
+      const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
+      console.log(`🎯 Kling using provider: ${providerName}`);
+
+      let result;
+
+      if (useKieAI) {
+        // KIE.AI підтримує Kling v2.5 та v2.6
+        const version = modelKey === 'kling_v2_6' ? 'v2.6' : 'v2.5';
+        result = await kieAI.generateKlingVideoKieAI(
           generationData.prompt,
           generationData.startImage || null,
           duration,
           generationData.aspectRatio || '16:9',
-          generationData.generateAudio === true,
-          model.audioParam || 'generate_audio'
-        )
-        : await generator(
-          generationData.prompt,
-          generationData.startImage || null,
-          supportsEndImage ? (generationData.endImage || null) : null,
-          duration,
-          generationData.aspectRatio || '16:9'
+          version
         );
+      } else {
+        // Replicate
+        const generator = modelKey === 'kling_v2_6'
+          ? replicate.generateVideoWithKling26
+          : replicate.generateVideoWithKling;
+
+        result = modelKey === 'kling_v2_6'
+          ? await generator(
+            generationData.prompt,
+            generationData.startImage || null,
+            duration,
+            generationData.aspectRatio || '16:9',
+            generationData.generateAudio === true,
+            model.audioParam || 'generate_audio'
+          )
+          : await generator(
+            generationData.prompt,
+            generationData.startImage || null,
+            supportsEndImage ? (generationData.endImage || null) : null,
+            duration,
+            generationData.aspectRatio || '16:9'
+          );
+      }
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
@@ -4247,6 +5030,159 @@ async function generateKlingVideo(ctx, state) {
         );
       } catch (e) {
         await bot.telegram.sendMessage(chatId, '❌ Помилка генерації Kling. Спробуйте ще раз.');
+      }
+    }
+  })();
+}
+
+// ==================== KLING 3.0 (KIE.AI) GENERATION FUNCTION ====================
+
+/** Вартість Kling 3.0 за секунду (токени): з кешу KIE + 30% націнка, якщо KIE_AI_USE_CACHE_PRICING не 'false'. */
+function getKling3CostPerSecond(model, mode = 'pro', withAudio = false) {
+  if (!accessControl.KIE_AI_USE_CACHE_PRICING) {
+    return withAudio ? model.costPerSecondAudio : model.costPerSecondNoAudio;
+  }
+  const fromCache = kiePricingSync.getKling3TokenCostPerSecondSync({ mode });
+  if (fromCache) {
+    const v = withAudio ? fromCache.costPerSecondAudio : fromCache.costPerSecondNoAudio;
+    if (v != null) return v;
+  }
+  return withAudio ? model.costPerSecondAudio : model.costPerSecondNoAudio;
+}
+
+async function generateKling3Video(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
+  const model = models.video.models.find(m => m.key === 'kling_3');
+
+  if (!model) {
+    await ctx.reply('❌ Модель Kling 3.0 не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  const multiShots = state.multiShots === true && Array.isArray(state.multiPrompt) && state.multiPrompt.length > 0;
+  const prompt = state.prompt || '';
+  const duration = state.duration || (multiShots ? state.multiPrompt.reduce((s, x) => s + (x.duration || 0), 0) : 5);
+  const aspectRatio = state.aspectRatio || '16:9';
+  const mode = state.mode || 'pro';
+  const generateAudio = state.generateAudio === true;
+  const costPerSec = getKling3CostPerSecond(model, mode, generateAudio);
+  const kling3Cost = state.kling3Cost || (duration * costPerSec);
+  const imageUrls = state.startImage ? [state.startImage] : [];
+  const elements = state.elements || [];
+  const klingElements = elements.map(el => ({
+    name: el.name,
+    description: el.description || el.name,
+    ...(el.imageUrls?.length ? { imageUrls: el.imageUrls } : {}),
+    ...(el.videoUrl ? { videoUrl: el.videoUrl } : {})
+  })).filter(el => el.imageUrls?.length || el.videoUrl);
+
+  if (!multiShots && (!prompt || prompt.length < 5)) {
+    await ctx.reply('❌ Введіть промпт (мінімум 5 символів).');
+    userState.delete(userId);
+    return;
+  }
+  if (multiShots && (!state.multiPrompt || state.multiPrompt.length === 0)) {
+    await ctx.reply('❌ Немає сцен для multi-shot. Почніть заново.');
+    userState.delete(userId);
+    return;
+  }
+
+  if (!(await userBalance.hasTokens(userId, kling3Cost))) {
+    await showInsufficientTokens(ctx, kling3Cost);
+    userState.delete(userId);
+    return;
+  }
+
+  const statusMsg = await ctx.reply(
+    `🎭 <b>Kling 3.0 Pro 💎 - Генерація</b>\n\n` +
+    `⏱️ ${duration} сек | 📐 ${aspectRatio} | ${mode.toUpperCase()} | ${generateAudio ? '🔊' : '🔇'}\n` +
+    `📝 "${prompt.substring(0, 80)}${prompt.length > 80 ? '...' : ''}"\n\n` +
+    `⏱️ Це може зайняти 2–5 хвилин...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом!</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  const generationData = {
+    ...state,
+    prompt,
+    duration,
+    aspectRatio,
+    mode,
+    generateAudio,
+    imageUrls,
+    kling3Cost,
+    klingElements,
+    multiShots,
+    multiPrompt: state.multiPrompt || []
+  };
+
+  (async () => {
+    try {
+      const result = await kieAI.generateKling3VideoKieAI({
+        prompt: multiShots ? '' : generationData.prompt,
+        imageUrls: generationData.imageUrls,
+        duration: String(Math.min(15, Math.max(3, duration))),
+        aspectRatio: generationData.aspectRatio,
+        mode: generationData.mode,
+        sound: generationData.generateAudio,
+        multiShots: generationData.multiShots || false,
+        multiPrompt: generationData.multiShots ? generationData.multiPrompt : undefined,
+        klingElements: generationData.klingElements?.length ? generationData.klingElements : undefined
+      });
+
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId, username, action: 'kling_3_generation', model: model.name,
+          prompt: generationData.prompt, duration: generationData.duration
+        });
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації Kling 3.0.\n\n${result.error}\n\nСпробуйте ще раз.`
+        );
+        return;
+      }
+
+      const apiCost = generationData.duration * (generationData.generateAudio ? model.apiCostPerSecondAudio : model.apiCostPerSecondNoAudio);
+      await userBalance.deductTokens(userId, kling3Cost, `${model.name} generation`, {
+        modelKey: 'kling_3', modelName: model.name, apiCost,
+        prompt: generationData.prompt, duration: generationData.duration,
+        hasStartImage: generationData.imageUrls?.length > 0,
+        generateAudio: generationData.generateAudio
+      });
+
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>Kling 3.0 Pro 💎 готово!</b>\n\n` +
+        `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
+        `⏱️ ${generationData.duration} сек | 📐 ${generationData.aspectRatio} | ${generationData.generateAudio ? '🔊' : '🔇'}\n` +
+        `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
+        `💰 Витрачено: ${kling3Cost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `🎭 Kling 3.0 Pro 💎\n\n⏱️ ${generationData.duration}сек | 📐 ${generationData.aspectRatio} | ${generationData.generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${kling3Cost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
+
+    } catch (error) {
+      console.error('Kling 3.0 generation failed:', error);
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'kling_3_generation', model: model.name });
+      try {
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          '❌ Помилка генерації Kling 3.0. Спробуйте ще раз.'
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації Kling 3.0. Спробуйте ще раз.');
       }
     }
   })();
@@ -4438,16 +5374,42 @@ async function generateVeoVideo(ctx, state) {
   // Асинхронна функція що виконується у фоні
   (async () => {
     try {
-      const result = await replicate.generateVideoWithVeo(
-        generationData.prompt,
-        generationData.references || [],
-        generationData.lastFrame || null,
-        generationData.aspectRatio,
-        duration,
-        '', // negative prompt
-        generationData.startImage || null,
-        generateAudio
-      );
+      // Перевіряємо чи можемо використовувати KIE.AI
+      const userChosenProvider = userProviderChoice.get(userId);
+      const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
+
+      let useKieAI = false;
+      if (userChosenProvider === 'kie-ai') {
+        useKieAI = true;
+      } else if (userChosenProvider === 'replicate') {
+        useKieAI = false;
+      } else {
+        useKieAI = canUseKieAI;
+      }
+
+      const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
+      console.log(`🎯 Veo using provider: ${providerName}`);
+
+      const result = useKieAI
+        ? await kieAI.generateVeoKieAI(generationData.prompt, {
+            imageUrl: generationData.startImage || null,
+            lastFrame: generationData.lastFrame || null,
+            referenceImages: generationData.references || [],
+            aspectRatio: generationData.aspectRatio,
+            duration: duration,
+            generateAudio: generateAudio,
+            resolution: '1080p'
+          })
+        : await replicate.generateVideoWithVeo(
+            generationData.prompt,
+            generationData.references || [],
+            generationData.lastFrame || null,
+            generationData.aspectRatio,
+            duration,
+            '', // negative prompt
+            generationData.startImage || null,
+            generateAudio
+          );
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
@@ -5044,6 +6006,78 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  // ✅ KLING 3.0 Multi-shot: опис сцени
+  if (state?.action === 'kling_3_generation' && state?.step === 'waiting_scene_prompt' && state?.multiShots) {
+    if (!text || text.length < 3) {
+      await ctx.reply('Опишіть сцену детальніше (мінімум 3 символи).', keyboard.createBackButton('video_menu'));
+      return;
+    }
+    const sceneIndex = (state.sceneIndex || 0) + 1;
+    const sceneCount = state.sceneCount || 2;
+    userState.set(userId, {
+      ...state,
+      pendingScenePrompt: text,
+      step: 'select_scene_duration'
+    });
+    const durationButtons = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(d =>
+      Markup.button.callback(`${d}с`, `kling_3_scene_dur_${d}`)
+    );
+    await ctx.reply(
+      `✅ Сцена ${sceneIndex}: «${text.slice(0, 60)}${text.length > 60 ? '…' : ''}»\n\n` +
+      `Тривалість цієї сцени (1–12 сек):`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          durationButtons.slice(0, 6),
+          durationButtons.slice(6, 12),
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // ✅ KLING 3.0: Ім’я елемента для kling_elements
+  if (state?.action === 'kling_3_generation' && state?.step === 'waiting_element_name') {
+    const name = (text || '').trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase() || 'element';
+    const safeName = name.slice(0, 50) || 'element';
+
+    userState.set(userId, {
+      ...state,
+      step: 'waiting_element_media',
+      currentElement: { name: safeName, imageUrls: [], videoUrl: null }
+    });
+
+    await ctx.reply(
+      `✅ Елемент <b>@${safeName}</b>.\n\n` +
+      `Надішліть <b>2–4 фото</b> (можна по одному) або <b>1 відео</b> для цього елемента. У описі відео пишіть, наприклад: «… @${safeName} …».`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  // ✅ KLING 3.0 (KIE.AI): Обробка промпту (останній крок)
+  if (state?.action === 'kling_3_generation' && state?.step === 'waiting_prompt') {
+    if (!text || text.length < 5) {
+      await ctx.reply(
+        '⚠️ Промпт занадто короткий!\n\n' +
+        'Напишіть детальніше що хочете бачити у відео (мінімум 5 символів).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      prompt: text,
+      step: 'ready_to_generate'
+    });
+
+    await ctx.reply('🚀 Промпт збережено! Починаємо генерацію Kling 3.0...');
+    runBackgroundTask(() => generateKling3Video(ctx, { ...state, prompt: text }), 'kling_3_generate_text');
+    return;
+  }
+
   // ✅ KLING MOTION: Обробка промпту (опціонально)
   if (state?.action === 'kling_motion_generation' && state?.step === 'ask_prompt') {
     // Зберігаємо промпт і генеруємо
@@ -5390,6 +6424,89 @@ bot.on('photo', async (ctx) => {
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
     return;
+  }
+
+  // ✅ KLING 3.0: Обробка стартового зображення
+  if (state?.action === 'kling_3_generation' && state?.step === 'waiting_start_image') {
+    const imageUrl = await getImageUrl(ctx);
+
+    userState.set(userId, {
+      ...state,
+      startImage: imageUrl,
+      elements: state.elements || [],
+      step: 'ask_elements'
+    });
+
+    await ctx.reply(
+      `✅ <b>Стартове зображення завантажено!</b>\n\n` +
+      `🔗 <b>Елементи (не обов’язково)</b>\n\n` +
+      `Можна додати елементи — фото/відео, на які посилатиметесь у описі через @ім’я (наприклад @dog). Пропустіть, якщо не потрібно.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('➕ Додати елемент', 'kling_3_add_element')],
+          [Markup.button.callback('⏭️ Пропустити → до опису', 'kling_3_skip_elements')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // ✅ KLING 3.0: Збір медіа для елемента (2–4 фото або 1 відео)
+  if (state?.action === 'kling_3_generation' && state?.step === 'waiting_element_media' && state?.currentElement) {
+    const videoUrl = await getVideoUrl(ctx);
+    if (videoUrl) {
+      const el = { name: state.currentElement.name, description: state.currentElement.name || state.currentElement.name, videoUrl };
+      const elements = [...(state.elements || []), el];
+      userState.set(userId, {
+        ...state,
+        elements,
+        currentElement: null,
+        step: 'ask_elements'
+      });
+      await ctx.reply(
+        `✅ Елемент <b>@${state.currentElement.name}</b> додано (відео).\n\nДодати ще один елемент чи перейти до опису відео?`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('➕ Ще елемент', 'kling_3_add_element')],
+            [Markup.button.callback('✅ Готово → опис відео', 'kling_3_skip_elements')],
+            [Markup.button.callback('← Назад', 'video_menu')]
+          ])
+        }
+      );
+      return;
+    }
+    const imageUrl = await getImageUrl(ctx);
+    if (imageUrl) {
+      const cur = state.currentElement;
+      const imageUrls = [...(cur.imageUrls || []), imageUrl];
+      if (imageUrls.length < 2) {
+        userState.set(userId, { ...state, currentElement: { ...cur, imageUrls }, step: 'waiting_element_media' });
+        await ctx.reply(
+          `📷 Є 1 фото. Надішліть ще мінімум 1 фото (разом 2–4) для елемента @${cur.name}, або 1 відео.`,
+          { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+        );
+        return;
+      }
+      const finalUrls = imageUrls.slice(0, 4);
+      const el = { name: cur.name, description: cur.name, imageUrls: finalUrls };
+      const elements = [...(state.elements || []), el];
+      userState.set(userId, { ...state, elements, currentElement: null, step: 'ask_elements' });
+      await ctx.reply(
+        `✅ Елемент <b>@${cur.name}</b> додано (${finalUrls.length} фото).\n\nДодати ще один елемент чи перейти до опису відео?`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('➕ Ще елемент', 'kling_3_add_element')],
+            [Markup.button.callback('✅ Готово → опис відео', 'kling_3_skip_elements')],
+            [Markup.button.callback('← Назад', 'video_menu')]
+          ])
+        }
+      );
+      return;
+    }
   }
 
   // ✅ RUNWAY TURBO: Обробка initial image
@@ -5855,6 +6972,37 @@ bot.on('video', async (ctx) => {
   const userId = ctx.from.id;
   const state = userState.get(userId);
 
+  // ✅ KLING 3.0: Відео для елемента (element_input_video_urls)
+  if (state?.action === 'kling_3_generation' && state?.step === 'waiting_element_media' && state?.currentElement) {
+    const videoUrl = await getVideoUrl(ctx);
+    if (videoUrl) {
+      const el = {
+        name: state.currentElement.name,
+        description: state.currentElement.name,
+        videoUrl
+      };
+      const elements = [...(state.elements || []), el];
+      userState.set(userId, {
+        ...state,
+        elements,
+        currentElement: null,
+        step: 'ask_elements'
+      });
+      await ctx.reply(
+        `✅ Елемент <b>@${state.currentElement.name}</b> додано (відео).\n\nДодати ще один елемент чи перейти до опису відео?`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('➕ Ще елемент', 'kling_3_add_element')],
+            [Markup.button.callback('✅ Готово → опис відео', 'kling_3_skip_elements')],
+            [Markup.button.callback('← Назад', 'video_menu')]
+          ])
+        }
+      );
+      return;
+    }
+  }
+
   // ✅ KLING MOTION: Обробка референсного відео
   if (state?.action === 'kling_motion_generation' && state?.step === 'waiting_video' && state?.imageUrl) {
     const model = models.video.models.find(m => m.key === 'kling_motion');
@@ -5973,6 +7121,22 @@ async function getImageUrl(ctx) {
   const photo = ctx.message.photo[ctx.message.photo.length - 1];
   const file = await ctx.telegram.getFile(photo.file_id);
   return `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+}
+
+/** Повертає URL файлу відео з повідомлення (для Kling 3.0 element_input_video_urls). */
+async function getVideoUrl(ctx) {
+  if (!ctx.message?.video) return null;
+  const file = await ctx.telegram.getFile(ctx.message.video.file_id);
+  return `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+}
+
+/** Збирає всі URL фото з повідомлення (1 фото або альбом у media group). */
+async function getImageUrlsFromContext(ctx) {
+  if (!ctx.message?.photo) return [];
+  const photo = ctx.message.photo[ctx.message.photo.length - 1];
+  const file = await ctx.telegram.getFile(photo.file_id);
+  const url = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+  return [url];
 }
 
 async function validateImageCount(photos, maxCount = 14) {
@@ -6224,7 +7388,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       const result = await generator();
 
       if (!result.success) {
-        await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_generation`, model: model.name, prompt, hasImage: !!imageInput, provider: providerName });
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_generation`, model: generationData.modelName || 'unknown', prompt, hasImage: !!imageInput, provider: providerName });
         await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, `❌ Помилка генерації (${providerName}).\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`);
 
         const isTrial = await isTrialUser(userId);
@@ -6889,6 +8053,25 @@ async function startBot() {
 
     // 💰 Перевірка цін Replicate при старті
     replicatePricing.logPriceComparison();
+
+    // 💰 Оновлення цін KIE.AI при старті (якщо потрібно)
+    try {
+      console.log('💰 Checking KIE.AI pricing...');
+      await kiePricingSync.updatePricingIfNeeded();
+
+      // Щоденне оновлення цін (раз на 24 години)
+      setInterval(async () => {
+        console.log('⏰ Daily KIE.AI pricing update...');
+        try {
+          await kiePricingSync.updatePricingIfNeeded();
+          console.log('✅ KIE.AI pricing updated');
+        } catch (error) {
+          console.error('❌ Failed to update KIE.AI pricing:', error.message);
+        }
+      }, 24 * 60 * 60 * 1000); // 24 години
+    } catch (error) {
+      console.error('⚠️ KIE.AI pricing update failed (not critical):', error.message);
+    }
 
     if (isShowBroadCast) {
       console.log('📢 Sending startup broadcast...');

@@ -16,14 +16,21 @@
 const PROVIDER_CHOICE_ACCESS = process.env.PROVIDER_CHOICE_ACCESS || 'admin_only';
 
 /**
- * Контролювати хто має доступ до KIE.AI функцій
+ * Контролювати хто має доступ до KIE.AI функцій (Kling 3.0 тощо)
  *
  * Режими:
- * - 'admin_only' (DEFAULT) - тільки для адміністратора
+ * - 'admin_only' (DEFAULT) - тільки для адміністратора (зручно під тести)
  * - 'all_users' - для всіх користувачів
  * - 'disabled' - функція вимкнена повністю
  */
 const KIE_AI_ACCESS = process.env.KIE_AI_ACCESS || 'admin_only';
+
+/**
+ * Чи брати вартість Kling 3.0 з кешу kie-ai-pricing-cache.json (з націнкою 30%).
+ * - не 'false' (DEFAULT) — використовувати кеш
+ * - 'false' — використовувати фіксовані ціни з config/models.js (зручно під тести)
+ */
+const KIE_AI_USE_CACHE_PRICING = process.env.KIE_AI_USE_CACHE_PRICING !== 'false';
 
 /**
  * Список користувачів які мають повний доступ
@@ -139,12 +146,14 @@ function canUseKieAI(userId) {
  * Вивести поточні налаштування
  */
 function printConfig() {
+  const kiePricing = KIE_AI_USE_CACHE_PRICING ? 'cache (30% націнка)' : 'models.js (фікс)';
   console.log(`
 ╔════════════════════════════════════════════════════════╗
 ║         PROVIDER ACCESS CONFIGURATION                  ║
 ╠════════════════════════════════════════════════════════╣
 ║ PROVIDER_CHOICE_ACCESS: ${PROVIDER_CHOICE_ACCESS.padEnd(40)} ║
 ║ KIE_AI_ACCESS:         ${KIE_AI_ACCESS.padEnd(40)} ║
+║ KIE ціна (Kling 3.0):  ${kiePricing.padEnd(40)} ║
 ║ ADMIN_ID:              ${ADMIN_ID.padEnd(40)} ║
 ║ WHITELIST_USERS:       ${WHITELIST_USERS.length} користувачів       ${' '.repeat(29)} ║
 ║ BLACKLIST_USERS:       ${BLACKLIST_USERS.length} користувачів       ${' '.repeat(29)} ║
@@ -158,6 +167,7 @@ module.exports = {
   // Constants
   PROVIDER_CHOICE_ACCESS,
   KIE_AI_ACCESS,
+  KIE_AI_USE_CACHE_PRICING,
   WHITELIST_USERS,
   BLACKLIST_USERS,
   ADMIN_ID,

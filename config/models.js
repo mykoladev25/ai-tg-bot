@@ -1,8 +1,12 @@
 /**
- * Нові припущення під нашу токеноміку:
- * 1 токен = $0.01 (для юзера)
- * Ціноутворення: tokens = ceil(apiCostUSD * PRICING_MULTIPLIER / TOKEN_USD)
- * де PRICING_MULTIPLIER = 1.65 (≈30% profit після fees + буфер)
+ * Токеноміка: models.js — єдине джерело цін для тарифів і всіх моделей (Replicate тощо).
+ * 1 токен = $0.01 для юзера.
+ * Ціноутворення: tokens = ceil(apiCostUSD * PRICING_MULTIPLIER / TOKEN_USD),
+ * PRICING_MULTIPLIER = 1.65 ≈ 30% прибутку після fees.
+ *
+ * Виняток: KIE.AI (Kling 3.0 тощо) — вартість у токенах рахується з кешу
+ * kie-ai-pricing-cache.json (оновлення щорану), з тим самим 30% (1.65).
+ * Там ціни нижчі → юзер платить менше токенів за генерацію (= більше генерацій за ті самі токени).
  */
 
 const TOKEN_USD = 0.01;
@@ -18,7 +22,7 @@ const WAYFORPAY_OVERHEAD = 0.07;
 const NET_REVENUE_FACTOR = 1 - WAYFORPAY_OVERHEAD; // 0.93
 
 const TRIAL_RESTRICTIONS = {
-  blockedModels: ['veo', 'kling_motion', 'runway_gen4'],
+  blockedModels: ['veo', 'kling_motion', 'kling_3', 'runway_gen4'],
   blockedModes: { kling: { durations: [10] }, kling_v2_6: { durations: [10] } },
   messages: {
     blocked:
@@ -128,6 +132,39 @@ module.exports = {
         available: true,
         requiresImage: true,
         requiresVideo: true
+      },
+
+      /**
+       * Kling 3.0 — Multi-shot & Element References 🆕
+       * ⚠️ KIE.AI ONLY - немає на Replicate!
+       *
+       * KIE.AI pricing (per second):
+       * - std with audio: $0.20/сек -> 33 tokens/sec
+       * - std without audio: $0.10/сек -> 17 tokens/sec
+       * - pro with audio: $0.27/сек -> 45 tokens/sec
+       * - pro without audio: $0.135/сек -> 23 tokens/sec
+       *
+       * Можливості:
+       * - Multi-shot: кілька сцен в одному відео
+       * - Element refs: використання @element_name
+       * - Тривалість: 3-15 секунд
+       */
+      {
+        name: '🎭 Kling 3.0 Pro 💎',
+        key: 'kling_3',
+        costPerSecondAudio: 45,      // pro with audio
+        costPerSecondNoAudio: 23,    // pro without audio
+        apiCostPerSecondAudio: 0.27,
+        apiCostPerSecondNoAudio: 0.135,
+        minSeconds: 3,
+        durations: [3, 5, 8, 10, 15],
+        cost: 225, // default 5s pro audio = 45*5
+        available: true,
+        requiresImage: false,
+        supportsMultiShot: true,
+        supportsElementRefs: true,
+        modes: ['std', 'pro'],
+        kieAIOnly: true  // ⚠️ Немає на Replicate!
       },
 
       /**

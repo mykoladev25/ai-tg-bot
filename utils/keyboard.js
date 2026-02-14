@@ -30,7 +30,14 @@ function createInlineMenu(buttons, columns = 1) {
         const maxCost = 8 * btn.costPerSecondAudio;    // 8 сек з аудіо
         text = `${btn.name} (${minCost}—${maxCost}⚡)`;
       }
-      // Для Kling показуємо діапазон цін
+      // Для Kling 3.0 показуємо діапазон (3–15 сек, з/без аудіо)
+      else if (btn.key === 'kling_3' && btn.durations && (btn.costPerSecondNoAudio || btn.costPerSecondAudio)) {
+        const durs = btn.durations;
+        const minCost = Math.min(...durs) * (btn.costPerSecondNoAudio || 23);
+        const maxCost = Math.max(...durs) * (btn.costPerSecondAudio || 45);
+        text = `${btn.name} (${minCost}—${maxCost}⚡)`;
+      }
+      // Для Kling (v2.5, v2.6) показуємо діапазон цін
       else if (btn.key !== 'kling_motion' && btn.key.startsWith('kling') && btn.costPerSecond && btn.durations) {
         const minCost = Math.min(...btn.durations) * btn.costPerSecond;
         const maxCost = Math.max(...btn.durations) * btn.costPerSecond;

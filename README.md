@@ -58,6 +58,12 @@ cp .env.example .env
 - [GoAPI](https://www.goapi.ai/)
 - Або власний Discord bot
 
+#### KIE.AI (Kling 3.0 тощо)
+1. Зареєструйтесь на [kie.ai](https://kie.ai/), отримайте API ключ.
+2. У `.env` додайте: `KIE_AI_API_KEY=ваш_ключ`.
+3. **Доступ**: `KIE_AI_ACCESS=admin_only` (за замовчуванням) — генерації KIE тільки для адміна; для всіх: `all_users`.
+4. **Ціна**: вартість Kling 3.0 рахується з кешу `config/kie-ai-pricing-cache.json` з націнкою 30%. Щоб під тести використовувати фіксовані ціни з `config/models.js`, встановіть `KIE_AI_USE_CACHE_PRICING=false`.
+
 ## 🏃 Запуск
 
 ### Розробка (з автоперезапуском)
