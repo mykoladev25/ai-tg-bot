@@ -854,7 +854,18 @@ async function generateKling3VideoKieAI(options = {}) {
       }
     );
 
-    const taskId = createResponse.data.data.taskId;
+    const data = createResponse?.data?.data;
+    const taskId = data?.taskId;
+    if (!taskId) {
+      const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+      const errText = typeof apiMsg === 'string' ? apiMsg : (createResponse?.data ? JSON.stringify(createResponse.data) : 'KIE.AI не повернув taskId');
+      console.error('❌ KIE.AI Kling 3.0 createTask: no taskId', createResponse?.data);
+      return {
+        success: false,
+        error: errText || 'Сервер не повернув ідентифікатор завдання. Спробуйте ще раз.',
+        provider: 'kie-ai'
+      };
+    }
     console.log(`✅ KIE.AI Kling 3.0 task created: ${taskId}`);
 
     // Kling 3.0 може займати довше (до 15 сек відео)
@@ -876,10 +887,12 @@ async function generateKling3VideoKieAI(options = {}) {
     };
 
   } catch (error) {
-    console.error('❌ KIE.AI Kling 3.0 Error:', error.response?.data || error.message);
+    const res = error.response?.data;
+    console.error('❌ KIE.AI Kling 3.0 Error:', res || error.message);
+    const errMsg = (typeof res?.msg === 'string' ? res.msg : null) || res?.message || error.message;
     return {
       success: false,
-      error: error.response?.data?.message || error.message,
+      error: errMsg,
       provider: 'kie-ai'
     };
   }
