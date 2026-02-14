@@ -24,10 +24,10 @@ function isAdminUser(userId) {
  * Polling для отримання результату від KIE.AI API
  *
  * Документація: https://docs.kie.ai/api-reference/query-task
- *
+ * KIE асинхронна: результат тільки через polling або webhook (https://docs.kie.ai/#7-asynchronous-task-model)
  * Статуси: pending, processing, success, fail
  */
-async function pollJobStatus(taskId, maxAttempts = 120, interval = 2000, modelName = 'KIE.AI') {
+async function pollJobStatus(taskId, maxAttempts = 400, interval = 3000, modelName = 'KIE.AI') {
   let attempts = 0;
 
   while (attempts < maxAttempts) {
@@ -72,6 +72,21 @@ async function pollJobStatus(taskId, maxAttempts = 120, interval = 2000, modelNa
     }
   }
 
+  // Остання спроба: іноді таск встигає завершитись одразу після нашого останнього запиту
+  try {
+    const last = await axios.get(`${KIE_API_BASE}/jobs/status/${taskId}`, {
+      headers: { 'Authorization': `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' }
+    });
+    const job = last.data?.data;
+    const state = job?.state || job?.status;
+    if (state === 'success' || state === 'completed') {
+      console.log(`📊 ${modelName} got result on final check`);
+      return job;
+    }
+  } catch (e) {
+    // ігноруємо
+  }
+
   throw new Error(`Timeout waiting for ${modelName} task completion (${taskId})`);
 }
 
@@ -97,10 +112,22 @@ function normalizeImageInput(imageInput, maxImages = 3) {
  * Формат може бути різний залежно від моделі
  */
 function extractImageUrl(result) {
-  // Спробуємо різні формати
+  if (!result) return null;
+
+  // Масив URL (напр. від KIE: ["https://..."])
+  if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'string') {
+    return result[0];
+  }
+  if (Array.isArray(result.output) && result.output.length > 0 && typeof result.output[0] === 'string') {
+    return result.output[0];
+  }
+
   if (result.resultJson) {
     try {
       const parsed = JSON.parse(result.resultJson);
+      if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') {
+        return parsed[0];
+      }
       if (parsed.resultUrls && parsed.resultUrls.length > 0) {
         return parsed.resultUrls[0];
       }
@@ -249,8 +276,8 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    // Очікуємо на результат (polling)
-    const result = await pollJobStatus(taskId, 120, 2000, 'Nano Banana Pro (KIE.AI)');
+    // Очікуємо на результат (polling): до ~20 хв (KIE асинхронна — тільки polling або webhook)
+    const result = await pollJobStatus(taskId, 400, 3000, 'Nano Banana Pro (KIE.AI)');
 
     // Отримуємо URL зображення з результату
     const imageUrl = extractImageUrl(result);
@@ -353,7 +380,7 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    const result = await pollJobStatus(taskId, 120, 2000, 'Seedream (KIE.AI)');
+    const result = await pollJobStatus(taskId, 400, 3000, 'Seedream (KIE.AI)');
 
     // Отримуємо URL зображення
     const imageUrl = extractImageUrl(result);
@@ -436,7 +463,7 @@ async function generateWithRecraftUpscaleKieAI(imageUrl) {
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    const result = await pollJobStatus(taskId, 120, 2000, 'Recraft Upscale (KIE.AI)');
+    const result = await pollJobStatus(taskId, 400, 3000, 'Recraft Upscale (KIE.AI)');
 
     const resultImageUrl = extractImageUrl(result);
     if (!resultImageUrl) {
@@ -549,7 +576,7 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    const result = await pollJobStatus(taskId, 120, 2000, 'Ideogram (KIE.AI)');
+    const result = await pollJobStatus(taskId, 400, 3000, 'Ideogram (KIE.AI)');
 
     // Отримуємо URL зображення
     const resultImageUrl = extractImageUrl(result);
@@ -640,7 +667,8 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
     // Kling Motion може займати довше часу
-    const result = await pollJobStatus(taskId, 180, 3000, 'Kling Motion (KIE.AI)');
+    // Відео: до ~50 хв (Kling Motion може генерувати довго)
+    const result = await pollJobStatus(taskId, 600, 5000, 'Kling Motion (KIE.AI)');
 
     // Отримуємо URL відео
     const videoResultUrl = extractVideoUrl(result);
@@ -818,7 +846,8 @@ async function generateKling3VideoKieAI(options = {}) {
     console.log(`✅ KIE.AI Kling 3.0 task created: ${taskId}`);
 
     // Kling 3.0 може займати довше (до 15 сек відео)
-    const result = await pollJobStatus(taskId, 240, 4000, 'Kling 3.0 (KIE.AI)');
+    // Відео: до ~50 хв
+    const result = await pollJobStatus(taskId, 600, 5000, 'Kling 3.0 (KIE.AI)');
 
     const videoUrl = extractVideoUrl(result);
     if (!videoUrl) {
@@ -957,7 +986,8 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    const result = await pollJobStatus(taskId, 180, 3000, `Kling ${version} (KIE.AI)`);
+    // Відео Kling v2.5/v2.6: до ~50 хв
+    const result = await pollJobStatus(taskId, 600, 5000, `Kling ${version} (KIE.AI)`);
 
     const videoUrl = extractVideoUrl(result);
     if (!videoUrl) {
@@ -1080,8 +1110,8 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Runway task created: ${taskId}`);
 
-    // Runway має свій endpoint для статусу
-    const result = await pollRunwayStatus(taskId, 300, 5000, 'Runway (KIE.AI)');
+    // Runway відео: до ~50 хв
+    const result = await pollRunwayStatus(taskId, 600, 5000, 'Runway (KIE.AI)');
 
     // Отримуємо URL відео
     const videoUrl = result.videoInfo?.videoUrl;
@@ -1113,7 +1143,7 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
  *
  * Статуси: wait, queueing, generating, success, fail
  */
-async function pollRunwayStatus(taskId, maxAttempts = 300, interval = 5000, modelName = 'Runway') {
+async function pollRunwayStatus(taskId, maxAttempts = 600, interval = 5000, modelName = 'Runway') {
   let attempts = 0;
 
   while (attempts < maxAttempts) {
@@ -1154,6 +1184,18 @@ async function pollRunwayStatus(taskId, maxAttempts = 300, interval = 5000, mode
       attempts++;
     }
   }
+
+  // Остання спроба перед таймаутом
+  try {
+    const last = await axios.get(`${KIE_API_BASE}/runway/record-detail?taskId=${taskId}`, {
+      headers: { 'Authorization': `Bearer ${KIE_API_KEY}` }
+    });
+    const task = last.data?.data;
+    if (task?.state === 'success') {
+      console.log(`📊 ${modelName} got result on final check`);
+      return task;
+    }
+  } catch (e) { /* ігноруємо */ }
 
   throw new Error(`Timeout waiting for ${modelName} task completion (${taskId})`);
 }
@@ -1281,8 +1323,8 @@ async function generateVeoKieAI(prompt, options = {}) {
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Veo task created: ${taskId}`);
 
-    // Veo може займати довше часу (до 5 хвилин)
-    const result = await pollVeoStatus(taskId, 300, 5000, 'Veo 3.1 (KIE.AI)');
+    // Veo відео: до ~50 хв
+    const result = await pollVeoStatus(taskId, 600, 5000, 'Veo 3.1 (KIE.AI)');
 
     // Отримуємо URL відео
     const videoUrl = extractVideoUrl(result);
@@ -1312,7 +1354,7 @@ async function generateVeoKieAI(prompt, options = {}) {
 /**
  * Polling для Veo (може мати інший endpoint для статусу)
  */
-async function pollVeoStatus(taskId, maxAttempts = 300, interval = 5000, modelName = 'Veo') {
+async function pollVeoStatus(taskId, maxAttempts = 600, interval = 5000, modelName = 'Veo') {
   let attempts = 0;
 
   while (attempts < maxAttempts) {
@@ -1356,6 +1398,19 @@ async function pollVeoStatus(taskId, maxAttempts = 300, interval = 5000, modelNa
       attempts++;
     }
   }
+
+  // Остання спроба перед таймаутом
+  try {
+    const last = await axios.get(`${KIE_API_BASE}/jobs/status/${taskId}`, {
+      headers: { 'Authorization': `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' }
+    });
+    const job = last.data?.data;
+    const state = job?.state || job?.status;
+    if (state === 'success' || state === 'completed') {
+      console.log(`📊 ${modelName} got result on final check`);
+      return job;
+    }
+  } catch (e) { /* ігноруємо */ }
 
   throw new Error(`Timeout waiting for ${modelName} task completion (${taskId})`);
 }

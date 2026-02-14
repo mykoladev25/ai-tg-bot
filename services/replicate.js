@@ -57,9 +57,10 @@ function normalizeImageInput(imageInput, maxImages = 14) {
 }
 
 /**
- * Polling для очікування результату від Replicate API
+ * Polling для очікування результату від Replicate API.
+ * Дефолт: до ~20 хв для зображень (400×3с); для відео передавати більші maxAttempts/interval.
  */
-async function pollPrediction(predictionId, maxAttempts = 60, interval = 2000, modelName = 'Model') {
+async function pollPrediction(predictionId, maxAttempts = 400, interval = 3000, modelName = 'Model') {
   let result = null;
   let attempts = 0;
 
@@ -87,7 +88,17 @@ async function pollPrediction(predictionId, maxAttempts = 60, interval = 2000, m
     attempts++;
   }
 
+  // Остання спроба перед таймаутом
   if (!result) {
+    try {
+      const last = await axios.get(`${REPLICATE_API}/predictions/${predictionId}`, {
+        headers: { 'Authorization': `Token ${process.env.REPLICATE_API_KEY}` }
+      });
+      if (last.data?.status === 'succeeded') {
+        console.log(`📊 ${modelName} got result on final check`);
+        return last.data;
+      }
+    } catch (e) { /* ігноруємо */ }
     throw new Error(`Timeout waiting for ${modelName} generation`);
   }
 
@@ -127,7 +138,7 @@ async function generateWithFlux(prompt) {
     const predictionId = response.data.id;
     console.log('FLUX prediction created:', predictionId);
 
-    const result = await pollPrediction(predictionId, 60, 2000, 'FLUX');
+    const result = await pollPrediction(predictionId, 400, 3000, 'FLUX');
 
     return {
       success: true,
@@ -183,7 +194,7 @@ async function generateWithStableDiffusion(prompt, imageUrl = null, strength = 0
     const predictionId = response.data.id;
     console.log('Stable Diffusion prediction created:', predictionId);
 
-    const result = await pollPrediction(predictionId, 60, 2000, 'Stable Diffusion');
+    const result = await pollPrediction(predictionId, 400, 3000, 'Stable Diffusion');
 
     return {
       success: true,
