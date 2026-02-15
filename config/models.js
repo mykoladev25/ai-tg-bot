@@ -57,6 +57,21 @@ module.exports = {
     ]
   },
 
+  /**
+   * Video Models
+   *
+   * ⚠️ requiresImage: true моделі (image-to-video ONLY):
+   * - runway_turbo (RunWay Gen-4 Turbo)
+   * - runway_gen4 (RunWay Gen-4 Aleph) - currently unavailable
+   * - kling (Kling v2.5 Turbo) - KIE.AI: тільки image-to-video!
+   * - kling_motion (Kling Motion Control) - також requiresVideo: true
+   *
+   * ✅ requiresImage: false моделі (text-to-video + опціонально image-to-video):
+   * - kling_v2_6 (Kling v2.6)
+   * - kling_3 (Kling 3.0 Pro)
+   * - veo (Google Veo 3.1)
+   * - sora_2 (OpenAI Sora 2)
+   */
   video: {
     models: [
       /**
@@ -89,7 +104,7 @@ module.exports = {
         cost: 60,
         apiCostPerSecond: 0.07,
         available: true,
-        requiresImage: false,
+        requiresImage: true,  // ⚠️ KIE.AI: Kling v2.5 = тільки image-to-video!
         durations: [5, 10],
         supportsEndImage: true
       },

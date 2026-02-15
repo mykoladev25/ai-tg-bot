@@ -284,7 +284,14 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
       }
     );
 
-    // ✅ Правильно: taskId, не id
+    console.log(`📥 KIE.AI Nano Banana response:`, JSON.stringify(createResponse.data, null, 2));
+
+    // Перевіряємо структуру відповіді
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+    }
+
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
@@ -388,7 +395,14 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
       }
     );
 
-    // ✅ Правильно: taskId
+    console.log(`📥 KIE.AI Seedream response:`, JSON.stringify(createResponse.data, null, 2));
+
+    // Перевіряємо структуру відповіді
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+    }
+
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
@@ -471,6 +485,14 @@ async function generateWithRecraftUpscaleKieAI(imageUrl) {
         }
       }
     );
+
+    console.log(`📥 KIE.AI Recraft response:`, JSON.stringify(createResponse.data, null, 2));
+
+    // Перевіряємо структуру відповіді
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+    }
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
@@ -584,7 +606,14 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
       }
     );
 
-    // ✅ Правильно: taskId
+    console.log(`📥 KIE.AI Ideogram response:`, JSON.stringify(createResponse.data, null, 2));
+
+    // Перевіряємо структуру відповіді
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+    }
+
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
@@ -674,7 +703,14 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
       }
     );
 
-    // ✅ Правильно: taskId
+    console.log(`📥 KIE.AI Kling Motion response:`, JSON.stringify(createResponse.data, null, 2));
+
+    // Перевіряємо структуру відповіді
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+    }
+
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
@@ -939,6 +975,10 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
     let modelName;
     if (version === 'v2.5') {
       // v2.5 - тільки image-to-video з розширеними параметрами
+      // ⚠️ ОБОВ'ЯЗКОВО потрібне початкове зображення!
+      if (!imageUrl) {
+        throw new Error('Kling v2.5 підтримує тільки image-to-video. Будь ласка, завантажте початкове зображення.');
+      }
       modelName = 'kling/v2-5-turbo-image-to-video-pro';
     } else {
       // v2.6
@@ -993,7 +1033,8 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
       model: payload.model,
       mode: isImage2Video ? 'image2video' : 'text2video',
       duration,
-      sound
+      sound,
+      payload: JSON.stringify(payload, null, 2)
     });
 
     const createResponse = await axios.post(
@@ -1006,6 +1047,14 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
         }
       }
     );
+
+    console.log(`📥 KIE.AI response:`, JSON.stringify(createResponse.data, null, 2));
+
+    // Перевіряємо структуру відповіді
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+    }
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
@@ -1027,11 +1076,33 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
     };
 
   } catch (error) {
-    console.error(`❌ KIE.AI Kling Error:`, error.response?.data || error.message);
+    console.error(`❌ KIE.AI Kling Error:`, {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      stack: error.stack
+    });
+
+    // Формуємо зрозуміле повідомлення для користувача
+    let errorMessage = error.message;
+
+    if (error.response?.data) {
+      const apiError = error.response.data;
+      if (apiError.msg) {
+        errorMessage = apiError.msg;
+      } else if (apiError.message) {
+        errorMessage = apiError.message;
+      } else if (apiError.error) {
+        errorMessage = apiError.error;
+      }
+    }
+
     return {
       success: false,
-      error: error.response?.data?.message || error.message,
-      provider: 'kie-ai'
+      error: errorMessage,
+      provider: 'kie-ai',
+      details: error.response?.data
     };
   }
 }
@@ -1130,6 +1201,14 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
         }
       }
     );
+
+    console.log(`📥 KIE.AI Runway response:`, JSON.stringify(createResponse.data, null, 2));
+
+    // Перевіряємо структуру відповіді
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      console.error('❌ Invalid KIE.AI Runway response structure:', createResponse.data);
+      throw new Error(`Неочікувана відповідь від KIE.AI Runway: ${JSON.stringify(createResponse.data)}`);
+    }
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Runway task created: ${taskId}`);
@@ -1343,7 +1422,14 @@ async function generateVeoKieAI(prompt, options = {}) {
       }
     );
 
-    // ✅ Правильно: taskId
+    console.log(`📥 KIE.AI Veo response:`, JSON.stringify(createResponse.data, null, 2));
+
+    // Перевіряємо структуру відповіді
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      console.error('❌ Invalid KIE.AI Veo response structure:', createResponse.data);
+      throw new Error(`Неочікувана відповідь від KIE.AI Veo: ${JSON.stringify(createResponse.data)}`);
+    }
+
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Veo task created: ${taskId}`);
 
@@ -1430,6 +1516,7 @@ async function pollVeoStatus(taskId, maxAttempts = 600, interval = 5000, modelNa
 
   throw new Error(`Timeout waiting for ${modelName} task completion (${taskId})`);
 }
+
 
 // ==================== EXPORT ====================
 

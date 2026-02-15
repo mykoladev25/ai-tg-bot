@@ -3299,6 +3299,16 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
     const costs = getEffectiveKlingMotionCosts(ctx.from.id);
     requiredCost = Math.min(...Object.values(costs));
   }
+  if (modelKey === 'kling') {
+    const durations = model.durations || [5, 10];
+    const minDuration = Math.min(...durations);
+    requiredCost = minDuration * getEffectiveKlingCostPerSecond(ctx.from.id);
+  }
+  if (modelKey === 'kling_v2_6') {
+    const durations = model.durations || [5, 10];
+    const minDuration = Math.min(...durations);
+    requiredCost = minDuration * getEffectiveKlingV2_6CostPerSecond(ctx.from.id, model, false);
+  }
   if (modelKey === 'kling_3') {
     const durations = model.durations || [3, 5, 8, 10, 15];
     const minDuration = Math.min(...durations);
@@ -3540,17 +3550,27 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
     return;
   }
 
+  // Розрахунок ефективної вартості для відображення у повідомленнях
+  let displayCost = model.cost;
+  if (modelKey === 'runway_turbo') {
+    displayCost = 5 * getEffectiveRunwayTurboCostPerSecond(ctx.from.id);
+  } else if (modelKey === 'runway_gen4') {
+    displayCost = 10 * getEffectiveRunwayTurboCostPerSecond(ctx.from.id);
+  } else if (modelKey === 'luma') {
+    displayCost = 5 * (model.costPerSecond || (model.cost / 5));
+  }
+
   const messages = {
 
-    runway_turbo: `${model.name}\n\n🎬 Image-to-Video ONLY ⚠️\n\n⚠️ ОБОВ'ЯЗКОВО: Надішліть зображення + текстовий опис\n\n📝 Опис має містити деталі руху/анімації\n🖼️ Зображення стане першим кадром відео\n\n💡 Приклад:\n"Camera slowly zooms in, person turns head to the left"\n\n⏱️ Генерація: 1-3 хвилини\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 720p, 5 секунд\n⚡ Найшвидша модель!`,
+    runway_turbo: `${model.name}\n\n🎬 Image-to-Video ONLY ⚠️\n\n⚠️ ОБОВ'ЯЗКОВО: Надішліть зображення + текстовий опис\n\n📝 Опис має містити деталі руху/анімації\n🖼️ Зображення стане першим кадром відео\n\n💡 Приклад:\n"Camera slowly zooms in, person turns head to the left"\n\n⏱️ Генерація: 1-3 хвилини\n💰 Вартість: ${displayCost}⚡\n📊 Якість: 720p, 5 секунд\n⚡ Найшвидша модель!`,
 
-    runway_gen4: `${model.name}\n\n🎬 Image-to-Video ONLY ⚠️\n\n⚠️ ОБОВ'ЯЗКОВО: Надішліть зображення + текстовий опис\n\n📝 Опис має містити деталі руху/анімації\n🖼️ Зображення стане першим кадром відео\n\n💡 Приклад:\n"Slow motion, waves crashing, cinematic"\n\n⏱️ Генерація: 3-5 хвилин\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 1080p, 10 секунд\n💎 Найвища якість!`,
+    runway_gen4: `${model.name}\n\n🎬 Image-to-Video ONLY ⚠️\n\n⚠️ ОБОВ'ЯЗКОВО: Надішліть зображення + текстовий опис\n\n📝 Опис має містити деталі руху/анімації\n🖼️ Зображення стане першим кадром відео\n\n💡 Приклад:\n"Slow motion, waves crashing, cinematic"\n\n⏱️ Генерація: 3-5 хвилин\n💰 Вартість: ${displayCost}⚡\n📊 Якість: 1080p, 10 секунд\n💎 Найвища якість!`,
 
-    luma: `${model.name}\n\n🌊 Text-to-Video і Image-to-Video\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для створення відео\n\n⏱️ Генерація: 2-4 хвилини\n💰 Вартість: ${model.cost}⚡\n📊 Якість: 1080p, 5 секунд`
+    luma: `${model.name}\n\n🌊 Text-to-Video і Image-to-Video\n\n📝 Надішліть текстовий опис для генерації\n🖼️ АБО надішліть фото з підписом для створення відео\n\n⏱️ Генерація: 2-4 хвилини\n💰 Вартість: ${displayCost}⚡\n📊 Якість: 1080p, 5 секунд`
   };
 
   await ctx.reply(
-    messages[modelKey] || `${model.name}\n\nНадішліть текстовий опис відео або зображення з підписом.\n\n⏱️ Генерація: 2-5 хвилин\n💰 Вартість: ${model.cost}⚡`,
+    messages[modelKey] || `${model.name}\n\nНадішліть текстовий опис відео або зображення з підписом.\n\n⏱️ Генерація: 2-5 хвилин\n💰 Вартість: ${displayCost}⚡`,
     keyboard.createBackButton('video_menu')
   );
 });
@@ -4125,7 +4145,7 @@ bot.action(/^runway_turbo_duration_(\d+)$/, async (ctx) => {
     return;
   }
 
-  const costPerSec = model?.costPerSecond || (model?.cost || 22) / 5;
+  const costPerSec = getEffectiveRunwayTurboCostPerSecond(userId);
   const cost = duration * costPerSec;
 
   userState.set(userId, {
@@ -4601,22 +4621,33 @@ bot.action(/^kling_aspect_(.+)$/, async (ctx) => {
     ? `🔊 Аудіо: <b>${state.generateAudio ? 'Так' : 'Ні'}</b>\n`
     : '';
 
+  // ⚠️ Kling v2.5 (key: 'kling') — тільки image-to-video! Не показуємо "Без зображення"
+  const isKlingV25 = modelKey === 'kling';
+  const requiresImage = isKlingV25;
+
+  const buttons = [];
+  buttons.push([Markup.button.callback('🖼️ Завантажу зображення', 'kling_add_start_image')]);
+
+  // Якщо модель НЕ вимагає image, показуємо опцію "Без зображення"
+  if (!requiresImage) {
+    buttons.push([Markup.button.callback('⏭️ Без зображення (text-to-video)', 'kling_skip_start_image')]);
+  }
+
+  buttons.push([Markup.button.callback('← Назад', 'video_menu')]);
+
   await ctx.reply(
     `<b>${model?.name || '🎭 Kling'}</b>\n\n` +
     `⏱️ Тривалість: <b>${state.duration} сек</b>\n` +
     `📐 Пропорції: <b>${aspectRatio}</b>\n` +
     `${audioLine}` +
     `💰 Вартість: <b>${effectiveCost}⚡</b>\n\n` +
-    `🖼️ <b>Крок ${startImageStep}: Стартове зображення (опціонально)</b>\n\n` +
-    `Зображення стане першим кадром відео.\n` +
-    `AI анімує його згідно з промптом.`,
+    `🖼️ <b>Крок ${startImageStep}: ${requiresImage ? 'Завантажте стартове зображення' : 'Стартове зображення (опціонально)'}</b>\n\n` +
+    `${requiresImage 
+      ? '⚠️ Kling v2.5 працює тільки з image-to-video.\n\nЗображення стане першим кадром відео.\nAI анімує його згідно з промптом.' 
+      : 'Зображення стане першим кадром відео.\nAI анімує його згідно з промптом.'}`,
     {
       parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🖼️ Завантажу зображення', 'kling_add_start_image')],
-        [Markup.button.callback('⏭️ Без зображення (text-to-video)', 'kling_skip_start_image')],
-        [Markup.button.callback('← Назад', 'video_menu')]
-      ])
+      ...Markup.inlineKeyboard(buttons)
     }
   );
 });
@@ -4656,6 +4687,12 @@ bot.action('kling_skip_start_image', async (ctx) => {
 
   if (!state || state.action !== 'kling_generation') {
     await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  // ⚠️ Kling v2.5 вимагає зображення!
+  if (modelKey === 'kling') {
+    await ctx.answerCbQuery('⚠️ Kling v2.5 працює тільки з зображеннями!', { show_alert: true });
     return;
   }
 
@@ -4821,9 +4858,10 @@ bot.action(/^motion_mode_(std|pro)$/, async (ctx) => {
     mode: mode
   });
 
-  // Показуємо ціни для обраного mode
-  const imageCost = model.costs[`${mode}_image`];
-  const videoCost = model.costs[`${mode}_video`];
+  // Показуємо ціни для обраного mode (ефективні ціни за провайдером)
+  const effectiveCosts = getEffectiveKlingMotionCosts(userId);
+  const imageCost = effectiveCosts[`${mode}_image`];
+  const videoCost = effectiveCosts[`${mode}_video`];
 
   await ctx.reply(
     `🔥 <b>Kling Motion Control</b>\n\n` +
@@ -5192,11 +5230,14 @@ async function generateKlingVideo(ctx, state) {
       if (useKieAI) {
         // KIE.AI підтримує Kling v2.5 та v2.6
         const version = modelKey === 'kling_v2_6' ? 'v2.6' : 'v2.5';
+        const enableSound = generationData.generateAudio === true;
+
         result = await kieAI.generateKlingVideoKieAI(
           generationData.prompt,
           generationData.startImage || null,
           duration,
           generationData.aspectRatio || '16:9',
+          enableSound,
           version
         );
       } else {
@@ -7780,16 +7821,26 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
 
   const imageUrl = await getImageUrl(ctx);
   
-  if ((modelKey === 'runway_turbo' || modelKey === 'runway_gen4') && !imageUrl) {
+  // ✅ Перевіряємо чи модель вимагає зображення (universal check)
+  if (model.requiresImage && !imageUrl) {
+    const modelNames = {
+      'runway_turbo': 'Runway Gen-4 Turbo',
+      'runway_gen4': 'Runway Gen-4 Aleph',
+      'kling': 'Kling v2.5 Turbo',
+      'kling_motion': 'Kling Motion Control'
+    };
+
+    const modelName = modelNames[modelKey] || model.name;
+
     await ctx.reply(
-      `⚠️ ${model.name} працює тільки з зображеннями!\n\n` +
+      `⚠️ <b>${modelName}</b> працює тільки з зображеннями!\n\n` +
       `📝 Інструкція:\n` +
       `1. Надішліть зображення\n` +
       `2. Додайте підпис з описом руху/анімації\n\n` +
       `💡 Приклад підпису:\n` +
       `"Camera slowly pans right, person smiles"\n\n` +
-      `Спробуйте ще раз або оберіть Kling для text-to-video 👇`,
-      keyboard.createBackButton('video_menu')
+      `Спробуйте ще раз або оберіть іншу модель 👇`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
     return;
   }
