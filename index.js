@@ -5090,6 +5090,21 @@ bot.on('video', async (ctx) => {
     return;
   }
 
+  // Перевірка роздільності (мінімум 720px по обох вимірах)
+  const videoWidth = videoFile.width || 0;
+  const videoHeight = videoFile.height || 0;
+  if (videoWidth < 720 || videoHeight < 720) {
+    await ctx.reply(
+      `❌ Роздільність відео занадто низька!\n\n` +
+      `Мінімальна роздільність: 720x720 пікселів\n` +
+      `Ваше відео: ${videoWidth}x${videoHeight}\n\n` +
+      `⚠️ Обидва виміри (ширина та висота) повинні бути не менше 720px.\n\n` +
+      `Спробуйте використати відео з вищою роздільністю.`,
+      keyboard.createBackButton('video_menu')
+    );
+    return;
+  }
+
   const videoUrl = await getVideoUrl(ctx);
   if (!videoUrl) {
     await ctx.reply('❌ Помилка: не вдалося завантажити відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
@@ -7136,6 +7151,19 @@ bot.on('text', async (ctx) => {
         '⚠️ Опис занадто короткий!\n\n' +
         'Напишіть детальніше що потрібно змінити у відео (мінімум 5 символів).',
         keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    // Перевірка на копіювання повідомлення бота
+    if (text.includes('NeuroLabAI') || text.includes('БОТ НЕЙРОМЕРЕЖІ') || text.includes('Крок') || text.includes('💰 Орієнтовна вартість')) {
+      await ctx.reply(
+        '⚠️ Схоже, ви скопіювали повідомлення бота!\n\n' +
+        '📝 Будь ласка, напишіть <b>свій опис редагування</b> текстом.\n\n' +
+        '💡 Приклад: "Замінити оранжевий автомобіль на сірий"\n' +
+        '💡 Або: "Змінити фон на пляж"\n\n' +
+        'Якщо ви додали референсні зображення, посилайтесь на них як <b>@Image1</b>, <b>@Image2</b> тощо.',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
       return;
     }
