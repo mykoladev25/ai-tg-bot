@@ -830,6 +830,111 @@ async function generateVideoWithVeo(prompt, referenceImages = [], lastFrame = nu
   }
 }
 
+/**
+ * Генерація/редагування відео через Kling O1 Edit (Replicate)
+ * Модель: kwaivgi/kling-o1
+ * 
+ * Параметри:
+ * - prompt: текстовий опис редагування (required)
+ * - referenceVideo: URL відео для редагування (optional, але потрібен для редагування)
+ * - startImage: перший кадр (optional)
+ * - endImage: останній кадр (optional, потребує startImage)
+ * - referenceImages: масив референсних зображень (до 7 без відео, 4 з відео)
+ * - videoReferenceType: 'feature' (стиль/камера) або 'base' (редагування відео)
+ * - keepOriginalSound: зберігати оригінальний звук (boolean)
+ * - mode: 'std' або 'pro'
+ * - aspectRatio: пропорції відео (optional, required для text-to-video)
+ * - duration: тривалість у секундах (3-10, optional, ігнорується для base type)
+ */
+async function generateVideoWithKlingO1Edit(options = {}) {
+  try {
+    const {
+      prompt = '',
+      referenceVideo = null,
+      startImage = null,
+      endImage = null,
+      referenceImages = [],
+      videoReferenceType = 'feature',  // 'feature' або 'base'
+      keepOriginalSound = false,
+      mode = 'std',
+      aspectRatio = null,
+      duration = 5
+    } = options;
+
+    if (!prompt || prompt.trim().length === 0) {
+      throw new Error('Prompt є обов\'язковим для Kling O1 Edit');
+    }
+
+    const input = {
+      prompt: prompt,
+      mode: mode  // 'std' або 'pro'
+    };
+
+    // Додаємо відео якщо є
+    if (referenceVideo) {
+      input.reference_video = referenceVideo;
+      input.video_reference_type = videoReferenceType;  // 'feature' або 'base'
+      input.keep_original_sound = keepOriginalSound;
+      
+      // Для base type duration ігнорується
+      if (videoReferenceType === 'feature' && duration) {
+        input.duration = Math.min(Math.max(parseInt(duration), 3), 10);
+      }
+    } else {
+      // Text-to-video: потрібен aspectRatio та duration
+      if (aspectRatio) {
+        input.aspect_ratio = aspectRatio;
+      }
+      if (duration) {
+        input.duration = Math.min(Math.max(parseInt(duration), 3), 10);
+      }
+    }
+
+    // Додаємо start_image та end_image
+    if (startImage) {
+      input.start_image = startImage;
+      if (endImage) {
+        input.end_image = endImage;
+      }
+    }
+
+    // Додаємо reference_images (до 7 без відео, 4 з відео)
+    if (referenceImages && referenceImages.length > 0) {
+      const maxRefs = referenceVideo ? 4 : 7;
+      input.reference_images = referenceImages.slice(0, maxRefs);
+    }
+
+    console.log(`✂️ Kling O1 Edit:`, {
+      prompt: prompt.substring(0, 100),
+      mode,
+      hasVideo: !!referenceVideo,
+      videoType: videoReferenceType,
+      hasStartImage: !!startImage,
+      hasEndImage: !!endImage,
+      referenceImagesCount: input.reference_images?.length || 0,
+      duration: input.duration,
+      aspectRatio: input.aspect_ratio
+    });
+
+    const output = await replicate.run(
+      "kwaivgi/kling-o1",
+      { input }
+    );
+
+    return {
+      success: true,
+      videoUrl: Array.isArray(output) ? output[0] : output
+    };
+
+  } catch (error) {
+    console.error('Kling O1 Edit API Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 module.exports = {
   generateWithFlux,
   generateWithStableDiffusion,
@@ -846,5 +951,6 @@ module.exports = {
   generateVideoWithKlingMotion,
   generateVideoWithRunway,
   generateVideoWithSora2,
-  generateVideoWithVeo
+  generateVideoWithVeo,
+  generateVideoWithKlingO1Edit
 };

@@ -126,6 +126,17 @@ function getVideoModelsForUser(userId) {
       const minCost = Math.min(...durations.map(d => getEffectiveSora2Cost(userId, m, d)));
       return { ...m, cost: minCost };
     }
+    if (m.key === 'kling_o1_edit') {
+      // Для редагування відео: ціна залежить від mode та наявності відео-input
+      // Показуємо мінімальну ціну (std без відео-input)
+      const durations = m.durations || [3, 5, 7, 10];
+      const minDuration = Math.min(...durations);
+      return {
+        ...m,
+        cost: minDuration * m.costPerSecond,  // std без відео-input
+        maxCost: Math.max(...durations) * m.costPerSecondProWithVideo  // pro з відео-input
+      };
+    }
     return m;
   });
 }
@@ -3254,7 +3265,7 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
 
 
 // Video Models
-bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo|sora_2|luma)$/, async (ctx) => {
+bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|runway_turbo|veo|sora_2|luma)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.video.models.find(m => m.key === modelKey);
 
@@ -3323,6 +3334,12 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
     const minDuration = model.minSeconds || (model.durations?.length ? Math.min(...model.durations) : 4);
     requiredCost = minDuration * getEffectiveVeoCostPerSecond(ctx.from.id, false);
   }
+  if (modelKey === 'kling_o1_edit') {
+    const durations = model.durations || [3, 5, 7, 10];
+    const minDuration = Math.min(...durations);
+    // Мінімальна ціна: std без відео-input
+    requiredCost = minDuration * model.costPerSecond;
+  }
 
   if (!(await userBalance.hasTokens(ctx.from.id, requiredCost))) {
     await showInsufficientTokens(ctx, requiredCost);
@@ -3348,6 +3365,41 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|runway_gen4|runway_turbo|veo
           [
             Markup.button.callback('⚡ STD', 'motion_mode_std'),
             Markup.button.callback('💎 PRO', 'motion_mode_pro')
+          ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  if (modelKey === 'kling_o1_edit') {
+    const durations = model.durations || [3, 5, 7, 10];
+    const minDuration = Math.min(...durations);
+    const maxDuration = Math.max(...durations);
+    const minCostStd = minDuration * model.costPerSecond;
+    const maxCostPro = maxDuration * model.costPerSecondProWithVideo;
+
+    userState.set(ctx.from.id, {
+      action: 'kling_o1_edit_generation',
+      step: 'select_mode',
+      modelKey: 'kling_o1_edit'
+    });
+
+    await ctx.reply(
+      `✂️ <b>Kling O1 Edit</b>\n\n` +
+      `Редагування відео через природну мову: зміна персонажів, середовища, стилю зі збереженням руху та таймінгу.\n\n` +
+      `📐 <b>Крок 1: Оберіть режим якості</b>\n\n` +
+      `⚡ <b>STD</b> — стандартний (швидше, дешевше)\n` +
+      `💎 <b>PRO</b> — професійний (вища якість)\n\n` +
+      `💰 Орієнтовно: ${minCostStd}—${maxCostPro}⚡\n` +
+      `(залежить від тривалості відео та наявності відео-input)`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('⚡ STD', 'kling_o1_mode_std'),
+            Markup.button.callback('💎 PRO', 'kling_o1_mode_pro')
           ],
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
@@ -4977,6 +5029,95 @@ bot.action('motion_generate_now', async (ctx) => {
   runBackgroundTask(() => generateKlingMotionVideo(ctx, state), 'kling_motion_generate_now');
 });
 
+// ==================== KLING O1 EDIT FLOW ====================
+
+// Крок 1: Вибір mode (std/pro)
+bot.action(/^kling_o1_mode_(std|pro)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const mode = ctx.match[1];
+  const state = userState.get(userId);
+  const model = models.video.models.find(m => m.key === 'kling_o1_edit');
+
+  if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'select_mode') {
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Kling O1 Edit');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    mode: mode,
+    step: 'waiting_video'
+  });
+
+  await ctx.reply(
+    `✂️ <b>Kling O1 Edit</b>\n\n` +
+    `⚙️ Режим: <b>${mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n\n` +
+    `🎥 <b>Крок 2: Надішліть ВІДЕО для редагування</b>\n\n` +
+    `Потрібен відео-файл (MP4, MOV, WEBM, M4V, GIF)\n` +
+    `Максимальний розмір: 200MB\n` +
+    `Тривалість: 3-10 секунд\n\n` +
+    `📤 <b>Надішліть відео:</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Обробка відео для kling_o1_edit
+bot.on('video', async (ctx) => {
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'waiting_video') {
+    return;
+  }
+
+  const videoFile = ctx.message.video;
+  if (!videoFile) {
+    await ctx.reply('❌ Помилка: не вдалося отримати відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+    return;
+  }
+
+  // Перевірка розміру (200MB max)
+  const fileSizeMB = (videoFile.file_size || 0) / (1024 * 1024);
+  if (fileSizeMB > 200) {
+    await ctx.reply(
+      `❌ Відео занадто велике!\n\n` +
+      `Максимальний розмір: 200MB\n` +
+      `Ваш файл: ${fileSizeMB.toFixed(2)}MB\n\n` +
+      `Спробуйте стиснути відео або використати коротший кліп.`,
+      keyboard.createBackButton('video_menu')
+    );
+    return;
+  }
+
+  const videoUrl = await getVideoUrl(ctx);
+  if (!videoUrl) {
+    await ctx.reply('❌ Помилка: не вдалося завантажити відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    referenceVideo: videoUrl,
+    step: 'waiting_prompt'
+  });
+
+  await ctx.reply(
+    `✂️ <b>Kling O1 Edit</b>\n\n` +
+    `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+    `🎥 Відео: <b>Завантажено</b>\n\n` +
+    `✍️ <b>Крок 3: Опишіть редагування</b>\n\n` +
+    `Напишіть що потрібно змінити у відео:\n` +
+    `• Замінити персонажа\n` +
+    `• Змінити середовище\n` +
+    `• Змінити стиль\n` +
+    `• Інше редагування\n\n` +
+    `💡 Приклад: "Замінити персонажа на @Element1, змінити середовище на @Image1"\n\n` +
+    `📝 <b>Напишіть опис редагування:</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
 // ==================== KLING MOTION GENERATION FUNCTION ====================
 
 async function generateKlingMotionVideo(ctx, state) {
@@ -5130,6 +5271,155 @@ async function generateKlingMotionVideo(ctx, state) {
       } catch (e) {
         await bot.telegram.sendMessage(chatId, '❌ Помилка генерації Kling Motion. Спробуйте ще раз.');
       }
+    }
+  })();
+}
+
+// ==================== KLING O1 EDIT GENERATION FUNCTION ====================
+
+async function generateKlingO1EditVideo(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
+  const model = models.video.models.find(m => m.key === 'kling_o1_edit');
+
+  if (!model) {
+    await ctx.reply('❌ Модель Kling O1 Edit не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  if (!state.referenceVideo) {
+    await ctx.reply('❌ Помилка: відсутнє відео для редагування');
+    userState.delete(userId);
+    return;
+  }
+
+  if (!state.prompt) {
+    await ctx.reply('❌ Помилка: відсутній опис редагування');
+    userState.delete(userId);
+    return;
+  }
+
+  const duration = 5; // default, actual duration from video
+  const hasVideo = !!state.referenceVideo;
+  const costPerSec = hasVideo
+    ? (state.mode === 'pro' ? model.costPerSecondProWithVideo : model.costPerSecondWithVideo)
+    : (state.mode === 'pro' ? model.costPerSecondPro : model.costPerSecond);
+  const apiCostPerSec = hasVideo
+    ? (state.mode === 'pro' ? model.apiCostPerSecondProWithVideo : model.apiCostPerSecondWithVideo)
+    : (state.mode === 'pro' ? model.apiCostPerSecondPro : model.apiCostPerSecond);
+  const klingO1Cost = duration * costPerSec;
+  const apiCost = duration * apiCostPerSec;
+
+  if (!(await userBalance.hasTokens(userId, klingO1Cost))) {
+    await showInsufficientTokens(ctx, klingO1Cost);
+    userState.delete(userId);
+    return;
+  }
+
+  const statusMsg = await ctx.reply(
+    `✂️ <b>Kling O1 Edit - Генерація</b>\n\n` +
+    `⚙️ Режим: ${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}\n` +
+    `📝 Промпт: "${state.prompt.substring(0, 100)}${state.prompt.length > 100 ? '...' : ''}"\n\n` +
+    `⏱️ Це може зайняти 2-5 хвилин...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  const generationData = { ...state };
+
+  (async () => {
+    try {
+      const result = await replicate.generateVideoWithKlingO1Edit({
+        prompt: generationData.prompt,
+        referenceVideo: generationData.referenceVideo,
+        startImage: generationData.startImage || null,
+        endImage: generationData.endImage || null,
+        referenceImages: generationData.referenceImages || [],
+        videoReferenceType: 'base', // 'base' для редагування відео
+        keepOriginalSound: generationData.keepOriginalSound || false,
+        mode: generationData.mode,
+        aspectRatio: generationData.aspectRatio || null,
+        duration: duration
+      });
+
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId, username, action: 'kling_o1_edit_generation', model: model.name
+        });
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації Kling O1 Edit.\n\n${result.error}\n\nСпробуйте ще раз.`
+        );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'kling_o1_edit',
+          success: false,
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100)
+        });
+
+        gracefulShutdown.completeGeneration(statusMsg.message_id, false);
+        return;
+      }
+
+      await userBalance.deductTokens(userId, klingO1Cost, `${model.name} generation`, {
+        modelKey: 'kling_o1_edit',
+        modelName: model.name,
+        apiCost,
+        prompt: generationData.prompt,
+        hasVideo: true,
+        mode: generationData.mode
+      });
+
+      const isTrial = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey: 'kling_o1_edit',
+        success: true,
+        isTrial,
+        isFree: isTrial
+      });
+
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>Kling O1 Edit готово!</b>\n\n` +
+        `⚙️ Режим: ${generationData.mode === 'pro' ? '💎 PRO' : '⚡ STD'}\n` +
+        `📝 Промпт: ${generationData.prompt.substring(0, 100)}...\n\n` +
+        `💰 Витрачено: ${klingO1Cost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `✂️ Kling O1 Edit\n\n⚙️ ${generationData.mode === 'pro' ? '💎 PRO' : '⚡ STD'}\n📝 ${generationData.prompt.substring(0, 80)}...\n\n💰 Витрачено: ${klingO1Cost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
+
+      gracefulShutdown.completeGeneration(statusMsg.message_id, true);
+
+    } catch (error) {
+      console.error('Kling O1 Edit generation failed:', error);
+      await adminNotifier.notifyAdmin(bot, error, {
+        userId, username, action: 'kling_o1_edit_generation', model: model.name
+      });
+      try {
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          '❌ Помилка генерації Kling O1 Edit. Спробуйте ще раз.'
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації Kling O1 Edit. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      }
+      gracefulShutdown.completeGeneration(statusMsg.message_id, false);
     }
   })();
 }
@@ -6381,6 +6671,44 @@ bot.on('text', async (ctx) => {
 
     await ctx.reply('🚀 Промпт збережено! Починаємо генерацію Kling 3.0...');
     runBackgroundTask(() => generateKling3Video(ctx, { ...state, prompt: text }), 'kling_3_generate_text');
+    return;
+  }
+
+  // ✅ KLING O1 EDIT: Обробка prompt
+  if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_prompt') {
+    if (!text || text.length < 5) {
+      await ctx.reply(
+        '⚠️ Опис занадто короткий!\n\n' +
+        'Напишіть детальніше що потрібно змінити у відео (мінімум 5 символів).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      prompt: text,
+      step: 'ready_to_generate'
+    });
+
+    const model = models.video.models.find(m => m.key === 'kling_o1_edit');
+    const duration = 5; // default, actual duration from video
+    const hasVideo = !!state.referenceVideo;
+    const costPerSec = hasVideo
+      ? (state.mode === 'pro' ? model.costPerSecondProWithVideo : model.costPerSecondWithVideo)
+      : (state.mode === 'pro' ? model.costPerSecondPro : model.costPerSecond);
+    const estimatedCost = duration * costPerSec;
+
+    await ctx.reply(
+      `✂️ <b>Kling O1 Edit</b>\n\n` +
+      `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+      `📝 Промпт: <b>${text.substring(0, 100)}${text.length > 100 ? '...' : ''}</b>\n` +
+      `💰 Орієнтовна вартість: <b>${estimatedCost}⚡</b>\n\n` +
+      `🚀 Починаємо генерацію...`,
+      { parse_mode: 'HTML' }
+    );
+
+    runBackgroundTask(() => generateKlingO1EditVideo(ctx, state), 'kling_o1_edit_generate');
     return;
   }
 

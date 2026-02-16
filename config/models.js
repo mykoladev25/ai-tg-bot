@@ -219,6 +219,36 @@ module.exports = {
         supportsReferences: true
       },
 
+      /**
+       * Kling O1 Edit — редагування відео через Replicate
+       * Ціни за секунду:
+       * - std: $0.084/сек -> 14 токенів/сек
+       * - std-with-video-input: $0.126/сек -> 21 токен/сек
+       * - pro: $0.112/сек -> 19 токенів/сек
+       * - pro-with-video-input: $0.168/сек -> 28 токенів/сек
+       * Тривалість: 3-10 секунд (залежить від вхідного відео)
+       */
+      {
+        name: '✂️ Kling O1 Edit',
+        key: 'kling_o1_edit',
+        costPerSecond: 14,              // std без відео-input
+        costPerSecondWithVideo: 21,     // std з відео-input
+        costPerSecondPro: 19,           // pro без відео-input
+        costPerSecondProWithVideo: 28,  // pro з відео-input
+        apiCostPerSecond: 0.084,
+        apiCostPerSecondWithVideo: 0.126,
+        apiCostPerSecondPro: 0.112,
+        apiCostPerSecondProWithVideo: 0.168,
+        minSeconds: 3,
+        maxSeconds: 10,
+        durations: [3, 5, 7, 10],
+        available: true,
+        requiresVideo: true,            // Потрібен відео-файл для редагування
+        requiresImage: false,
+        supportsReferences: true,       // reference_images, start_image, end_image
+        modes: ['std', 'pro']
+      },
+
       { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 0, apiCost: 0, available: false, requiresImage: true },
       { name: '🌊 MidJourney Video', key: 'midjourney_video', cost: 0, apiCost: 0, available: false },
       { name: '💜 HeyGen', key: 'heygen', cost: 0, apiCost: 0, available: false }
