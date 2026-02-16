@@ -855,8 +855,8 @@ async function generateVideoWithKlingO1Edit(options = {}) {
       endImage = null,
       referenceImages = [],
       videoReferenceType = 'feature',  // 'feature' або 'base'
-      keepOriginalSound = false,
-      mode = 'std',
+      keepOriginalSound = true,  // default true згідно з API
+      mode = 'pro',  // default 'pro' згідно з API
       aspectRatio = null,
       duration = 5
     } = options;
@@ -881,12 +881,14 @@ async function generateVideoWithKlingO1Edit(options = {}) {
         input.duration = Math.min(Math.max(parseInt(duration), 3), 10);
       }
     } else {
-      // Text-to-video: потрібен aspectRatio та duration
+      // Text-to-video: потрібен aspectRatio та duration (тільки 5 або 10)
       if (aspectRatio) {
         input.aspect_ratio = aspectRatio;
       }
       if (duration) {
-        input.duration = Math.min(Math.max(parseInt(duration), 3), 10);
+        // Для text-to-video duration має бути тільки 5 або 10
+        const validDuration = duration === 5 || duration === 10 ? duration : 5;
+        input.duration = validDuration;
       }
     }
 

@@ -5099,20 +5099,464 @@ bot.on('video', async (ctx) => {
   userState.set(userId, {
     ...state,
     referenceVideo: videoUrl,
-    step: 'waiting_prompt'
+    step: 'select_video_type'
   });
 
   await ctx.reply(
     `✂️ <b>Kling O1 Edit</b>\n\n` +
     `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
     `🎥 Відео: <b>Завантажено</b>\n\n` +
-    `✍️ <b>Крок 3: Опишіть редагування</b>\n\n` +
+    `🎬 <b>Крок 3: Як використовувати відео?</b>\n\n` +
+    `• <b>Feature</b> — як референс стилю/камери (можна змінювати тривалість)\n` +
+    `• <b>Base</b> — редагування відео (тривалість як у оригіналі)`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🎨 Feature', 'kling_o1_video_type_feature'),
+          Markup.button.callback('✂️ Base', 'kling_o1_video_type_base')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 3: Вибір video_reference_type
+bot.action(/^kling_o1_video_type_(feature|base)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const videoType = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'select_video_type') {
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Kling O1 Edit');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    videoReferenceType: videoType,
+    step: videoType === 'feature' ? 'select_duration' : 'ask_sound'
+  });
+
+  if (videoType === 'feature') {
+    // Feature type: можна вибрати duration
+    await ctx.reply(
+      `✂️ <b>Kling O1 Edit</b>\n\n` +
+      `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+      `🎥 Відео: <b>Завантажено</b> (🎨 референс стилю/камери)\n\n` +
+      `⏱️ <b>Крок 4: Тривалість відео</b>\n\n` +
+      `Оберіть тривалість (3-10 секунд):`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('3с', 'kling_o1_duration_3'),
+            Markup.button.callback('4с', 'kling_o1_duration_4'),
+            Markup.button.callback('5с', 'kling_o1_duration_5'),
+            Markup.button.callback('6с', 'kling_o1_duration_6')
+          ],
+          [
+            Markup.button.callback('7с', 'kling_o1_duration_7'),
+            Markup.button.callback('8с', 'kling_o1_duration_8'),
+            Markup.button.callback('9с', 'kling_o1_duration_9'),
+            Markup.button.callback('10с', 'kling_o1_duration_10')
+          ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+  } else {
+    // Base type: одразу питаємо про звук
+    await ctx.reply(
+      `✂️ <b>Kling O1 Edit</b>\n\n` +
+      `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+      `🎥 Відео: <b>Завантажено</b> (✂️ редагування)\n\n` +
+      `🔊 <b>Крок 4: Звук з відео</b>\n\n` +
+      `Зберегти оригінальний звук з відео?`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('🔊 Зберегти звук', 'kling_o1_sound_on'),
+            Markup.button.callback('🔇 Без звуку', 'kling_o1_sound_off')
+          ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+  }
+});
+
+// Крок 4a: Вибір duration (для feature type)
+bot.action(/^kling_o1_duration_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const duration = parseInt(ctx.match[1], 10);
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'select_duration') {
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    duration: duration,
+    step: 'ask_sound'
+  });
+
+  await ctx.reply(
+    `✂️ <b>Kling O1 Edit</b>\n\n` +
+    `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+    `🎥 Відео: <b>Завантажено</b> (🎨 референс)\n` +
+    `⏱️ Тривалість: <b>${duration} сек</b>\n\n` +
+    `🔊 <b>Крок 5: Звук з відео</b>\n\n` +
+    `Зберегти оригінальний звук з відео?`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔊 Зберегти звук', 'kling_o1_sound_on'),
+          Markup.button.callback('🔇 Без звуку', 'kling_o1_sound_off')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 4b/5: Вибір keep_original_sound
+bot.action(/^kling_o1_sound_(on|off)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const keepSound = ctx.match[1] === 'on';
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'ask_sound') {
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    keepOriginalSound: keepSound,
+    step: 'ask_start_image'
+  });
+
+  await ctx.reply(
+    `✂️ <b>Kling O1 Edit</b>\n\n` +
+    `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+    `🎥 Відео: <b>Завантажено</b>\n` +
+    `🔊 Звук: <b>${keepSound ? 'Зберегти' : 'Без звуку'}</b>\n\n` +
+    `🖼️ <b>Крок 6: Перший/останній кадр</b> (опціонально)\n\n` +
+    `Можна вказати перший та останній кадр відео:\n` +
+    `• Перший кадр (start_image) — обов'язковий якщо хочете вказати останній\n` +
+    `• Останній кадр (end_image) — потребує перший кадр`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🖼️ Додати перший/останній кадр', 'kling_o1_add_frames')],
+        [Markup.button.callback('⏭️ Пропустити', 'kling_o1_skip_frames')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 4: Додати frames або пропустити
+bot.action('kling_o1_add_frames', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'ask_start_image') {
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_start_image'
+  });
+
+  await ctx.reply(
+    `✂️ <b>Kling O1 Edit</b>\n\n` +
+    `📷 <b>Надішліть перший кадр</b> (start_image)\n\n` +
+    `Підтримується: JPG, PNG (до 10MB)\n\n` +
+    `💡 Після першого кадру можна додати останній кадр (end_image).`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+bot.action('kling_o1_skip_frames', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'ask_start_image') {
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'ask_reference_images'
+  });
+
+  const maxRefs = state.referenceVideo ? 4 : 7;
+  await ctx.reply(
+    `✂️ <b>Kling O1 Edit</b>\n\n` +
+    `🖼️ <b>Крок 5: Референсні зображення</b> (опціонально)\n\n` +
+    `Можна додати до <b>${maxRefs}</b> референсних зображень для елементів, сцен або стилю.\n\n` +
+    `💡 У промпті посилайтесь на них як <b>@Image1</b>, <b>@Image2</b> тощо.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('➕ Додати зображення', 'kling_o1_add_ref_images')],
+        [Markup.button.callback('⏭️ Пропустити → до опису', 'kling_o1_skip_ref_images')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Обробка start_image для kling_o1_edit
+bot.on('photo', async (ctx) => {
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  // ✅ KLING O1 EDIT: Обробка start_image
+  if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_start_image') {
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      startImage: imageUrl,
+      step: 'ask_end_image'
+    });
+
+    await ctx.reply(
+      `✂️ <b>Kling O1 Edit</b>\n\n` +
+      `✅ Перший кадр: <b>Завантажено</b>\n\n` +
+      `📷 <b>Додати останній кадр?</b> (опціонально)\n\n` +
+      `Можна додати останній кадр (end_image) або пропустити.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📷 Додати останній кадр', 'kling_o1_add_end_image')],
+          [Markup.button.callback('⏭️ Пропустити', 'kling_o1_skip_end_image')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // ✅ KLING O1 EDIT: Обробка end_image
+  if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_end_image') {
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      endImage: imageUrl,
+      step: 'ask_reference_images'
+    });
+
+    const maxRefs = state.referenceVideo ? 4 : 7;
+    await ctx.reply(
+      `✂️ <b>Kling O1 Edit</b>\n\n` +
+      `✅ Перший кадр: <b>Завантажено</b>\n` +
+      `✅ Останній кадр: <b>Завантажено</b>\n\n` +
+      `🖼️ <b>Крок 5: Референсні зображення</b> (опціонально)\n\n` +
+      `Можна додати до <b>${maxRefs}</b> референсних зображень.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('➕ Додати зображення', 'kling_o1_add_ref_images')],
+          [Markup.button.callback('⏭️ Пропустити → до опису', 'kling_o1_skip_ref_images')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // ✅ KLING O1 EDIT: Обробка reference_images
+  if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_reference_images') {
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    const maxRefs = state.referenceVideo ? 4 : 7;
+    const currentRefs = state.referenceImages || [];
+    
+    if (currentRefs.length >= maxRefs) {
+      await ctx.reply(
+        `⚠️ Максимум <b>${maxRefs}</b> референсних зображень!\n\n` +
+        `Ви вже додали ${currentRefs.length}. Перейдіть до опису редагування.`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('✍️ Перейти до опису', 'kling_o1_skip_ref_images')],
+            [Markup.button.callback('← Назад', 'video_menu')]
+          ])
+        }
+      );
+      return;
+    }
+
+    const newRefs = [...currentRefs, imageUrl];
+    userState.set(userId, {
+      ...state,
+      referenceImages: newRefs,
+      step: 'waiting_reference_images'
+    });
+
+    const remaining = maxRefs - newRefs.length;
+    await ctx.reply(
+      `✂️ <b>Kling O1 Edit</b>\n\n` +
+      `✅ Референсних зображень: <b>${newRefs.length}/${maxRefs}</b>\n\n` +
+      `${remaining > 0 ? `Можна додати ще <b>${remaining}</b> зображень.` : 'Досягнуто максимум.'}\n\n` +
+      `💡 У промпті посилайтесь на них як <b>@Image1</b>, <b>@Image2</b> тощо.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('➕ Додати ще', 'kling_o1_add_ref_images'),
+            Markup.button.callback('✍️ До опису', 'kling_o1_skip_ref_images')
+          ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+});
+
+bot.action('kling_o1_add_end_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'ask_end_image') {
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_end_image'
+  });
+
+  await ctx.reply(
+    `✂️ <b>Kling O1 Edit</b>\n\n` +
+    `📷 <b>Надішліть останній кадр</b> (end_image)\n\n` +
+    `Підтримується: JPG, PNG (до 10MB)`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+bot.action('kling_o1_skip_end_image', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'ask_end_image') {
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'ask_reference_images'
+  });
+
+  const maxRefs = state.referenceVideo ? 4 : 7;
+  await ctx.reply(
+    `✂️ <b>Kling O1 Edit</b>\n\n` +
+    `🖼️ <b>Крок 5: Референсні зображення</b> (опціонально)\n\n` +
+    `Можна додати до <b>${maxRefs}</b> референсних зображень.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('➕ Додати зображення', 'kling_o1_add_ref_images')],
+        [Markup.button.callback('⏭️ Пропустити → до опису', 'kling_o1_skip_ref_images')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+bot.action('kling_o1_add_ref_images', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_o1_edit_generation' || (state.step !== 'ask_reference_images' && state.step !== 'waiting_reference_images')) {
+    return;
+  }
+
+  const maxRefs = state.referenceVideo ? 4 : 7;
+  const currentRefs = state.referenceImages || [];
+  
+  if (currentRefs.length >= maxRefs) {
+    await ctx.answerCbQuery(`Максимум ${maxRefs} зображень!`, true);
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_reference_images'
+  });
+
+  const remaining = maxRefs - currentRefs.length;
+  await ctx.reply(
+    `✂️ <b>Kling O1 Edit</b>\n\n` +
+    `📷 <b>Надішліть референсне зображення</b>\n\n` +
+    `Поточні: ${currentRefs.length}/${maxRefs}\n` +
+    `Залишилось: ${remaining}\n\n` +
+    `Підтримується: JPG, PNG\n` +
+    `💡 У промпті посилайтесь як <b>@Image${currentRefs.length + 1}</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+bot.action('kling_o1_skip_ref_images', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'kling_o1_edit_generation') {
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_prompt'
+  });
+
+  const refsCount = state.referenceImages?.length || 0;
+  const refsHint = refsCount > 0
+    ? `\n\nВи додали ${refsCount} референсних зображень. У промпті посилайтесь на них як @Image1, @Image2 тощо.`
+    : '';
+
+  await ctx.reply(
+    `✂️ <b>Kling O1 Edit</b>\n\n` +
+    `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+    `🎥 Відео: <b>Завантажено</b>${state.startImage ? '\n🖼️ Перший кадр: Завантажено' : ''}${state.endImage ? '\n🖼️ Останній кадр: Завантажено' : ''}\n\n` +
+    `✍️ <b>Крок 6: Опишіть редагування</b>\n\n` +
     `Напишіть що потрібно змінити у відео:\n` +
     `• Замінити персонажа\n` +
     `• Змінити середовище\n` +
     `• Змінити стиль\n` +
-    `• Інше редагування\n\n` +
-    `💡 Приклад: "Замінити персонажа на @Element1, змінити середовище на @Image1"\n\n` +
+    `• Інше редагування${refsHint}\n\n` +
+    `💡 Приклад: "Замінити персонажа на @Image1, змінити середовище на @Image2"\n\n` +
     `📝 <b>Напишіть опис редагування:</b>`,
     { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
   );
@@ -5301,7 +5745,8 @@ async function generateKlingO1EditVideo(ctx, state) {
     return;
   }
 
-  const duration = 5; // default, actual duration from video
+  // Duration: якщо feature type - зі стану, інакше 5 (для base ігнорується API)
+  const duration = (state.videoReferenceType === 'feature' && state.duration) ? state.duration : 5;
   const hasVideo = !!state.referenceVideo;
   const costPerSec = hasVideo
     ? (state.mode === 'pro' ? model.costPerSecondProWithVideo : model.costPerSecondWithVideo)
@@ -5340,11 +5785,11 @@ async function generateKlingO1EditVideo(ctx, state) {
         startImage: generationData.startImage || null,
         endImage: generationData.endImage || null,
         referenceImages: generationData.referenceImages || [],
-        videoReferenceType: 'base', // 'base' для редагування відео
-        keepOriginalSound: generationData.keepOriginalSound || false,
+        videoReferenceType: generationData.videoReferenceType || 'feature',  // default 'feature'
+        keepOriginalSound: generationData.keepOriginalSound !== undefined ? generationData.keepOriginalSound : true,  // default true
         mode: generationData.mode,
         aspectRatio: generationData.aspectRatio || null,
-        duration: duration
+        duration: generationData.videoReferenceType === 'feature' ? duration : undefined  // для base type ігнорується
       });
 
       if (!result.success) {
@@ -6692,7 +7137,8 @@ bot.on('text', async (ctx) => {
     });
 
     const model = models.video.models.find(m => m.key === 'kling_o1_edit');
-    const duration = 5; // default, actual duration from video
+    // Duration: якщо feature type - зі стану, інакше 5 (для base ігнорується API)
+    const duration = (state.videoReferenceType === 'feature' && state.duration) ? state.duration : 5;
     const hasVideo = !!state.referenceVideo;
     const costPerSec = hasVideo
       ? (state.mode === 'pro' ? model.costPerSecondProWithVideo : model.costPerSecondWithVideo)
@@ -6726,7 +7172,31 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  if (!currentModel) {
+  // ✅ KLING O1 EDIT: якщо є активний флоу але немає currentModel
+  if (state?.action === 'kling_o1_edit_generation') {
+    if (state.step === 'waiting_video') {
+      await ctx.reply(
+        '🎥 <b>Очікується ВІДЕО для редагування, а не текст!</b>\n\n' +
+        '👉 Надішліть відео файл (MP4, MOV, WEBM, M4V, GIF, до 200MB).',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+      return;
+    }
+    // Якщо step = waiting_prompt - текст обробиться в KLING O1 EDIT обробнику вище (рядок 6677)
+    // Якщо інший step - показуємо повідомлення
+    if (state.step !== 'waiting_prompt') {
+      await ctx.reply(
+        '✂️ <b>Kling O1 Edit</b>\n\n' +
+        '⚠️ Спочатку завершіть налаштування!\n\n' +
+        'Натисніть кнопку Kling O1 Edit в меню відео.',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+      return;
+    }
+    // Якщо step = waiting_prompt - не переходимо далі, обробка вже вище
+  }
+
+  if (!currentModel && !state?.action) {
     await ctx.reply('Будь ласка, спочатку виберіть модель з меню 👇', keyboard.createMainMenu());
     return;
   }
