@@ -5779,8 +5779,18 @@ async function generateKlingO1EditVideo(ctx, state) {
 
   (async () => {
     try {
+      // Конвертуємо формат посилань на зображення з @Image1, @Image2 в <<<image_1>>>, <<<image_2>>>
+      let processedPrompt = generationData.prompt || '';
+      if (generationData.referenceImages && generationData.referenceImages.length > 0) {
+        for (let i = 0; i < generationData.referenceImages.length; i++) {
+          const userFormat = `@Image${i + 1}`;
+          const apiFormat = `<<<image_${i + 1}>>>`;
+          processedPrompt = processedPrompt.replace(new RegExp(userFormat, 'gi'), apiFormat);
+        }
+      }
+
       const result = await replicate.generateVideoWithKlingO1Edit({
-        prompt: generationData.prompt,
+        prompt: processedPrompt,
         referenceVideo: generationData.referenceVideo,
         startImage: generationData.startImage || null,
         endImage: generationData.endImage || null,
@@ -7130,31 +7140,32 @@ bot.on('text', async (ctx) => {
       return;
     }
 
-    userState.set(userId, {
+    const updatedState = {
       ...state,
       prompt: text,
       step: 'ready_to_generate'
-    });
+    };
+    userState.set(userId, updatedState);
 
     const model = models.video.models.find(m => m.key === 'kling_o1_edit');
     // Duration: якщо feature type - зі стану, інакше 5 (для base ігнорується API)
-    const duration = (state.videoReferenceType === 'feature' && state.duration) ? state.duration : 5;
-    const hasVideo = !!state.referenceVideo;
+    const duration = (updatedState.videoReferenceType === 'feature' && updatedState.duration) ? updatedState.duration : 5;
+    const hasVideo = !!updatedState.referenceVideo;
     const costPerSec = hasVideo
-      ? (state.mode === 'pro' ? model.costPerSecondProWithVideo : model.costPerSecondWithVideo)
-      : (state.mode === 'pro' ? model.costPerSecondPro : model.costPerSecond);
+      ? (updatedState.mode === 'pro' ? model.costPerSecondProWithVideo : model.costPerSecondWithVideo)
+      : (updatedState.mode === 'pro' ? model.costPerSecondPro : model.costPerSecond);
     const estimatedCost = duration * costPerSec;
 
     await ctx.reply(
       `✂️ <b>Kling O1 Edit</b>\n\n` +
-      `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+      `⚙️ Режим: <b>${updatedState.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
       `📝 Промпт: <b>${text.substring(0, 100)}${text.length > 100 ? '...' : ''}</b>\n` +
       `💰 Орієнтовна вартість: <b>${estimatedCost}⚡</b>\n\n` +
       `🚀 Починаємо генерацію...`,
       { parse_mode: 'HTML' }
     );
 
-    runBackgroundTask(() => generateKlingO1EditVideo(ctx, state), 'kling_o1_edit_generate');
+    runBackgroundTask(() => generateKlingO1EditVideo(ctx, updatedState), 'kling_o1_edit_generate');
     return;
   }
 
