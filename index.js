@@ -6013,7 +6013,23 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
   const state = userState.get(userId);
   const model = models.video.models.find(m => m.key === 'a2e_motion');
 
+  // DEBUG: детальне логування
+  console.log('🔥 A2E Duration callback:', {
+    userId,
+    duration,
+    hasState: !!state,
+    stateAction: state?.action,
+    stateStep: state?.step,
+    hasModel: !!model
+  });
+
   if (!state || state.action !== 'a2e_motion_generation' || state.step !== 'select_duration') {
+    console.log('❌ A2E Duration validation failed:', {
+      noState: !state,
+      wrongAction: state?.action !== 'a2e_motion_generation',
+      wrongStep: state?.step !== 'select_duration',
+      actualStep: state?.step
+    });
     await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без меж');
     return;
   }
