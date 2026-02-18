@@ -138,6 +138,17 @@ function getVideoModelsForUser(userId) {
         maxCost: Math.max(...durations) * m.costPerSecondProWithVideo  // pro з відео-input
       };
     }
+    if (m.key === 'a2e_motion') {
+      // A2E: показуємо мінімальну та максимальну ціну залежно від тривалості
+      const durations = m.durations || [5, 10, 15, 20];
+      const minDuration = Math.min(...durations);
+      const maxDuration = Math.max(...durations);
+      return {
+        ...m,
+        cost: minDuration * m.costPerSecond,
+        maxCost: maxDuration * m.costPerSecond
+      };
+    }
     return m;
   });
 }
@@ -3402,6 +3413,47 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
             Markup.button.callback('⚡ STD', 'kling_o1_mode_std'),
             Markup.button.callback('💎 PRO', 'kling_o1_mode_pro')
           ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // A2E Motion без меж 🔥
+  if (modelKey === 'a2e_motion') {
+    const a2eService = require('./services/a2e');
+    if (!a2eService.isA2EEnabled) {
+      await ctx.reply(
+        '❌ A2E API тимчасово вимкнена. Додайте A2E_API_TOKEN в .env.',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const durations = model.durations || [5, 10, 15, 20];
+    const minDuration = Math.min(...durations);
+    const maxDuration = Math.max(...durations);
+    const minCost = minDuration * model.costPerSecond;
+    const maxCost = maxDuration * model.costPerSecond;
+
+    userState.set(ctx.from.id, {
+      action: 'a2e_motion_generation',
+      step: 'waiting_image',
+      modelKey: 'a2e_motion'
+    });
+
+    await ctx.reply(
+      `🔥 <b>Motion без меж</b>\n\n` +
+      `Анімація зображення з природним рухом та плавними переходами.\n\n` +
+      `🖼️ <b>Крок 1: Надішліть зображення</b>\n\n` +
+      `Це зображення буде анімоване.\n\n` +
+      `⏱️ Тривалість: ${durations.join(', ')} секунд\n` +
+      `💰 Вартість: ${minCost}—${maxCost}⚡\n\n` +
+      `📤 <b>Надішліть одне зображення:</b>`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
       }
@@ -8120,6 +8172,42 @@ bot.on('photo', async (ctx) => {
       `📁 Формат: MP4, MOV\n\n` +
       `📤 <b>Надішліть відео файл:</b>`,
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  // ✅ A2E Motion: Обробка фото для анімації
+  if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_image') {
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      imageUrl: imageUrl,
+      step: 'select_duration'
+    });
+
+    const model = models.video.models.find(m => m.key === 'a2e_motion');
+    const durations = model.durations || [5, 10, 15, 20];
+    const durationButtons = durations.map(d => 
+      Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `a2e_duration_${d}`)
+    );
+
+    await ctx.reply(
+      `🔥 <b>Motion без меж</b>\n\n` +
+      `✅ Зображення завантажено!\n\n` +
+      `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
+      `💰 Вартість залежить від тривалості:`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          durationButtons,
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
     );
     return;
   }
