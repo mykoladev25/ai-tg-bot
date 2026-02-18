@@ -3266,7 +3266,7 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
 
 
 // Video Models
-bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|runway_turbo|veo|sora_2|luma)$/, async (ctx) => {
+bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|runway_turbo|veo|sora_2|luma|a2e_motion)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.video.models.find(m => m.key === modelKey);
 
