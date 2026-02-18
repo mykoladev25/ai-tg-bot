@@ -32,6 +32,7 @@ const blockedUsersUtil = require('./utils/blockedUsers');
 const gracefulShutdown = require('./utils/gracefulShutdown');
 const db = require('./database/connection');
 const User = require('./database/models/User');
+const GenerationResult = require('./database/models/GenerationResult');
 
 // Імпортуємо конфігурацію
 const models = require('./config/models');
@@ -5894,6 +5895,251 @@ async function generateKlingO1EditVideo(ctx, state) {
   })();
 }
 
+// ==================== A2E MOTION GENERATION FUNCTION ====================
+
+async function generateA2EMotionVideo(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
+  const model = models.video.models.find(m => m.key === 'a2e_motion');
+  const a2eService = require('./services/a2e');
+
+  if (!model) {
+    await ctx.reply('❌ Модель A2E Motion не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  if (!state.imageUrl) {
+    await ctx.reply('❌ Помилка: відсутнє зображення');
+    userState.delete(userId);
+    return;
+  }
+
+  if (!state.prompt) {
+    await ctx.reply('❌ Помилка: відсутній опис руху');
+    userState.delete(userId);
+    return;
+  }
+
+  const duration = state.duration || 5;
+  const cost = state.a2eCost || (duration * model.costPerSecond);
+  const apiCost = duration * model.apiCostPerSecond;
+
+  if (!(await userBalance.hasTokens(userId, cost))) {
+    await showInsufficientTokens(ctx, cost);
+    userState.delete(userId);
+    return;
+  }
+
+  const statusMsg = await ctx.reply(
+    `🔥 <b>Motion без меж - Генерація</b>\n\n` +
+    `⏱️ Тривалість: ${duration} сек\n` +
+    `📝 Промпт: "${state.prompt.substring(0, 100)}${state.prompt.length > 100 ? '...' : ''}"\n\n` +
+    `⏱️ Це може зайняти 2-5 хвилин...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  const generationData = { ...state };
+
+  (async () => {
+    try {
+      // Створюємо задачу в A2E API
+      const startResult = await a2eService.startImageToVideoTask({
+        imageUrl: generationData.imageUrl,
+        prompt: generationData.prompt,
+        negativePrompt: generationData.negativePrompt || 'blurry, low quality, chaotic, deformed, watermark, bad anatomy, shaky camera view point',
+        videoTime: duration,
+        modelType: 'GENERAL',
+        extendPrompt: true,
+        skipFaceEnhance: false
+      });
+
+      if (!startResult.success || !startResult.taskId) {
+        await adminNotifier.notifyAdmin(bot, new Error(startResult.error || 'Failed to start A2E task'), {
+          userId, username, action: 'a2e_motion_generation', model: model.name
+        });
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації A2E Motion.\n\n${startResult.error || 'Не вдалося створити задачу'}\n\nСпробуйте ще раз.`
+        );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'a2e_motion',
+          success: false,
+          isTrial,
+          isFree: isTrial,
+          errorCode: startResult.error?.substring(0, 100)
+        });
+
+        gracefulShutdown.completeGeneration(statusMsg.message_id, false);
+        return;
+      }
+
+      const taskId = startResult.taskId;
+      console.log(`🔥 A2E: Task created: ${taskId}, polling for result...`);
+
+      // Polling статусу задачі
+      let attempts = 0;
+      const maxAttempts = 120; // 10 хвилин (120 * 5 сек)
+      const pollInterval = 5000; // 5 секунд
+
+      let finalResult = null;
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        attempts++;
+
+        const detailsResult = await a2eService.getTaskDetails(taskId);
+        if (!detailsResult.success) {
+          console.error(`A2E: Failed to get task details: ${detailsResult.error}`);
+          continue;
+        }
+
+        const taskData = detailsResult.data;
+        const status = taskData?.status || taskData?.state;
+
+        // Перевіряємо статус задачі
+        if (status === 'completed' || status === 'success' || taskData?.video_url || taskData?.result_url) {
+          finalResult = {
+            success: true,
+            videoUrl: taskData.video_url || taskData.result_url || taskData.output_url
+          };
+          break;
+        }
+
+        if (status === 'failed' || status === 'error') {
+          finalResult = {
+            success: false,
+            error: taskData.error_message || taskData.message || 'Task failed'
+          };
+          break;
+        }
+
+        // Якщо статус 'processing' або 'running' - продовжуємо polling
+        if (attempts % 12 === 0) { // Кожні 60 секунд
+          console.log(`🔥 A2E: Task ${taskId} still processing... (attempt ${attempts}/${maxAttempts})`);
+        }
+      }
+
+      if (!finalResult) {
+        finalResult = {
+          success: false,
+          error: 'Timeout waiting for A2E task completion'
+        };
+      }
+
+      if (!finalResult.success || !finalResult.videoUrl) {
+        await adminNotifier.notifyAdmin(bot, new Error(finalResult.error || 'A2E generation failed'), {
+          userId, username, action: 'a2e_motion_generation', model: model.name,
+          taskId: taskId
+        });
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації A2E Motion.\n\n${finalResult.error || 'Генерація не вдалась'}\n\nСпробуйте ще раз.`
+        );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'a2e_motion',
+          success: false,
+          isTrial,
+          isFree: isTrial,
+          errorCode: finalResult.error?.substring(0, 100)
+        });
+
+        gracefulShutdown.completeGeneration(statusMsg.message_id, false);
+        return;
+      }
+
+      // Віднімаємо токени
+      await userBalance.deductTokens(userId, cost, `${model.name} generation`, {
+        modelKey: 'a2e_motion',
+        modelName: model.name,
+        apiCost,
+        prompt: generationData.prompt,
+        duration: duration
+      });
+
+      // Зберігаємо результат в MongoDB
+      try {
+        await GenerationResult.create({
+          userId,
+          username,
+          modelKey: 'a2e_motion',
+          modelName: model.name,
+          resultUrl: finalResult.videoUrl,
+          resultType: 'video',
+          prompt: generationData.prompt,
+          options: {
+            duration,
+            imageUrl: generationData.imageUrl
+          },
+          duration,
+          success: true,
+          provider: 'a2e',
+          providerTaskId: taskId,
+          tokensSpent: cost,
+          apiCostUSD: apiCost,
+          generatedAt: new Date()
+        });
+        console.log(`✅ A2E: Result saved to MongoDB for user ${userId}`);
+      } catch (dbError) {
+        console.error('❌ A2E: Failed to save result to MongoDB:', dbError);
+        // Не блокуємо успішну генерацію через помилку БД
+      }
+
+      const isTrial = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey: 'a2e_motion',
+        success: true,
+        isTrial,
+        isFree: isTrial
+      });
+
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>Motion без меж готово!</b>\n\n` +
+        `⏱️ Тривалість: ${duration} сек\n` +
+        `📝 Промпт: ${generationData.prompt.substring(0, 100)}...\n\n` +
+        `💰 Витрачено: ${cost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await safeSendVideo(chatId, finalResult.videoUrl, {
+        caption: `🔥 Motion без меж\n\n⏱️ ${duration} сек\n📝 ${generationData.prompt.substring(0, 80)}...\n\n💰 Витрачено: ${cost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
+
+      gracefulShutdown.completeGeneration(statusMsg.message_id, true);
+
+    } catch (error) {
+      console.error('A2E Motion generation failed:', error);
+      await adminNotifier.notifyAdmin(bot, error, {
+        userId, username, action: 'a2e_motion_generation', model: model.name
+      });
+      try {
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          '❌ Помилка генерації A2E Motion. Спробуйте ще раз.'
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації A2E Motion. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      }
+      gracefulShutdown.completeGeneration(statusMsg.message_id, false);
+    }
+  })();
+}
+
 // Генерувати Kling відразу
 bot.action('kling_generate_now', async (ctx) => {
   await ctx.answerCbQuery();
@@ -7141,6 +7387,82 @@ bot.on('text', async (ctx) => {
 
     await ctx.reply('🚀 Промпт збережено! Починаємо генерацію Kling 3.0...');
     runBackgroundTask(() => generateKling3Video(ctx, { ...state, prompt: text }), 'kling_3_generate_text');
+    return;
+  }
+
+  // ✅ A2E Motion: Обробка prompt та перехід до negative prompt
+  if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_prompt') {
+    if (!text || text.length < 5) {
+      await ctx.reply(
+        '⚠️ Опис занадто короткий!\n\n' +
+        'Напишіть детальніше що має відбуватися на відео (мінімум 5 символів).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      prompt: text,
+      step: 'waiting_negative_prompt'
+    });
+
+    await ctx.reply(
+      `🔥 <b>Motion без меж</b>\n\n` +
+      `✅ Промпт: <b>${text.substring(0, 100)}${text.length > 100 ? '...' : ''}</b>\n\n` +
+      `🚫 <b>Крок 4: Negative Prompt</b> (опціонально, до 200 символів)\n\n` +
+      `Опишіть що НЕ має бути у відео:\n` +
+      `• Небажані ефекти\n` +
+      `• Помилки якості\n` +
+      `• Небажані об'єкти\n\n` +
+      `💡 Приклад: "blurry, low quality, watermark, distorted"\n` +
+      `💡 Або натисніть "Пропустити" для використання стандартного\n\n` +
+      `📝 <b>Напишіть negative prompt або натисніть "Пропустити":</b>`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('⏭️ Пропустити (використати стандартний)', 'a2e_skip_negative')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  // ✅ A2E Motion: Обробка negative prompt
+  if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_negative_prompt') {
+    if (text && text.length > 200) {
+      await ctx.reply(
+        '⚠️ Negative prompt занадто довгий!\n\n' +
+        'Максимум 200 символів. Спробуйте скоротити.',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const negativePrompt = text && text.trim().length > 0 
+      ? text.trim() 
+      : 'blurry, low quality, chaotic, deformed, watermark, bad anatomy, shaky camera view point';
+
+    const updatedState = {
+      ...state,
+      negativePrompt: negativePrompt,
+      step: 'ready_to_generate'
+    };
+    userState.set(userId, updatedState);
+
+    await ctx.reply(
+      `🔥 <b>Motion без меж</b>\n\n` +
+      `✅ Зображення: <b>Завантажено</b>\n` +
+      `⏱️ Тривалість: <b>${updatedState.duration} секунд</b>\n` +
+      `📝 Промпт: <b>${updatedState.prompt.substring(0, 100)}${updatedState.prompt.length > 100 ? '...' : ''}</b>\n` +
+      `🚫 Negative: <b>${negativePrompt.substring(0, 80)}${negativePrompt.length > 80 ? '...' : ''}</b>\n` +
+      `💰 Вартість: <b>${updatedState.a2eCost}⚡</b>\n\n` +
+      `🚀 Починаємо генерацію...`,
+      { parse_mode: 'HTML' }
+    );
+
+    runBackgroundTask(() => generateA2EMotionVideo(ctx, updatedState), 'a2e_motion_generate');
     return;
   }
 

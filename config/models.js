@@ -249,6 +249,29 @@ module.exports = {
         modes: ['std', 'pro']
       },
 
+      /**
+       * A2E Motion без меж 🔥
+       * На сайті A2E: 5 секунд = 30 credits
+       * Собівартість: $10 за 1800 credits = $0.00556 за credit
+       * Собівартість 5s: 30 credits × $0.00556 = $0.1668
+       * Маржа х2: клієнт платить $0.1668 × 2 = $0.3336
+       * У наших токенах (1 токен = $0.01): $0.3336 / $0.01 = 33.36 токенів ≈ 33 токенів
+       * Але користувач хоче: 5s = 60 токенів, 10s = 120 токенів, 15s = 180 токенів
+       * Це означає: 12 токенів за секунду (більше ніж х2 маржа)
+       */
+      {
+        name: '🔥 Motion без меж',
+        key: 'a2e_motion',
+        cost: 60,  // Ціна для 5 секунд (х2 маржа від собівартості)
+        apiCost: 0.1668,  // Собівартість 5s: 30 credits × $0.00556
+        costPerSecond: 12,  // 12 токенів за секунду (5s=60, 10s=120, 15s=180, 20s=240)
+        apiCostPerSecond: 0.03336,  // Собівартість за секунду: 6 credits × $0.00556
+        durations: [5, 10, 15, 20],
+        available: true,
+        requiresImage: true,
+        a2eOnly: true  // Тільки через A2E API
+      },
+
       { name: '🎬 RunWay: Gen-4 Aleph 💎', key: 'runway_gen4', cost: 0, apiCost: 0, available: false, requiresImage: true },
       { name: '🌊 MidJourney Video', key: 'midjourney_video', cost: 0, apiCost: 0, available: false },
       { name: '💜 HeyGen', key: 'heygen', cost: 0, apiCost: 0, available: false }
