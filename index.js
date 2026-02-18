@@ -7682,8 +7682,8 @@ bot.on('text', async (ctx) => {
       );
       return;
     }
-    // Якщо інший step - показуємо повідомлення
-    if (state.step !== 'waiting_prompt' && state.step !== 'waiting_negative_prompt') {
+    // Якщо інший step (крім prompt/negative_prompt які обробляються вище) - показуємо повідомлення
+    if (state.step !== 'waiting_prompt' && state.step !== 'waiting_negative_prompt' && state.step !== 'select_duration') {
       await ctx.reply(
         '🔥 <b>Motion без меж</b>\n\n' +
         '⚠️ Спочатку завершіть налаштування!\n\n' +
@@ -8183,43 +8183,6 @@ bot.on('photo', async (ctx) => {
     }
   }
 
-  // ✅ A2E Motion: Обробка фото для анімації
-  if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_image') {
-    console.log('🔥 A2E Motion: Processing photo for user', userId);
-    const imageUrl = await getImageUrl(ctx);
-    if (!imageUrl) {
-      await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
-      return;
-    }
-
-    console.log('🔥 A2E Motion: Image URL received, setting state to select_duration');
-    userState.set(userId, {
-      ...state,
-      imageUrl: imageUrl,
-      step: 'select_duration'
-    });
-
-    const model = models.video.models.find(m => m.key === 'a2e_motion');
-    const durations = model.durations || [5, 10, 15, 20];
-    const durationButtons = durations.map(d => 
-      Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `a2e_duration_${d}`)
-    );
-
-    await ctx.reply(
-      `🔥 <b>Motion без меж</b>\n\n` +
-      `✅ Зображення завантажено!\n\n` +
-      `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
-      `💰 Вартість залежить від тривалості:`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          durationButtons,
-          [Markup.button.callback('← Назад', 'video_menu')]
-        ])
-      }
-    );
-    return;
-  }
 
   // ✅ RUNWAY TURBO: Обробка initial image
   if (state?.action === 'runway_turbo_generation' && state?.step === 'waiting_image') {
