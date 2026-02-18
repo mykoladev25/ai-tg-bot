@@ -5962,6 +5962,76 @@ async function generateKlingO1EditVideo(ctx, state) {
   })();
 }
 
+// ==================== A2E MOTION CALLBACKS ====================
+
+// Крок 2: Вибір тривалості після завантаження зображення
+bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const duration = parseInt(ctx.match[1]);
+  const state = userState.get(userId);
+  const model = models.video.models.find(m => m.key === 'a2e_motion');
+
+  if (!state || state.action !== 'a2e_motion_generation' || state.step !== 'select_duration') {
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без меж');
+    return;
+  }
+
+  const a2eCost = duration * model.costPerSecond;
+
+  userState.set(userId, {
+    ...state,
+    duration: duration,
+    a2eCost: a2eCost,
+    step: 'waiting_prompt'
+  });
+
+  await ctx.reply(
+    `🔥 <b>Motion без меж</b>\n\n` +
+    `✅ Зображення: Завантажено\n` +
+    `⏱️ Тривалість: <b>${duration} сек</b>\n` +
+    `💰 Вартість: <b>${a2eCost}⚡</b>\n\n` +
+    `📝 <b>Крок 3: Опишіть рух</b>\n\n` +
+    `Напишіть детально який рух/анімацію ви хочете бачити.\n\n` +
+    `✍️ <b>Надішліть текстовий промпт:</b>`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// Крок 4: Пропустити negative prompt
+bot.action('a2e_skip_negative', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'a2e_motion_generation' || state.step !== 'waiting_negative_prompt') {
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без меж');
+    return;
+  }
+
+  const negativePrompt = 'blurry, low quality, chaotic, deformed, watermark, bad anatomy, shaky camera view point';
+
+  const updatedState = {
+    ...state,
+    negativePrompt: negativePrompt,
+    step: 'ready_to_generate'
+  };
+  userState.set(userId, updatedState);
+
+  await ctx.reply(
+    `🔥 <b>Motion без меж</b>\n\n` +
+    `✅ Зображення: <b>Завантажено</b>\n` +
+    `⏱️ Тривалість: <b>${updatedState.duration} секунд</b>\n` +
+    `📝 Промпт: <b>${updatedState.prompt.substring(0, 100)}${updatedState.prompt.length > 100 ? '...' : ''}</b>\n` +
+    `🚫 Negative: <b>стандартний</b>\n` +
+    `💰 Вартість: <b>${updatedState.a2eCost}⚡</b>\n\n` +
+    `🚀 Починаємо генерацію...`,
+    { parse_mode: 'HTML' }
+  );
+
+  runBackgroundTask(() => generateA2EMotionVideo(ctx, updatedState), 'a2e_motion_generate');
+});
+
 // ==================== A2E MOTION GENERATION FUNCTION ====================
 
 async function generateA2EMotionVideo(ctx, state) {
