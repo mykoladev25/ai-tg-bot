@@ -6079,7 +6079,8 @@ async function generateA2EMotionVideo(ctx, state) {
           prompt: generationData.prompt,
           options: {
             duration,
-            imageUrl: generationData.imageUrl
+            imageUrl: generationData.imageUrl,
+            negativePrompt: generationData.negativePrompt
           },
           duration,
           success: true,
