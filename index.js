@@ -7927,6 +7927,44 @@ bot.on('photo', async (ctx) => {
     hasState: !!state
   });
 
+  // ✅ A2E Motion: Обробка фото для анімації (перевіряємо першим)
+  if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_image') {
+    console.log('🔥 A2E Motion: Processing photo for user', userId);
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    console.log('🔥 A2E Motion: Image URL received, setting state to select_duration');
+    userState.set(userId, {
+      ...state,
+      imageUrl: imageUrl,
+      step: 'select_duration'
+    });
+
+    const model = models.video.models.find(m => m.key === 'a2e_motion');
+    const durations = model.durations || [5, 10, 15, 20];
+    const durationButtons = durations.map(d => 
+      Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `a2e_duration_${d}`)
+    );
+
+    await ctx.reply(
+      `🔥 <b>Motion без меж</b>\n\n` +
+      `✅ Зображення завантажено!\n\n` +
+      `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
+      `💰 Вартість залежить від тривалості:`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          durationButtons,
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
   // ✅ VEO: Обробка стартового зображення (image-to-video)
   if (state?.action === 'veo_generation' && state?.step === 'waiting_start_image') {
     console.log(`✅ Processing VEO start image for user ${userId}`);
@@ -8073,6 +8111,44 @@ bot.on('photo', async (ctx) => {
       );
       return;
     }
+  }
+
+  // ✅ A2E Motion: Обробка фото для анімації
+  if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_image') {
+    console.log('🔥 A2E Motion: Processing photo for user', userId);
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    console.log('🔥 A2E Motion: Image URL received, setting state to select_duration');
+    userState.set(userId, {
+      ...state,
+      imageUrl: imageUrl,
+      step: 'select_duration'
+    });
+
+    const model = models.video.models.find(m => m.key === 'a2e_motion');
+    const durations = model.durations || [5, 10, 15, 20];
+    const durationButtons = durations.map(d => 
+      Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `a2e_duration_${d}`)
+    );
+
+    await ctx.reply(
+      `🔥 <b>Motion без меж</b>\n\n` +
+      `✅ Зображення завантажено!\n\n` +
+      `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
+      `💰 Вартість залежить від тривалості:`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          durationButtons,
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
   }
 
   // ✅ RUNWAY TURBO: Обробка initial image
@@ -8224,41 +8300,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ A2E Motion: Обробка фото для анімації
-  if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_image') {
-    const imageUrl = await getImageUrl(ctx);
-    if (!imageUrl) {
-      await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
-      return;
-    }
-
-    userState.set(userId, {
-      ...state,
-      imageUrl: imageUrl,
-      step: 'select_duration'
-    });
-
-    const model = models.video.models.find(m => m.key === 'a2e_motion');
-    const durations = model.durations || [5, 10, 15, 20];
-    const durationButtons = durations.map(d => 
-      Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `a2e_duration_${d}`)
-    );
-
-    await ctx.reply(
-      `🔥 <b>Motion без меж</b>\n\n` +
-      `✅ Зображення завантажено!\n\n` +
-      `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
-      `💰 Вартість залежить від тривалості:`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          durationButtons,
-          [Markup.button.callback('← Назад', 'video_menu')]
-        ])
-      }
-    );
-    return;
-  }
 
   if (state?.creative && state?.step === 'waiting_photo') {
     const imageUrl = await getImageUrl(ctx);
