@@ -3358,7 +3358,10 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  userCurrentModel.set(ctx.from.id, modelKey);
+  // Для A2E Motion не встановлюємо currentModel, бо це image-to-video модель
+  if (modelKey !== 'a2e_motion') {
+    userCurrentModel.set(ctx.from.id, modelKey);
+  }
 
   if (modelKey === 'kling_motion') {
     const motionCosts = getEffectiveKlingMotionCosts(ctx.from.id);
@@ -3422,43 +3425,55 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
 
   // A2E Motion без меж 🔥
   if (modelKey === 'a2e_motion') {
-    const a2eService = require('./services/a2e');
-    if (!a2eService.isA2EEnabled) {
+    try {
+      const a2eService = require('./services/a2e');
+      console.log('🔥 A2E Motion: Service loaded, isA2EEnabled:', a2eService.isA2EEnabled);
+      
+      if (!a2eService.isA2EEnabled) {
+        await ctx.reply(
+          '❌ A2E API тимчасово вимкнена. Додайте A2E_API_TOKEN в .env.',
+          keyboard.createBackButton('video_menu')
+        );
+        return;
+      }
+
+      const durations = model.durations || [5, 10, 15, 20];
+      const minDuration = Math.min(...durations);
+      const maxDuration = Math.max(...durations);
+      const minCost = minDuration * model.costPerSecond;
+      const maxCost = maxDuration * model.costPerSecond;
+
+      console.log('🔥 A2E Motion: Setting state for user', ctx.from.id);
+      userState.set(ctx.from.id, {
+        action: 'a2e_motion_generation',
+        step: 'waiting_image',
+        modelKey: 'a2e_motion'
+      });
+
       await ctx.reply(
-        '❌ A2E API тимчасово вимкнена. Додайте A2E_API_TOKEN в .env.',
+        `🔥 <b>Motion без меж</b>\n\n` +
+        `Анімація зображення з природним рухом та плавними переходами.\n\n` +
+        `🖼️ <b>Крок 1: Надішліть зображення</b>\n\n` +
+        `Це зображення буде анімоване.\n\n` +
+        `⏱️ Тривалість: ${durations.join(', ')} секунд\n` +
+        `💰 Вартість: ${minCost}—${maxCost}⚡\n\n` +
+        `📤 <b>Надішліть одне зображення:</b>`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('← Назад', 'video_menu')]
+          ])
+        }
+      );
+      return;
+    } catch (error) {
+      console.error('A2E Motion error:', error);
+      await ctx.reply(
+        '❌ Помилка ініціалізації A2E Motion. Перевірте налаштування.',
         keyboard.createBackButton('video_menu')
       );
       return;
     }
-
-    const durations = model.durations || [5, 10, 15, 20];
-    const minDuration = Math.min(...durations);
-    const maxDuration = Math.max(...durations);
-    const minCost = minDuration * model.costPerSecond;
-    const maxCost = maxDuration * model.costPerSecond;
-
-    userState.set(ctx.from.id, {
-      action: 'a2e_motion_generation',
-      step: 'waiting_image',
-      modelKey: 'a2e_motion'
-    });
-
-    await ctx.reply(
-      `🔥 <b>Motion без меж</b>\n\n` +
-      `Анімація зображення з природним рухом та плавними переходами.\n\n` +
-      `🖼️ <b>Крок 1: Надішліть зображення</b>\n\n` +
-      `Це зображення буде анімоване.\n\n` +
-      `⏱️ Тривалість: ${durations.join(', ')} секунд\n` +
-      `💰 Вартість: ${minCost}—${maxCost}⚡\n\n` +
-      `📤 <b>Надішліть одне зображення:</b>`,
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('← Назад', 'video_menu')]
-        ])
-      }
-    );
-    return;
   }
 
   // Для Kling 3.0 (KIE.AI) — тільки якщо є доступ до KIE та KIE увімкнена
@@ -7586,6 +7601,29 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  // ✅ A2E Motion: якщо є активний флоу але користувач надіслав текст замість фото
+  if (state?.action === 'a2e_motion_generation') {
+    if (state.step === 'waiting_image') {
+      await ctx.reply(
+        '🖼️ <b>Очікується ЗОБРАЖЕННЯ, а не текст!</b>\n\n' +
+        '👉 Для Motion без меж потрібно надіслати фото, яке буде анімоване.\n\n' +
+        '📤 Надішліть зображення (JPG, PNG).',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+      return;
+    }
+    // Якщо інший step - показуємо повідомлення
+    if (state.step !== 'waiting_prompt' && state.step !== 'waiting_negative_prompt') {
+      await ctx.reply(
+        '🔥 <b>Motion без меж</b>\n\n' +
+        '⚠️ Спочатку завершіть налаштування!\n\n' +
+        'Натисніть кнопку Motion без меж в меню відео.',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+      return;
+    }
+  }
+
   // ✅ KLING O1 EDIT: якщо є активний флоу але немає currentModel
   if (state?.action === 'kling_o1_edit_generation') {
     if (state.step === 'waiting_video') {
@@ -7810,6 +7848,16 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  // ✅ A2E Motion: якщо currentModel встановлено але це image-to-video модель
+  if (currentModel === 'a2e_motion') {
+    await ctx.reply(
+      '🖼️ <b>Motion без меж потребує ЗОБРАЖЕННЯ!</b>\n\n' +
+      '👉 Для цієї моделі потрібно надіслати фото, яке буде анімоване.\n\n' +
+      '📤 Надішліть зображення (JPG, PNG).',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
 
   const handlers = {
     claude_vision: () => handleClaudeText(ctx, text),
