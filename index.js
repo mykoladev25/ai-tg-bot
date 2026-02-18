@@ -5402,9 +5402,47 @@ bot.action('kling_o1_skip_frames', async (ctx) => {
 });
 
 // Обробка start_image для kling_o1_edit
-bot.on('photo', async (ctx) => {
+bot.on('photo', async (ctx, next) => {
   const userId = ctx.from.id;
   const state = userState.get(userId);
+
+  // ✅ A2E Motion: Обробка фото для анімації (ПЕРЕВІРЯЄМО ПЕРШИМ!)
+  if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_image') {
+    console.log('🔥 A2E Motion: Processing photo for user', userId);
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    console.log('🔥 A2E Motion: Image URL received, setting state to select_duration');
+    userState.set(userId, {
+      ...state,
+      imageUrl: imageUrl,
+      step: 'select_duration'
+    });
+
+    const model = models.video.models.find(m => m.key === 'a2e_motion');
+    const durations = model.durations || [5, 10, 15, 20];
+    const durationButtons = durations.map(d =>
+      Markup.button.callback(`${d} сек (${d * model.costPerSecond}⚡)`, `a2e_duration_${d}`)
+    );
+
+    await ctx.reply(
+      `🔥 <b>Motion без меж</b>\n\n` +
+      `✅ Зображення завантажено!\n\n` +
+      `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
+      `💰 Вартість залежить від тривалості:`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          durationButtons,
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
 
   // ✅ KLING O1 EDIT: Обробка start_image
   if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_start_image') {
@@ -5522,6 +5560,9 @@ bot.on('photo', async (ctx) => {
     );
     return;
   }
+
+  // Якщо жоден обробник не спрацював, передаємо наступному handler
+  return next();
 });
 
 bot.action('kling_o1_add_end_image', async (ctx) => {
