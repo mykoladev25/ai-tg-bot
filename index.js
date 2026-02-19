@@ -720,6 +720,11 @@ bot.on('callback_query', async (ctx, next) => {
     return next();
   }
 
+  // ✅ ДОЗВОЛЯЄМО A2E MOTION CALLBACKS
+  if (callbackData.startsWith('a2e_')) {
+    return next();
+  }
+
   if (MODELS_WITH_STATE.includes(callbackData)) {
     return next();
   }
@@ -753,6 +758,16 @@ bot.on('callback_query', async (ctx, next) => {
 
   // ✅ Дозволяємо kling_3 state
   if (state?.action === 'kling_3_generation') {
+    return next();
+  }
+
+  // ✅ Дозволяємо a2e_motion state
+  if (state?.action === 'a2e_motion_generation') {
+    return next();
+  }
+
+  // ✅ Дозволяємо kling_o1_edit state
+  if (state?.action === 'kling_o1_edit_generation') {
     return next();
   }
 
