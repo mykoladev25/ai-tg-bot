@@ -56,7 +56,7 @@ const OFFICIAL_PRICING = {
   },
 
   'bytedance/seedream-4.5-4k': {
-    pricePerRun: 0.04,  // $0.04 per image (однакова ціна для всіх resolution)
+    pricePerRun: 0.04,  // Replicate: $0.04 per image (KIE.AI дешевше: $0.032)
     model: 'seedream_4k',
     lastChecked: '2026-01-25',
     source: 'https://replicate.com/bytedance/seedream-4.5'

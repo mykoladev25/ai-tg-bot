@@ -202,6 +202,9 @@ function getModelPrice(cache, modelKey, options = {}) {
       case 'nano_banana_4k':
         return parsed.nano_banana_4k?.usdPrice || '0.12';
 
+      // Seedream: KIE support підтвердив що немає API для отримання ціни (19.02.2026)
+      // Офіційна ціна: 6.5 credits = $0.032 per image
+      // Повертаємо null щоб використовувався fallback з kie-ai-models.js
       case 'seedream_2k':
       case 'seedream_4k':
         return parsed.seedream_4k?.usdPrice || null;

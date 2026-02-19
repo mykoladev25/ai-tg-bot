@@ -963,16 +963,32 @@ async function generateKling3VideoKieAI(options = {}) {
     const data = createResponse?.data?.data;
     const taskId = data?.taskId;
     if (!taskId) {
+      const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+
+      // Спеціальна обробка для 500 помилок
+      if (responseCode === 500) {
+        console.error('❌ KIE.AI Kling 3.0 - Server Error 500:', createResponse?.data);
+        console.error('📋 Request payload for support:', JSON.stringify(payload, null, 2));
+        return {
+          success: false,
+          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          provider: 'kie-ai',
+          serverError: true
+        };
+      }
+
       const errText = typeof apiMsg === 'string' ? apiMsg : (createResponse?.data ? JSON.stringify(createResponse.data) : 'KIE.AI не повернув taskId');
       console.error('❌ KIE.AI Kling 3.0 createTask: no taskId', createResponse?.data);
+      console.error('📋 Request payload for support:', JSON.stringify(payload, null, 2));
       return {
         success: false,
         error: errText || 'Сервер не повернув ідентифікатор завдання. Спробуйте ще раз.',
         provider: 'kie-ai'
       };
     }
-    console.log(`✅ KIE.AI Kling 3.0 task created: ${taskId}`);
+    console.log(`✅ KIE.AI Kling 3.0 task created`);
+    console.log(`📋 Task ID for KIE.AI support: ${taskId}`);
 
     // Kling 3.0 може займати довше (до 15 сек відео)
     // Відео: до ~50 хв

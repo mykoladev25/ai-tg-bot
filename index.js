@@ -2161,7 +2161,7 @@ bot.hears('💰 Поповнити баланс', async (ctx) => {
 // Отримуємо ціни моделей
 const nanoBanana2kModel = models.design.models.find(m => m.key === 'nano_banana_2k');
 const seedream4kModel = models.design.models.find(m => m.key === 'seedream_4k');
-const CREATIVE_COST = 7;
+const CREATIVE_COST = seedream4kModel?.cost || 5;  // Seedream 4K: 5 токенів (KIE.AI $0.032)
 const CREATIVE_COST_2K = 25;
 const CREATIVE_COST_SEEDREAM_4K = CREATIVE_COST;
 
@@ -8121,6 +8121,7 @@ bot.on('text', async (ctx) => {
     ideogram: () => handleImageGeneration(ctx, text, 'ideogram'),
     kling: () => handleVideoGeneration(ctx, text, 'kling'),
     kling_v2_6: () => handleVideoGeneration(ctx, text, 'kling_v2_6'),
+    // kling_3 використовує окремий флоу через state machine (kling_3_generation)
     runway_gen4: () => handleVideoGeneration(ctx, text, 'runway_gen4'),
     suno: () => handleSunoGeneration(ctx, text)
   };
@@ -8945,7 +8946,44 @@ bot.on('video', async (ctx) => {
     }
 
     const videoFile = ctx.message.video;
-    const videoUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${(await ctx.telegram.getFile(videoFile.file_id)).file_path}`;
+
+    // Перевірка розміру (Telegram getFile обмежений до 20MB)
+    const fileSizeMB = (videoFile.file_size || 0) / (1024 * 1024);
+    const maxDuration = state.orientation === 'image' ? 10 : 30;
+
+    if (fileSizeMB > 20) {
+      await ctx.reply(
+        `❌ <b>Відео занадто велике для обробки!</b>\n\n` +
+        `📦 Максимальний розмір: <b>20MB</b>\n` +
+        `📦 Ваш файл: <b>${fileSizeMB.toFixed(2)}MB</b>\n\n` +
+        `⏱️ Макс. тривалість: ${maxDuration} сек\n\n` +
+        `💡 <b>Рекомендації:</b>\n` +
+        `• Використайте коротше відео (до ${maxDuration} секунд)\n` +
+        `• Зменшіть роздільність відео\n` +
+        `• Стисніть відео перед завантаженням\n\n` +
+        `📤 Надішліть відео ще раз:`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+      return;
+    }
+
+    console.log(`🎥 Kling Motion: Getting file URL for video ${fileSizeMB.toFixed(2)}MB`);
+
+    let videoUrl;
+    try {
+      const fileInfo = await ctx.telegram.getFile(videoFile.file_id);
+      videoUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${fileInfo.file_path}`;
+    } catch (error) {
+      console.error('❌ Kling Motion: Failed to get video file:', error);
+      await ctx.reply(
+        '❌ Помилка завантаження відео. Спробуйте:\n\n' +
+        '• Використати коротше відео\n' +
+        '• Зменшити розмір файлу\n' +
+        '• Надіслати ще раз',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
 
     userState.set(userId, {
       ...state,

@@ -68,11 +68,31 @@ module.exports = {
   /**
    * ByteDance Seedream 4.5
    * https://docs.kie.ai/market/bytedance/seedream-4.5
+   * https://kie.ai/seedream-4-5
    *
-   * Replicate Pricing: $0.04/image
+   * KIE.AI Pricing (офіційно від KIE support, 19.02.2026):
+   * - 6.5 credits per image
+   * - Ваш тариф: $5 = 1,000 credits → 1 credit = $0.005
+   * - API cost: 6.5 × $0.005 = $0.0325
+   * - ⚠️ Немає API для автоматичного отримання ціни
+   *
+   * Replicate Pricing (для порівняння):
+   * - API cost: $0.04
+   * - User cost: 7 tokens (multiplier 1.75x)
+   *
+   * Наша ціна (з тим же multiplier 1.75x):
+   * - API cost: $0.0325
+   * - User cost: $0.0325 × 1.75 = $0.0569 → 6 tokens
+   *
+   * 💰 Економія: $0.0075 API cost (-18.75%), 1 token user cost (-14%)
    */
   seedream: {
     kie_model: 'seedream-4.5',
+    kie_pricing: {
+      credits: 6.5,
+      usd: 0.0325,  // 6.5 × $0.005
+      note: 'Підтверджено KIE support 19.02.2026. Немає API для отримання ціни.'
+    },
     replicate_model: 'bytedance/seedream-4.5',
     replicate_pricing: {
       per_image: 0.04
@@ -301,7 +321,7 @@ module.exports = {
         return 0.30;
       case 'seedream_2k':
       case 'seedream_4k':
-        return 0.04;
+        return 0.0325;  // KIE.AI: 6.5 credits × $0.005 = $0.0325 (18.75% дешевше ніж Replicate $0.04)
       case 'stable_diffusion':
         return 0.07;
       case 'kling':

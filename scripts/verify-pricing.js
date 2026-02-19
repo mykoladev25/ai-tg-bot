@@ -18,7 +18,7 @@ const replicatePrices = {
   // IMAGE
   nano_banana_2k: 0.15,
   nano_banana_4k: 0.30,
-  seedream_4k: 0.04,
+  seedream_4k: 0.032,  // KIE.AI: 6.5 credits = $0.032 (was $0.04 on Replicate)
   stable_diffusion: 0.07,
 
   // VIDEO (per second)
@@ -39,7 +39,7 @@ const replicatePrices = {
 const ourPrices = {
   nano_banana_2k: { tokens: 25, apiCost: 0.15 },
   nano_banana_4k: { tokens: 27, apiCost: 0.30 },
-  seedream_4k: { tokens: 6, apiCost: 0.04 },
+  seedream_4k: { tokens: 5, apiCost: 0.032 },  // Оновлено: KIE.AI дешевше на 20%
   stable_diffusion: { tokens: 12, apiCost: 0.07 },
 
   kling_v2_5: { tokensPerSec: 12, apiCostPerSec: 0.07 },
