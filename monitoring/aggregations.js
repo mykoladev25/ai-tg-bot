@@ -7,6 +7,7 @@ const PaymentEvent = require('../database/models/PaymentEvent');
 const DailySummary = require('../database/models/DailySummary');
 const User = require('../database/models/User');
 const replicateBalanceConfig = require('../config/replicateBalance');
+const kieBalanceConfig = require('../config/kieBalance');
 const { TRIAL_TOKENS, WORST_CASE_TOKEN_USD, EFFECTIVE_TOKEN_USD, NET_REVENUE_FACTOR } = require('../config/constants');
 
 /**
@@ -68,6 +69,44 @@ async function getReplicateBalance() {
   };
 }
 
+async function getKieBalance() {
+  const initialUSD = Number(kieBalanceConfig?.initialUSD) || 0;
+  const topUps = Array.isArray(kieBalanceConfig?.topUps)
+    ? kieBalanceConfig.topUps
+    : [];
+  const totalTopUpsUSD = topUps.reduce((sum, t) => sum + (Number(t.amountUSD) || 0), 0);
+  const fundedUSD = initialUSD + totalTopUpsUSD;
+
+  const startDate = parseFundingStartDate(kieBalanceConfig?.initialDate);
+  const spendAgg = await UsageEvent.aggregate([
+    {
+      $match: {
+        ts: { $gte: startDate },
+        provider: 'kie'
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: '$estimatedApiCostUSD' }
+      }
+    }
+  ]);
+
+  const spentUSD = spendAgg[0]?.total || 0;
+  const remainingUSD = fundedUSD - spentUSD;
+  const topUpNeededUSD = remainingUSD < 0 ? Math.abs(remainingUSD) : 0;
+
+  return {
+    fundedUSD,
+    spentUSD,
+    remainingUSD,
+    topUpNeededUSD,
+    startDate: startDate.toISOString().slice(0, 10),
+    topUpsCount: topUps.length
+  };
+}
+
 /**
  * Get summary metrics for dashboard
  */
@@ -95,11 +134,12 @@ async function getSummary(from, to) {
     }
   ]);
 
-  // COGS aggregation
+  // COGS aggregation for Replicate only
   const cogsAgg = await UsageEvent.aggregate([
     {
       $match: {
-        ts: { $gte: startDate, $lte: endDate }
+        ts: { $gte: startDate, $lte: endDate },
+        provider: 'replicate'
       }
     },
     {
@@ -115,11 +155,12 @@ async function getSummary(from, to) {
     }
   ]);
 
-  // Trial burn aggregation
+  // Trial burn aggregation for Replicate only
   const trialAgg = await UsageEvent.aggregate([
     {
       $match: {
         ts: { $gte: startDate, $lte: endDate },
+        provider: 'replicate',
         isTrial: true
       }
     },
@@ -284,7 +325,7 @@ async function getPurchasesByPlan(from, to) {
 }
 
 /**
- * Get top models by COGS
+ * Get top models by COGS (Replicate only)
  */
 async function getTopModels(from, to, limit = 10) {
   const { startDate, endDate } = parseDateRange(from, to);
@@ -292,7 +333,8 @@ async function getTopModels(from, to, limit = 10) {
   return UsageEvent.aggregate([
     {
       $match: {
-        ts: { $gte: startDate, $lte: endDate }
+        ts: { $gte: startDate, $lte: endDate },
+        provider: 'replicate'
       }
     },
     {
@@ -337,7 +379,7 @@ async function getTopModels(from, to, limit = 10) {
 }
 
 /**
- * Get top users by tokens spent
+ * Get top users by tokens spent (Replicate only)
  */
 async function getTopUsers(from, to, limit = 10) {
   const { startDate, endDate } = parseDateRange(from, to);
@@ -345,7 +387,8 @@ async function getTopUsers(from, to, limit = 10) {
   return UsageEvent.aggregate([
     {
       $match: {
-        ts: { $gte: startDate, $lte: endDate }
+        ts: { $gte: startDate, $lte: endDate },
+        provider: 'replicate'
       }
     },
     {
@@ -430,17 +473,203 @@ async function getDailySummaries(startDay, endDay) {
   return DailySummary.getRange(startDay, endDay);
 }
 
+/**
+ * Get summary metrics for KIE.AI provider
+ */
+async function getKieSummary(from, to) {
+  const { startDate, endDate } = parseDateRange(from, to);
+
+  // COGS aggregation for KIE.AI only
+  const kieCogsAgg = await UsageEvent.aggregate([
+    {
+      $match: {
+        ts: { $gte: startDate, $lte: endDate },
+        provider: 'kie'
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        totalCogs: { $sum: '$estimatedApiCostUSD' },
+        totalRevenue: { $sum: '$estimatedRevenueUSD' },
+        totalTokens: { $sum: '$tokensSpent' },
+        generationCount: { $sum: 1 },
+        successCount: { $sum: { $cond: ['$success', 1, 0] } },
+        activeUsers: { $addToSet: '$userId' }
+      }
+    }
+  ]);
+
+  // Trial burn for KIE.AI
+  const kieTrialAgg = await UsageEvent.aggregate([
+    {
+      $match: {
+        ts: { $gte: startDate, $lte: endDate },
+        provider: 'kie',
+        isTrial: true
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        trialBurn: { $sum: '$estimatedApiCostUSD' },
+        trialCount: { $sum: 1 },
+        trialUsers: { $addToSet: '$userId' }
+      }
+    }
+  ]);
+
+  const kieCogs = kieCogsAgg[0] || {};
+  const kieTrial = kieTrialAgg[0] || {};
+  const kieBalance = await getKieBalance();
+
+  const revenueUSD = kieCogs.totalRevenue || 0;
+  const totalCogsUSD = kieCogs.totalCogs || 0;
+  const grossEstimated = revenueUSD - totalCogsUSD;
+
+  return {
+    period: {
+      from: startDate.toISOString(),
+      to: endDate.toISOString()
+    },
+    cogs: {
+      estimated: totalCogsUSD,
+      generations: kieCogs.generationCount || 0,
+      successRate: kieCogs.generationCount > 0
+        ? ((kieCogs.successCount || 0) / kieCogs.generationCount * 100).toFixed(1)
+        : 0,
+      activeUsers: kieCogs.activeUsers?.length || 0
+    },
+    revenue: {
+      usd: revenueUSD,
+      tokens: kieCogs.totalTokens || 0
+    },
+    trial: {
+      burnUSD: kieTrial.trialBurn || 0,
+      generations: kieTrial.trialCount || 0,
+      users: kieTrial.trialUsers?.length || 0
+    },
+    kieBalance,
+    gross: {
+      estimated: grossEstimated,
+      marginPercent: revenueUSD > 0
+        ? ((grossEstimated / revenueUSD) * 100).toFixed(1)
+        : 0
+    }
+  };
+}
+
+/**
+ * Get top models for KIE.AI provider
+ */
+async function getTopKieModels(from, to, limit = 20) {
+  const { startDate, endDate } = parseDateRange(from, to);
+
+  return UsageEvent.aggregate([
+    {
+      $match: {
+        ts: { $gte: startDate, $lte: endDate },
+        provider: 'kie'
+      }
+    },
+    {
+      $group: {
+        _id: '$modelKey',
+        count: { $sum: 1 },
+        totalCogs: { $sum: '$estimatedApiCostUSD' },
+        totalRevenue: { $sum: '$estimatedRevenueUSD' },
+        tokensSpent: { $sum: '$tokensSpent' },
+        successCount: { $sum: { $cond: ['$success', 1, 0] } },
+        failCount: { $sum: { $cond: ['$success', 0, 1] } }
+      }
+    },
+    {
+      $project: {
+        modelKey: '$_id',
+        count: 1,
+        cogs: '$totalCogs',
+        revenue: '$totalRevenue',
+        tokens: '$tokensSpent',
+        successCount: 1,
+        failCount: 1,
+        marginPercent: {
+          $cond: [
+            { $gt: ['$totalRevenue', 0] },
+            {
+              $multiply: [
+                { $divide: [{ $subtract: ['$totalRevenue', '$totalCogs'] }, '$totalRevenue'] },
+                100
+              ]
+            },
+            0
+          ]
+        }
+      }
+    },
+    { $sort: { cogs: -1 } },
+    { $limit: limit }
+  ]);
+}
+
+/**
+ * Get top users for KIE.AI provider
+ */
+async function getTopKieUsers(from, to, limit = 20) {
+  const { startDate, endDate } = parseDateRange(from, to);
+
+  return UsageEvent.aggregate([
+    {
+      $match: {
+        ts: { $gte: startDate, $lte: endDate },
+        provider: 'kie'
+      }
+    },
+    {
+      $group: {
+        _id: '$userId',
+        count: { $sum: 1 },
+        tokensSpent: { $sum: '$tokensSpent' },
+        totalCogs: { $sum: '$estimatedApiCostUSD' },
+        totalRevenue: { $sum: '$estimatedRevenueUSD' },
+        successCount: { $sum: { $cond: ['$success', 1, 0] } }
+      }
+    },
+    {
+      $project: {
+        userId: '$_id',
+        count: 1,
+        tokensSpent: 1,
+        cogs: '$totalCogs',
+        revenue: '$totalRevenue',
+        successRate: {
+          $cond: [
+            { $gt: ['$count', 0] },
+            { $multiply: [{ $divide: ['$successCount', '$count'] }, 100] },
+            0
+          ]
+        }
+      }
+    },
+    { $sort: { tokensSpent: -1 } },
+    { $limit: limit }
+  ]);
+}
+
 module.exports = {
   parseDateRange,
   getSummary,
+  getKieSummary,
   getRevenue,
   getCogs,
   getTrialBurn,
   getFailRate,
   getPurchasesByPlan,
   getTopModels,
+  getTopKieModels,
   getTopUsers,
+  getTopKieUsers,
   getReplicateBalance,
+  getKieBalance,
   computeDailySummary,
   getDailySummaries
 };

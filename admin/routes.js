@@ -49,6 +49,21 @@ router.get('/metrics/summary', async (req, res) => {
 });
 
 /**
+ * GET /admin/metrics/kie-summary
+ * KIE.AI specific dashboard summary
+ */
+router.get('/metrics/kie-summary', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const summary = await aggregations.getKieSummary(from, to);
+    res.json({ success: true, data: summary });
+  } catch (error) {
+    console.error('Admin KIE metrics error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * GET /admin/metrics/revenue
  * Revenue breakdown by period
  */
@@ -149,6 +164,36 @@ router.get('/metrics/top-users', async (req, res) => {
     res.json({ success: true, data });
   } catch (error) {
     console.error('Admin top-users error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /admin/metrics/kie-top-models
+ * Top KIE.AI models by COGS
+ */
+router.get('/metrics/kie-top-models', async (req, res) => {
+  try {
+    const { from, to, limit = 10 } = req.query;
+    const data = await aggregations.getTopKieModels(from, to, parseInt(limit));
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Admin KIE top-models error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /admin/metrics/kie-top-users
+ * Top users by KIE.AI tokens spent
+ */
+router.get('/metrics/kie-top-users', async (req, res) => {
+  try {
+    const { from, to, limit = 20 } = req.query;
+    const data = await aggregations.getTopKieUsers(from, to, parseInt(limit));
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Admin KIE top-users error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -572,14 +617,15 @@ router.get('/dashboard', (req, res) => {
 
   <!-- Tabs -->
   <div class="tabs">
-    <button class="tab-btn active" data-tab="metrics">📊 Метрики</button>
-    <button class="tab-btn" data-tab="pricing">💰 Ціни Replicate</button>
+    <button class="tab-btn active" data-tab="replicate">📊 Replicate</button>
+    <button class="tab-btn" data-tab="kie">🔥 KIE.AI</button>
+    <button class="tab-btn" data-tab="pricing">💰 Ціни</button>
   </div>
 
   <div id="error" class="error" style="display:none;"></div>
 
-  <!-- Tab: Metrics -->
-  <div id="tab-metrics" class="tab-content active">
+  <!-- Tab: Replicate -->
+  <div id="tab-replicate" class="tab-content active">
     <div class="legend">
       <h3>📖 Словник термінів</h3>
       <div class="legend-item">
@@ -678,6 +724,69 @@ router.get('/dashboard', (req, res) => {
         </thead>
         <tbody id="users-body">
           <tr><td colspan="7" class="loading">Завантаження...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tab: KIE.AI -->
+  <div id="tab-kie" class="tab-content">
+    <div class="legend">
+      <h3>📖 Словник термінів</h3>
+      <div class="legend-item">
+        <span class="legend-term">💸 Собівартість KIE.AI</span>
+        <span class="legend-desc">— скільки МИ платимо за KIE.AI API (kling-3.0, sora-2, тощо)</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-term">💰 Дохід KIE</span>
+        <span class="legend-desc">— скільки токенів витратили юзери на KIE моделі (в USD еквіваленті)</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-term">📈 Маржа KIE</span>
+        <span class="legend-desc">— відсоток прибутку від KIE генерацій</span>
+      </div>
+    </div>
+
+    <div class="cards" id="kie-summary">
+      <div class="loading">Завантаження...</div>
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">🤖 KIE.AI моделі по витратах</h2>
+      <p class="section-hint">Які KIE моделі найбільше "з'їдають" на API</p>
+      <table id="kie-models-table">
+        <thead>
+          <tr>
+            <th>Модель</th>
+            <th>Генерацій</th>
+            <th>Собівартість $</th>
+            <th>Дохід $</th>
+            <th>Маржа</th>
+            <th>Помилок</th>
+          </tr>
+        </thead>
+        <tbody id="kie-models-body">
+          <tr><td colspan="6" class="loading">Завантаження...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">👤 Топ юзерів по KIE токенах</h2>
+      <p class="section-hint">Користувачі, які витратили найбільше токенів на KIE моделях</p>
+      <table id="kie-users-table">
+        <thead>
+          <tr>
+            <th>Юзер</th>
+            <th>Токенів</th>
+            <th>Генерацій</th>
+            <th>Собівартість $</th>
+            <th>Дохід $</th>
+            <th>Успішність</th>
+          </tr>
+        </thead>
+        <tbody id="kie-users-body">
+          <tr><td colspan="6" class="loading">Завантаження...</td></tr>
         </tbody>
       </table>
     </div>
@@ -787,6 +896,8 @@ router.get('/dashboard', (req, res) => {
         
         if (btn.dataset.tab === 'pricing') {
           loadPricing();
+        } else if (btn.dataset.tab === 'kie') {
+          loadKieDashboard();
         }
       });
     });
@@ -1051,13 +1162,133 @@ router.get('/dashboard', (req, res) => {
       }
     }
     
+    async function loadKieDashboard() {
+      const now = new Date();
+      const from = new Date(now.getTime() - currentDays * 24 * 60 * 60 * 1000).toISOString();
+      const to = now.toISOString();
+      
+      try {
+        // KIE Summary
+        const summary = await fetchAPI('/metrics/kie-summary?from=' + from + '&to=' + to);
+        if (summary.success) {
+          const d = summary.data;
+          const kb = d.kieBalance || {};
+          const remainingUSD = Number(kb.remainingUSD) || 0;
+          const remainingClass = remainingUSD < 0 ? 'danger' : remainingUSD < 10 ? 'warning' : 'success';
+          const remainingLabel = remainingUSD < 0 ? 'Потрібно поповнити' : 'Залишок на KIE.AI';
+          const remainingValue = formatUSD(Math.abs(remainingUSD));
+          const fundedValue = formatUSD(kb.fundedUSD || 0);
+          const spentValue = formatUSD(kb.spentUSD || 0);
+          
+          document.getElementById('kie-summary').innerHTML = \`
+            <div class="card">
+              <div class="card-title">💸 Собівартість KIE</div>
+              <div class="card-hint">Скільки платимо KIE.AI API</div>
+              <div class="card-value danger">\${formatUSD(d.cogs.estimated)}</div>
+              <div class="card-subtitle">\${d.cogs.generations} генерацій</div>
+            </div>
+            <div class="card">
+              <div class="card-title">💰 Дохід KIE</div>
+              <div class="card-hint">Токени витрачені на KIE моделях</div>
+              <div class="card-value success">\${formatUSD(d.revenue.usd)}</div>
+              <div class="card-subtitle">\${d.revenue.tokens}⚡ токенів</div>
+            </div>
+            <div class="card">
+              <div class="card-title">💳 \${remainingLabel}</div>
+              <div class="card-hint">Депозит: \${fundedValue} • Витрачено: \${spentValue}</div>
+              <div class="card-value \${remainingClass}">\${remainingValue}</div>
+              <div class="card-subtitle">З \${kb.startDate || '—'}</div>
+            </div>
+            <div class="card">
+              <div class="card-title">📈 Прибуток KIE</div>
+              <div class="card-hint">Дохід мінус собівартість</div>
+              <div class="card-value \${d.gross.estimated >= 0 ? 'success' : 'danger'}">\${formatUSD(d.gross.estimated)}</div>
+              <div class="card-subtitle">Маржа: \${formatPct(d.gross.marginPercent)}</div>
+            </div>
+            <div class="card">
+              <div class="card-title">✅ Успішність</div>
+              <div class="card-hint">Відсоток успішних генерацій</div>
+              <div class="card-value \${d.cogs.successRate >= 95 ? 'success' : d.cogs.successRate >= 90 ? 'warning' : 'danger'}">\${formatPct(d.cogs.successRate)}</div>
+              <div class="card-subtitle">\${d.cogs.activeUsers} активних юзерів</div>
+            </div>
+            <div class="card">
+              <div class="card-title">🔥 Trial витрати KIE</div>
+              <div class="card-hint">Собівартість trial на KIE</div>
+              <div class="card-value warning">\${formatUSD(d.trial.burnUSD)}</div>
+              <div class="card-subtitle">\${d.trial.generations} trial gen • \${d.trial.users} юзерів</div>
+            </div>
+          \`;
+        }
+        
+        // Top KIE models
+        const models = await fetchAPI('/metrics/kie-top-models?from=' + from + '&to=' + to + '&limit=10');
+        if (models.success) {
+          const tbody = document.getElementById('kie-models-body');
+          if (models.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6">Немає KIE генерацій за період</td></tr>';
+          } else {
+            tbody.innerHTML = models.data.map(m => {
+              const marginClass = m.marginPercent > 50 ? 'success' : m.marginPercent > 30 ? 'warning' : 'danger';
+              const failRate = m.count > 0 ? ((m.failCount / m.count) * 100) : 0;
+              const failClass = failRate < 5 ? 'success' : failRate < 15 ? 'warning' : 'danger';
+              return \`
+                <tr>
+                  <td><strong>\${m.modelKey}</strong></td>
+                  <td>\${m.count}</td>
+                  <td>\${formatUSD(m.cogs)}</td>
+                  <td>\${formatUSD(m.revenue)}</td>
+                  <td><span class="badge badge-\${marginClass}">\${formatPct(m.marginPercent)}</span></td>
+                  <td><span class="badge badge-\${failClass}">\${formatPct(failRate)}</span></td>
+                </tr>
+              \`;
+            }).join('');
+          }
+        }
+
+        // Top KIE users
+        const users = await fetchAPI('/metrics/kie-top-users?from=' + from + '&to=' + to + '&limit=20');
+        if (users.success) {
+          const tbody = document.getElementById('kie-users-body');
+          if (users.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6">Немає KIE юзерів за період</td></tr>';
+          } else {
+            tbody.innerHTML = users.data.map(u => {
+              const successClass = u.successRate >= 95 ? 'success' : u.successRate >= 90 ? 'warning' : 'danger';
+              return \`
+                <tr>
+                  <td><strong>\${u.userId}</strong></td>
+                  <td>\${u.tokensSpent}⚡</td>
+                  <td>\${u.count}</td>
+                  <td>\${formatUSD(u.cogs)}</td>
+                  <td>\${formatUSD(u.revenue)}</td>
+                  <td><span class="badge badge-\${successClass}">\${formatPct(u.successRate)}</span></td>
+                </tr>
+              \`;
+            }).join('');
+          }
+        }
+        
+        document.getElementById('error').style.display = 'none';
+      } catch (err) {
+        document.getElementById('error').textContent = 'Помилка KIE: ' + err.message;
+        document.getElementById('error').style.display = 'block';
+      }
+    }
+    
     // Period buttons
     document.querySelectorAll('.period-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentDays = parseInt(btn.dataset.days);
-        loadDashboard();
+        
+        // Reload current active tab
+        const activeTab = document.querySelector('.tab-btn.active');
+        if (activeTab && activeTab.dataset.tab === 'kie') {
+          loadKieDashboard();
+        } else if (activeTab && activeTab.dataset.tab === 'replicate') {
+          loadDashboard();
+        }
       });
     });
     
@@ -1076,14 +1307,22 @@ router.get('/dashboard', (req, res) => {
         const resp = await postAPI('/metrics/reset', { scope: 'all', confirm: 'RESET' });
         if (!resp.success) throw new Error(resp.error || 'Помилка');
         await loadDashboard();
+        await loadKieDashboard();
         alert('Статистику обнулено.');
       } catch (err) {
         alert('Помилка: ' + err.message);
       }
     });
     
-    // Auto-refresh every 5 minutes
-    setInterval(loadDashboard, 5 * 60 * 1000);
+    // Auto-refresh every 5 minutes (reload current active tab)
+    setInterval(() => {
+      const activeTab = document.querySelector('.tab-btn.active');
+      if (activeTab && activeTab.dataset.tab === 'kie') {
+        loadKieDashboard();
+      } else if (activeTab && activeTab.dataset.tab === 'replicate') {
+        loadDashboard();
+      }
+    }, 5 * 60 * 1000);
   </script>
 </body>
 </html>
