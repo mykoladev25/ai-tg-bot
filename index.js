@@ -5416,11 +5416,19 @@ bot.on('photo', async (ctx, next) => {
     }
 
     console.log('🔥 A2E Motion: Image URL received, setting state to select_duration');
-    userState.set(userId, {
-      ...state,
-      imageUrl: imageUrl,
-      step: 'select_duration'
-    });
+
+    // Зберігаємо в userCurrentModel для backup
+    userCurrentModel.set(userId, 'a2e_motion');
+
+    const newState = {
+      action: 'a2e_motion_generation',
+      step: 'select_duration',
+      modelKey: 'a2e_motion',
+      imageUrl: imageUrl
+    };
+    userState.set(userId, newState);
+
+    console.log('🔥 A2E Motion: State saved:', JSON.stringify(newState));
 
     const model = models.video.models.find(m => m.key === 'a2e_motion');
     const durations = model.durations || [5, 10, 15, 20];
@@ -6010,7 +6018,8 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
   const duration = parseInt(ctx.match[1]);
-  const state = userState.get(userId);
+  let state = userState.get(userId);
+  const currentModel = userCurrentModel.get(userId);
   const model = models.video.models.find(m => m.key === 'a2e_motion');
 
   // DEBUG: детальне логування
@@ -6020,17 +6029,39 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
     hasState: !!state,
     stateAction: state?.action,
     stateStep: state?.step,
+    currentModel,
     hasModel: !!model
   });
 
-  if (!state || state.action !== 'a2e_motion_generation' || state.step !== 'select_duration') {
+  // Якщо state втрачено але є currentModel - відновлюємо state
+  if (!state && currentModel === 'a2e_motion') {
+    console.log('🔥 A2E Duration: State lost, but currentModel exists. Asking user to resend image.');
+    await ctx.reply(
+      '❌ <b>Помилка: втрачено дані</b>\n\n' +
+      'Будь ласка, надішліть зображення ще раз.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (!state || state.action !== 'a2e_motion_generation') {
     console.log('❌ A2E Duration validation failed:', {
       noState: !state,
       wrongAction: state?.action !== 'a2e_motion_generation',
-      wrongStep: state?.step !== 'select_duration',
-      actualStep: state?.step
+      actualAction: state?.action
     });
     await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без меж');
+    return;
+  }
+
+  // Перевірка наявності imageUrl
+  if (!state.imageUrl) {
+    console.log('❌ A2E Duration: No imageUrl in state');
+    await ctx.reply(
+      '❌ <b>Помилка: відсутнє зображення</b>\n\n' +
+      'Будь ласка, почніть заново та надішліть зображення.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
     return;
   }
 
