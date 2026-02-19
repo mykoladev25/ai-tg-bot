@@ -1520,6 +1520,53 @@ async function pollVeoStatus(taskId, maxAttempts = 600, interval = 5000, modelNa
 
 // ==================== EXPORT ====================
 
+/**
+ * Отримати інформацію про модель з кешу цін KIE.AI
+ * @param {string} modelKey - ключ моделі (наприклад 'sora-watermark-remover')
+ * @returns {Object|null} - { cost: number, apiCost: number } або null
+ */
+function getModelInfo(modelKey) {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const cacheFile = path.join(__dirname, '../config/kie-ai-pricing-cache.json');
+
+    if (!fs.existsSync(cacheFile)) {
+      console.warn('⚠️ KIE.AI pricing cache not found');
+      return null;
+    }
+
+    const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
+
+    // Шукаємо модель в кеші (по anchor URL для точності)
+    const allPricing = cache.pricing?.all || [];
+    const model = allPricing.find(m =>
+      m.anchor?.includes(`model=${modelKey}`) ||
+      m.modelDescription?.toLowerCase().includes(modelKey.toLowerCase())
+    );
+
+    if (!model) {
+      console.warn(`⚠️ Model ${modelKey} not found in pricing cache`);
+      return null;
+    }
+
+    // Розраховуємо ціну з 65% націнкою (1.65)
+    const apiCost = parseFloat(model.usdPrice) || 0;
+    const cost = Math.ceil(apiCost * 1.65 / 0.01); // Конвертуємо в токени
+
+    return {
+      cost,
+      apiCost,
+      creditPrice: model.creditPrice,
+      modelDescription: model.modelDescription
+    };
+
+  } catch (error) {
+    console.error('❌ Error loading model info:', error.message);
+    return null;
+  }
+}
+
 module.exports = {
   // Перевірки
   isAdminUser,
@@ -1538,6 +1585,8 @@ module.exports = {
   generateRunwayVideoKieAI,          // ✅ Runway (endpoint: /runway/generate)
   generateVeoKieAI,                  // ✅ Veo 3.1 (endpoint: /veo/generate)
 
+  // Утиліти
+  getModelInfo,
   // Інформація про провайдер
   KIE_API_BASE,
   KIE_API_KEY: !!KIE_API_KEY,

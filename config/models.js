@@ -53,7 +53,10 @@ module.exports = {
       { name: '✍️ Пишіть', key: 'text', cost: 2, apiCost: 0.008 },
 
       // Claude image analysis: $0.048 -> ceil(0.048*1.65/0.01)=8 токенів
-      { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 8, apiCost: 0.048 }
+      { name: '🖼️ Завантажте зображення для аналізу', key: 'image', cost: 8, apiCost: 0.048 },
+
+      // Sora Watermark Remover: Dynamic KIE.AI pricing
+      { name: '🧹 Видалити Sora Watermark', key: 'sora_watermark_remover', cost: 0, apiCost: 0, isDynamic: true, kieModel: 'sora-watermark-remover' }
     ]
   },
 

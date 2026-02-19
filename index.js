@@ -3018,6 +3018,39 @@ bot.action('gpt_image', async (ctx) => {
   );
 });
 
+bot.action('gpt_sora_watermark_remover', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+
+  // Отримуємо динамічну ціну з KIE.AI
+  const kieAI = require('./services/kie-ai');
+  const modelInfo = await kieAI.getModelInfo('sora-watermark-remover');
+  const cost = modelInfo?.cost || 10; // Fallback до 10 токенів якщо не вдалося отримати ціну
+
+  userCurrentModel.set(userId, 'sora_watermark_remover');
+  userState.set(userId, {
+    action: 'sora_watermark_remover',
+    step: 'waiting_url'
+  });
+
+  await ctx.reply(
+    '🧹 <b>Видалення Sora Watermark</b>\n\n' +
+    '📝 <b>Як використовувати:</b>\n' +
+    '1. Відкрийте ваше відео на sora.chatgpt.com\n' +
+    '2. Скопіюйте URL відео\n' +
+    '3. Надішліть URL сюди\n\n' +
+    '✅ <b>Формат URL:</b>\n' +
+    '<code>https://sora.chatgpt.com/p/s_...</code>\n\n' +
+    `💰 <b>Вартість:</b> ${cost}⚡\n` +
+    '⏱️ <b>Час обробки:</b> ~30-60 секунд\n\n' +
+    '📤 Надішліть URL вашого Sora відео:',
+    {
+      parse_mode: 'HTML',
+      ...keyboard.createBackButton('main_menu')
+    }
+  );
+});
+
 bot.action('new_conversation', async (ctx) => {
   await ctx.answerCbQuery('Історію очищено!');
   await userBalance.clearConversationHistory(ctx.from.id);
@@ -8056,6 +8089,7 @@ bot.on('text', async (ctx) => {
     claude_text: () => handleClaudeText(ctx, text),
     claude: () => handleClaudeText(ctx, text),
     claude_voice: () => handleClaudeText(ctx, text),
+    sora_watermark_remover: () => handleSoraWatermarkRemover(ctx, text),
     midjourney: () => handleMidjourneyGeneration(ctx, text),
     flux: () => handleImageGeneration(ctx, text, 'flux'),
     stable_diffusion: () => handleImageGeneration(ctx, text, 'stable_diffusion'),
@@ -9490,6 +9524,159 @@ async function handleClaudeVision(ctx) {
   } catch (error) {
     console.error('Claude vision error:', error);
     await ctx.reply('❌ Помилка при аналізі зображення.');
+  }
+}
+
+async function handleSoraWatermarkRemover(ctx, videoUrl) {
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  // Перевірка стану
+  if (!state || state.action !== 'sora_watermark_remover' || state.step !== 'waiting_url') {
+    await ctx.reply('❌ Помилка. Почніть заново: 🧠 Помічники → 🧹 Видалити Sora Watermark');
+    return;
+  }
+
+  // Перевірка URL
+  if (!videoUrl.includes('sora.chatgpt.com')) {
+    await ctx.reply(
+      '❌ <b>Невірний URL!</b>\n\n' +
+      'URL має бути з sora.chatgpt.com\n\n' +
+      '✅ <b>Приклад:</b>\n' +
+      '<code>https://sora.chatgpt.com/p/s_...</code>\n\n' +
+      '📤 Надішліть правильний URL:',
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
+
+  // Отримуємо динамічну ціну
+  const kieAI = require('./services/kie-ai');
+  const modelInfo = await kieAI.getModelInfo('sora-watermark-remover');
+  const cost = modelInfo?.cost || 10;
+
+  // Перевірка балансу
+  if (!(await userBalance.hasTokens(userId, cost))) {
+    await showInsufficientTokens(ctx, cost);
+    userState.delete(userId);
+    return;
+  }
+
+  // Очищаємо стан
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  const statusMsg = await ctx.reply(
+    '🧹 <b>Видаляю watermark...</b>\n\n' +
+    '⏱️ Це може зайняти 30-60 секунд\n' +
+    '📊 Статус: обробка...',
+    { parse_mode: 'HTML' }
+  );
+
+  try {
+    const soraWatermarkRemover = require('./services/sora-watermark-remover');
+
+    // Створюємо задачу
+    const createResult = await soraWatermarkRemover.removeSoraWatermark(videoUrl);
+
+    if (!createResult.success) {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `❌ <b>Помилка створення задачі</b>\n\n${createResult.error}`,
+        { parse_mode: 'HTML' }
+      );
+      return;
+    }
+
+    const taskId = createResult.taskId;
+    let retries = 0;
+    const maxRetries = 60;
+    const retryDelay = 5000;
+
+    // Polling статусу
+    while (retries < maxRetries) {
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+
+      const status = await soraWatermarkRemover.checkTaskStatus(taskId);
+
+      if (status.state === 'success' && status.resultUrls?.[0]) {
+        // Списуємо токени
+        await userBalance.deductTokens(
+          userId,
+          cost,
+          'Sora Watermark Remover',
+          {
+            modelKey: 'sora_watermark_remover',
+            modelName: 'Sora Watermark Remover',
+            apiCost: modelInfo?.apiCost || 0,
+            videoUrl
+          }
+        );
+
+        const user = await userBalance.getUser(userId, ctx.from);
+
+        // Видаляємо статус
+        await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+
+        // Надсилаємо відео
+        await ctx.replyWithVideo(status.resultUrls[0], {
+          caption:
+            `✅ <b>Watermark видалено!</b>\n\n` +
+            `🎬 Оригінальне відео: sora.chatgpt.com\n` +
+            `💰 Використано: ${cost}⚡\n` +
+            `💰 Залишок: ${user.tokens.toFixed(2)}⚡`,
+          parse_mode: 'HTML',
+          ...keyboard.createBackButton('main_menu')
+        });
+
+        return;
+      } else if (status.state === 'fail') {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          `❌ <b>Помилка обробки</b>\n\n${status.error}`,
+          { parse_mode: 'HTML' }
+        );
+        return;
+      }
+
+      // Оновлюємо статус
+      if (retries % 3 === 0) {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          `🧹 <b>Видаляю watermark...</b>\n\n` +
+          `⏱️ Очікування: ${Math.floor(retries * retryDelay / 1000)}с\n` +
+          `📊 Статус: обробка...`,
+          { parse_mode: 'HTML' }
+        ).catch(() => {});
+      }
+
+      retries++;
+    }
+
+    // Таймаут
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      statusMsg.message_id,
+      null,
+      '❌ <b>Перевищено час очікування</b>\n\nСпробуйте пізніше.',
+      { parse_mode: 'HTML' }
+    );
+
+  } catch (error) {
+    console.error('❌ Sora Watermark Remover Error:', error);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      statusMsg.message_id,
+      null,
+      `❌ <b>Помилка</b>\n\n${error.message}`,
+      { parse_mode: 'HTML' }
+    );
   }
 }
 
