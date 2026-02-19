@@ -9623,13 +9623,24 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
     });
 
     if (!createResult.success) {
-      // Перевіряємо чи це помилка доступу
+      // Перевіряємо тип помилки
       const isPermissionError = createResult.error?.toLowerCase().includes('permission') ||
                                  createResult.error?.toLowerCase().includes('access');
+      const isCreditsError = createResult.error?.toLowerCase().includes('credits insufficient') ||
+                              createResult.error?.toLowerCase().includes('balance');
 
       let errorMessage = '❌ <b>Помилка створення задачі</b>\n\n';
 
-      if (isPermissionError) {
+      if (isCreditsError) {
+        errorMessage +=
+          '💳 <b>Недостатньо credits на KIE.AI</b>\n\n' +
+          'На балансі KIE.AI провайдера недостатньо credits для виконання цього запиту.\n\n' +
+          '👨‍💼 <b>Для адміністратора:</b>\n' +
+          '• Поповніть баланс на https://kie.ai\n' +
+          '• Потрібно ~10 credits на одне видалення watermark\n\n' +
+          '📝 <b>Технічна помилка:</b>\n' +
+          `<code>${createResult.error}</code>`;
+      } else if (isPermissionError) {
         errorMessage +=
           '🔒 <b>Немає доступу до відео</b>\n\n' +
           'KIE.AI API не може отримати доступ до вашого відео.\n\n' +
