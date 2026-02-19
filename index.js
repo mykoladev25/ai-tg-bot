@@ -9611,8 +9611,16 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
   try {
     const soraWatermarkRemover = require('./services/sora-watermark-remover');
 
+    console.log('🧹 Sora Watermark: Calling removeSoraWatermark API for user', userId);
+
     // Створюємо задачу
     const createResult = await soraWatermarkRemover.removeSoraWatermark(videoUrl);
+
+    console.log('🧹 Sora Watermark: API result:', {
+      success: createResult.success,
+      taskId: createResult.taskId,
+      error: createResult.error
+    });
 
     if (!createResult.success) {
       // Перевіряємо чи це помилка доступу

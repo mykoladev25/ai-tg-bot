@@ -22,6 +22,8 @@ async function removeSoraWatermark(videoUrl, uploadMethod = 's3') {
     // Приймаємо обидва формати: /p/s_... та /g/gen_...
     // API сам визначить чи має доступ
 
+    console.log('🧹 Sora Watermark: Creating task for URL:', videoUrl);
+
     const response = await axios.post(
       `${KIE_BASE_URL}/createTask`,
       {
@@ -39,6 +41,12 @@ async function removeSoraWatermark(videoUrl, uploadMethod = 's3') {
       }
     );
 
+    console.log('🧹 Sora Watermark: API response:', {
+      code: response.data.code,
+      msg: response.data.msg,
+      taskId: response.data.data?.taskId
+    });
+
     if (response.data.code === 200 && response.data.data?.taskId) {
       return {
         success: true,
@@ -51,7 +59,11 @@ async function removeSoraWatermark(videoUrl, uploadMethod = 's3') {
       };
     }
   } catch (error) {
-    console.error('❌ Sora Watermark Remover Error:', error.response?.data || error.message);
+    console.error('❌ Sora Watermark Remover Error:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status
+    });
     return {
       success: false,
       error: error.response?.data?.msg || error.message
