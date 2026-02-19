@@ -387,9 +387,14 @@ module.exports = {
       usdAudio = staticAudio;
       usdNoAudio = staticNoAudio;
     }
+
+    // Fallback ціни залежать від режиму
+    const fallbackAudio = mode === 'pro' ? 0.20 : 0.15;      // 1080p: $0.20, 720p: $0.15
+    const fallbackNoAudio = mode === 'pro' ? 0.135 : 0.10;   // 1080p: $0.135, 720p: $0.10
+
     return {
-      costPerSecondAudio: usdToTokens(usdAudio ?? 0.20),
-      costPerSecondNoAudio: usdToTokens(usdNoAudio ?? 0.135)
+      costPerSecondAudio: usdToTokens(usdAudio ?? fallbackAudio),
+      costPerSecondNoAudio: usdToTokens(usdNoAudio ?? fallbackNoAudio)
     };
   },
 
