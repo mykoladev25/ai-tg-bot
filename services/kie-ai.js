@@ -1431,6 +1431,145 @@ async function pollRunwayStatus(taskId, maxAttempts = 600, interval = 5000, mode
 }
 
 /**
+ * Генерація через KIE.AI - OpenAI Sora 2 (звичайна версія, не Pro)
+ *
+ * Документація: https://kie.ai/sora-2
+ *
+ * Моделі:
+ * - sora-2-text-to-video: текст → відео (15s)
+ * - sora-2-image-to-video: зображення + текст → відео (10s або 15s)
+ *
+ * KIE.AI Pricing:
+ * - Text-to-video 15s: 40 credits = $0.20
+ * - Image-to-video 10s: 35 credits = $0.175
+ * - Image-to-video 15s: 40 credits = $0.20
+ *
+ * 🔥 80%+ дешевше ніж Fal.ai!
+ *
+ * Параметри:
+ * - prompt: текстовий опис (обов'язково)
+ * - imageUrl: URL зображення (тільки для image-to-video)
+ * - duration: тривалість (10 або 15 секунд, для text-to-video тільки 15)
+ * - aspectRatio: 'portrait' або 'landscape'
+ */
+async function generateSora2KieAI(prompt, options = {}) {
+  try {
+    if (!KIE_API_KEY) {
+      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+    }
+
+    if (!prompt) {
+      throw new Error('Prompt є обов\'язковим для Sora 2');
+    }
+
+    const {
+      imageUrl = null,           // URL зображення для image-to-video
+      duration = null,           // 10 або 15 секунд (auto-select based on mode)
+      aspectRatio = 'landscape'  // 'portrait' або 'landscape'
+    } = options;
+
+    const isImageToVideo = !!imageUrl;
+
+    // Вибираємо модель і тривалість
+    let modelName, actualDuration;
+    if (isImageToVideo) {
+      modelName = 'sora-2-image-to-video';
+      actualDuration = duration || 15;  // За замовчуванням 15s для image-to-video
+    } else {
+      modelName = 'sora-2-text-to-video';
+      actualDuration = 15;  // Text-to-video тільки 15s
+    }
+
+    console.log(`🌌 KIE.AI Sora 2 (${isImageToVideo ? 'image2video' : 'text2video'}):`, {
+      prompt: prompt.substring(0, 100),
+      duration: actualDuration,
+      aspectRatio,
+      hasImage: isImageToVideo
+    });
+
+    // ✅ Структура за документацією KIE.AI
+    const input = {
+      prompt: prompt,
+      aspect_ratio: aspectRatio  // "portrait" або "landscape"
+    };
+
+    // Для image-to-video додаємо image_urls
+    if (isImageToVideo) {
+      input.image_urls = [imageUrl];
+    }
+
+    const payload = {
+      model: modelName,
+      callBackUrl: `${process.env.APP_URL || 'http://localhost:5500'}/webhook/kie-ai`,
+      input: input
+    };
+
+    console.log(`📤 KIE.AI Sora 2 request:`, {
+      model: payload.model,
+      duration: actualDuration,
+      aspectRatio,
+      hasImage: isImageToVideo
+    });
+
+    const createResponse = await axios.post(
+      `${KIE_API_BASE}/jobs/createTask`,
+      payload,
+      {
+        headers: {
+          'Authorization': `Bearer ${KIE_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log(`📥 KIE.AI Sora 2 response:`, createResponse.data);
+
+    if (!createResponse.data?.data?.taskId) {
+      console.error('❌ Invalid KIE.AI Sora 2 response:', createResponse.data);
+      throw new Error('No taskId in response');
+    }
+
+    const taskId = createResponse.data.data.taskId;
+    console.log(`✅ KIE.AI Sora 2 task created: ${taskId}`);
+
+    // Sora 2 може займати 5-10 хвилин
+    const result = await pollJobStatus(taskId, 120, 5000, 'Sora 2 (KIE.AI)');
+
+    // Отримуємо URL відео
+    const videoResultUrl = extractVideoUrl(result);
+    if (!videoResultUrl) {
+      throw new Error('KIE.AI Sora 2 returned no video in output');
+    }
+
+    return {
+      success: true,
+      videoUrl: videoResultUrl,
+      taskId: taskId,
+      provider: 'kie-ai',
+      duration: actualDuration
+    };
+
+  } catch (error) {
+    console.error('❌ KIE.AI Sora 2 Error:', error.response?.data || error.message);
+
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
+    return {
+      success: false,
+      error: error.response?.data?.msg || error.response?.data?.message || error.message,
+      provider: 'kie-ai'
+    };
+  }
+}
+
+/**
  * Генерація через KIE.AI - Google Veo 3.1
  *
  * Документація: https://docs.kie.ai/market/google/veo-3.1
@@ -1733,6 +1872,7 @@ module.exports = {
   generateKling3VideoKieAI,          // ✅ Kling 3.0 (multi-shot, element refs)
   generateKlingVideoKieAI,           // ✅ Kling v2.5 + v2.6
   generateRunwayVideoKieAI,          // ✅ Runway (endpoint: /runway/generate)
+  generateSora2KieAI,                // ✅ Sora 2 (звичайна, не Pro) 🔥 80%+ знижка!
   generateVeoKieAI,                  // ✅ Veo 3.1 (endpoint: /veo/generate)
 
   // Утиліти
@@ -1758,6 +1898,7 @@ module.exports = {
       'kling_3',          // ✅ kling-3.0/video (multi-shot, element refs) 🆕
       'kling_motion',     // ✅ kling-2.6/motion-control
       'runway_turbo',     // ✅ /runway/generate (endpoint!)
+      'sora_2',           // ✅ sora-2-pro-text-to-video, sora-2-image-to-video 🆕
       'veo'               // ✅ veo3, veo3_fast (/veo/generate endpoint!)
     ],
     // Моделі які ТІЛЬКИ на KIE.AI - немає на Replicate!
@@ -1767,8 +1908,7 @@ module.exports = {
     // Моделі які НЕ підтримуються на KIE.AI — ціна та запуск через Replicate
     notSupported: [
       'stable_diffusion', // ❌ Немає на KIE.AI
-      'clarity',          // ❌ Немає на KIE.AI
-      'sora_2'            // ❌ Поки тільки Replicate
+      'clarity'           // ❌ Немає на KIE.AI
     ]
   },
 

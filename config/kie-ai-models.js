@@ -331,17 +331,27 @@ module.exports = {
    * ⚠️ Discount: 80-82.5% дешевше ніж Fal.ai ($1.00 на Fal vs $0.20 на KIE)!
    */
   sora_2: {
-    kie_model: 'sora-2',
+    kie_model_text_to_video: 'sora-2-text-to-video',
+    kie_model_image_to_video: 'sora-2-image-to-video',
     kie_pricing: {
       'text_to_video_15s': { credits: 40, usd: 0.20, fal_price: 1.00, discount: '80%' },
       'image_to_video_10s': { credits: 35, usd: 0.175, fal_price: 1.00, discount: '82.5%' },
       'image_to_video_15s': { credits: 40, usd: 0.20, fal_price: 1.00, discount: '80%' }
     },
-    features: {
-      durations: [10, 15],
-      modes: ['text-to-video', 'image-to-video']
+    replicate_pricing: {
+      per_second: 0.10,  // Standard quality на Replicate
+      '4s': 0.40,
+      '8s': 0.80,
+      '12s': 1.20
     },
-    notes: '🔥 ВЕЛИЧЕЗНА ЗНИЖКА! 80%+ дешевше ніж Fal.ai!'
+    features: {
+      durations: [10, 15],  // KIE.AI: 10s або 15s
+      replicate_durations: [4, 8, 12],  // Replicate: 4, 8, 12s
+      modes: ['text-to-video', 'image-to-video'],
+      qualities: ['stable'],  // Тільки stable на KIE.AI (без Pro)
+      aspect_ratios: ['portrait', 'landscape']
+    },
+    notes: '🔥 ВЕЛИЧЕЗНА ЗНИЖКА! 80%+ дешевше ніж Fal.ai! Це звичайна Sora 2, не Pro версія.'
   },
 
   // ==================== HELPER FUNCTIONS ====================

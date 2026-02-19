@@ -19,11 +19,11 @@ const PROVIDER_CHOICE_ACCESS = process.env.PROVIDER_CHOICE_ACCESS || 'admin_only
  * Контролювати хто має доступ до KIE.AI функцій (Kling 3.0 тощо)
  *
  * Режими:
- * - 'admin_only' (DEFAULT) - тільки для адміністратора (зручно під тести)
- * - 'all_users' - для всіх користувачів
+ * - 'all_users' (DEFAULT) - для всіх користувачів ✅
+ * - 'admin_only' - тільки для адміністратора (зручно під тести)
  * - 'disabled' - функція вимкнена повністю
  */
-const KIE_AI_ACCESS = process.env.KIE_AI_ACCESS || 'admin_only';
+const KIE_AI_ACCESS = process.env.KIE_AI_ACCESS || 'all_users';
 
 /**
  * Чи брати вартість Kling 3.0 з кешу kie-ai-pricing-cache.json (з націнкою 30%).

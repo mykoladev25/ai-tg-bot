@@ -30,6 +30,7 @@ const keyboard = require('./utils/keyboard');
 const userBalance = require('./utils/userBalance');
 const blockedUsersUtil = require('./utils/blockedUsers');
 const gracefulShutdown = require('./utils/gracefulShutdown');
+const providerFallback = require('./utils/providerFallback');
 const db = require('./database/connection');
 const User = require('./database/models/User');
 const GenerationResult = require('./database/models/GenerationResult');
@@ -1947,7 +1948,7 @@ bot.hears('👤 Профіль', async (ctx) => {
 });
 
 /**
- * Меню вибору провайдера (тільки для адміна)
+ * Меню вибору провайдера (доступно всім користувачам)
  */
 bot.command('provider', async (ctx) => {
   const userId = ctx.from.id;
@@ -1965,16 +1966,20 @@ bot.command('provider', async (ctx) => {
 
   const providerMenu = `⚙️ <b>Вибір провайдера для генерацій</b>
 
-Который провайдер використовувати для генерацій?
+Який провайдер використовувати для генерацій?
 
-<b>Поточний вибір:</b> ${currentChoice === 'auto' ? '🤖 Автоматичний (KIE.AI)' : currentChoice === 'kie-ai' ? '🔵 KIE.AI' : '🟣 Replicate'}
+<b>Поточний вибір:</b> ${currentChoice === 'auto' ? '🤖 Автоматичний' : currentChoice === 'kie-ai' ? '🔵 KIE.AI' : '🟣 Replicate'}
 
 <b>Описання:</b>
-🔵 <b>KIE.AI</b> - часто швидше, альтернативний провайдер
-🟣 <b>Replicate</b> - базовий провайдер, більш стабільний
-🤖 <b>Автоматичний</b> - KIE.AI (якщо увімкнена), інакше Replicate
+🔵 <b>KIE.AI</b> - дешевший, швидший (пріоритетний) ✅
+🟣 <b>Replicate</b> - альтернативний провайдер
+🤖 <b>Автоматичний</b> - розумний вибір з fallback
 
-💡 За замовчуванням використовується KIE.AI якщо увімкнена.`;
+<b>🆕 Нова система fallback:</b>
+✅ Якщо KIE.AI не працює - автоматично перемикається на Replicate
+✅ Якщо обрали конкретний провайдер - використовується тільки він
+
+💡 Рекомендуємо: <b>Автоматичний</b> (найкраща надійність)`;
 
   const providerKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('🔵 KIE.AI', 'provider_kie-ai')],
@@ -2049,9 +2054,12 @@ bot.action('provider_auto', async (ctx) => {
   saveProviderChoice();
 
   await ctx.editMessageText(
-    '✅ <b>Автоматичний режим</b>\n\n' +
-    '🤖 Система автоматично обиратиме найкращий провайдер\n\n' +
-    '💡 Командa: /provider для зміни вибору',
+    '✅ <b>Автоматичний режим увімкнено</b>\n\n' +
+    '🤖 Розумний вибір провайдера:\n' +
+    '1️⃣ Спочатку пробує <b>KIE.AI</b> (дешевше)\n' +
+    '2️⃣ Якщо не працює → автоматично <b>Replicate</b>\n\n' +
+    '✅ Fallback УВІМКНЕНИЙ - максимальна надійність!\n\n' +
+    '💡 Команда: /provider для зміни вибору',
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([[Markup.button.callback('🏠 Назад', 'main_menu')]])
@@ -2102,6 +2110,50 @@ bot.action('provider_menu', async (ctx) => {
   });
 
   await ctx.answerCbQuery('⚙️ Меню провайдера');
+});
+
+// ==================== НАЛАШТУВАННЯ ====================
+
+bot.hears('⚙️ Налаштування', async (ctx) => {
+  const userId = ctx.from.id;
+  const currentChoice = userProviderChoice.get(userId) || 'auto';
+
+  const choiceEmoji = {
+    'kie-ai': '🔵',
+    'replicate': '🟣',
+    'auto': '🤖'
+  };
+
+  const choiceText = {
+    'kie-ai': 'KIE.AI',
+    'replicate': 'Replicate',
+    'auto': 'Автоматичний'
+  };
+
+  const settingsMenu = `⚙️ <b>Налаштування</b>
+
+<b>Поточні налаштування:</b>
+${choiceEmoji[currentChoice]} Провайдер: <b>${choiceText[currentChoice]}</b>
+
+<b>Що таке провайдер?</b>
+• 🔵 <b>KIE.AI</b> - дешевший, пріоритетний (рекомендовано)
+• 🟣 <b>Replicate</b> - альтернативний провайдер
+• 🤖 <b>Автоматичний</b> - спершу пробує KIE.AI, потім Replicate
+
+<b>Нова система fallback:</b>
+✅ Якщо один провайдер не працює - автоматично перемикається на інший!
+
+Оберіть опцію нижче 👇`;
+
+  const settingsKeyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('🔧 Вибрати провайдер', 'provider_menu')],
+    [Markup.button.callback('🏠 Назад', 'main_menu')]
+  ]);
+
+  await ctx.reply(settingsMenu, {
+    parse_mode: 'HTML',
+    ...settingsKeyboard
+  });
 });
 
 bot.hears('❓ Допомога', async (ctx) => {
@@ -9538,107 +9590,153 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   (async () => {
     let finished = false;
     try {
-      // Перевіряємо чи можемо використовувати KIE.AI
-      // Враховуємо вибір користувача з userProviderChoice та централізовану систему доступу
+      // 🎯 НОВА СИСТЕМА: Автоматичний fallback між провайдерами
       const userChosenProvider = userProviderChoice.get(userId);
       const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 
-      // Провайдер за вибором; якщо KIE обрано але реалізації немає — Replicate
-      let useKieAI = false;
-      if (userChosenProvider === 'kie-ai') {
-        useKieAI = kieAI.isKieAIImplemented(generationData.modelKey);
-      } else if (userChosenProvider === 'replicate') {
-        useKieAI = false;
-      } else {
-        useKieAI = canUseKieAI && kieAI.isKieAIImplemented(generationData.modelKey);
-      }
+      // Генеруємо через систему з fallback
+      const result = await providerFallback.generateWithFallback({
+        modelKey: generationData.modelKey,
+        userChoice: userChosenProvider,
+        canUseKieAI,
 
-      const replicateFunctions = {
-        flux: () => replicate.generateWithFlux(generationData.prompt),
-        stable_diffusion: useKieAI
-          ? () => kieAI.generateWithStableDiffusionKieAI(
-              generationData.prompt,
-              generationData.imageInput,
-              generationData.aspectRatio
-            )
-          : () => replicate.generateWithStableDiffusion(
-              generationData.prompt,
-              generationData.imageInput,
-              0.8,
-              generationData.aspectRatio
-            ),
-        nano_banana: () => replicate.generateWithNanoBananaBase(generationData.prompt, generationData.imageInput, generationData.aspectRatio),
-        nano_banana_2k: useKieAI
-          ? () => kieAI.generateWithNanoBananaKieAI(
-              generationData.prompt,
-              generationData.imageInput,
-              '2K',
-              generationData.aspectRatio,
-              0.5
-            )
-          : () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '2K', generationData.aspectRatio),
-        nano_banana_4k: useKieAI
-          ? () => kieAI.generateWithNanoBananaKieAI(
-              generationData.prompt,
-              generationData.imageInput,
-              '4K',
-              generationData.aspectRatio,
-              0.5
-            )
-          : () => replicate.generateWithNanoBanana(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
-        seedream_4k: useKieAI
-          ? () => kieAI.generateWithSeedreamKieAI(
-              generationData.prompt,
-              generationData.imageInput,
-              '4K',
-              generationData.aspectRatio,
-              0.5
-            )
-          : () => replicate.generateWithSeedream(generationData.prompt, generationData.imageInput, '4K', generationData.aspectRatio),
-        ideogram: () => replicate.generateWithIdeogram(generationData.prompt, generationData.imageInput, 0.5, generationData.aspectRatio),
-        clarity: () => {
-          const clarityImage = Array.isArray(generationData.imageInput)
-            ? generationData.imageInput[0]
-            : generationData.imageInput;
-          return replicate.generateWithClarityUpscaler(clarityImage, generationData.prompt);
+        // KIE.AI генератор
+        kieGenerator: async () => {
+          switch (generationData.modelKey) {
+            case 'stable_diffusion':
+              return await kieAI.generateWithStableDiffusionKieAI(
+                generationData.prompt,
+                generationData.imageInput,
+                generationData.aspectRatio
+              );
+
+            case 'nano_banana_2k':
+              return await kieAI.generateWithNanoBananaKieAI(
+                generationData.prompt,
+                generationData.imageInput,
+                '2K',
+                generationData.aspectRatio,
+                0.5
+              );
+
+            case 'nano_banana_4k':
+              return await kieAI.generateWithNanoBananaKieAI(
+                generationData.prompt,
+                generationData.imageInput,
+                '4K',
+                generationData.aspectRatio,
+                0.5
+              );
+
+            case 'seedream_4k':
+              return await kieAI.generateWithSeedreamKieAI(
+                generationData.prompt,
+                generationData.imageInput,
+                '4K',
+                generationData.aspectRatio,
+                0.5
+              );
+
+            default:
+              return { success: false, error: `No KIE generator for ${generationData.modelKey}` };
+          }
         },
-        recraft_upscale: () => {
-          const upscaleImage = Array.isArray(generationData.imageInput)
-            ? generationData.imageInput[0]
-            : generationData.imageInput;
-          return replicate.generateWithRecraftCrispUpscale(upscaleImage);
-        }
-      };
 
-      const generator = replicateFunctions[generationData.modelKey];
-      if (!generator) {
-        const errorMsg = `No generator for model: ${generationData.modelKey}`;
-        console.error(errorMsg);
-        await adminNotifier.notifyAdmin(bot, new Error(errorMsg), { userId, username, action: `${modelKey}_generation`, model: model.name, prompt });
-        await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, '❌ Помилка генерації. Спробуйте іншу модель.');
-        const isTrial = await isTrialUser(userId);
-        await monitoringLoggers.logUsageEvent({
-          userId,
-          modelKey,
-          success: false,
-          isTrial,
-          isFree: isTrial,
-          errorCode: 'no_generator',
-          provider: useKieAI ? 'kie' : 'replicate'
-        });
-        finished = true;
-        gracefulShutdown.completeGeneration(requestId, false);
-        return;
-      }
+        // Replicate генератор
+        replicateGenerator: async () => {
+          switch (generationData.modelKey) {
+            case 'flux':
+              return await replicate.generateWithFlux(generationData.prompt);
 
-      const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
-      console.log(`🎯 Using provider: ${providerName} for model ${generationData.modelKey}`);
+            case 'stable_diffusion':
+              return await replicate.generateWithStableDiffusion(
+                generationData.prompt,
+                generationData.imageInput,
+                0.8,
+                generationData.aspectRatio
+              );
 
-      const result = await generator();
+            case 'nano_banana':
+              return await replicate.generateWithNanoBananaBase(
+                generationData.prompt,
+                generationData.imageInput,
+                generationData.aspectRatio
+              );
+
+            case 'nano_banana_2k':
+              return await replicate.generateWithNanoBanana(
+                generationData.prompt,
+                generationData.imageInput,
+                '2K',
+                generationData.aspectRatio
+              );
+
+            case 'nano_banana_4k':
+              return await replicate.generateWithNanoBanana(
+                generationData.prompt,
+                generationData.imageInput,
+                '4K',
+                generationData.aspectRatio
+              );
+
+            case 'seedream_4k':
+              return await replicate.generateWithSeedream(
+                generationData.prompt,
+                generationData.imageInput,
+                '4K',
+                generationData.aspectRatio
+              );
+
+            case 'ideogram':
+              return await replicate.generateWithIdeogram(
+                generationData.prompt,
+                generationData.imageInput,
+                0.5,
+                generationData.aspectRatio
+              );
+
+            case 'clarity':
+              const clarityImage = Array.isArray(generationData.imageInput)
+                ? generationData.imageInput[0]
+                : generationData.imageInput;
+              return await replicate.generateWithClarityUpscaler(clarityImage, generationData.prompt);
+
+            case 'recraft_upscale':
+              const upscaleImage = Array.isArray(generationData.imageInput)
+                ? generationData.imageInput[0]
+                : generationData.imageInput;
+              return await replicate.generateWithRecraftCrispUpscale(upscaleImage);
+
+            default:
+              return { success: false, error: `No Replicate generator for ${generationData.modelKey}` };
+          }
+        },
+
+        context: { userId, username, modelKey: generationData.modelKey }
+      });
+
+      // Провайдер який реально використали
+      const actualProvider = result.provider;
+      const providerName = actualProvider === 'kie' ? 'KIE.AI' : 'Replicate';
+
+      console.log(`🎯 Used provider: ${providerName} for ${generationData.modelKey}${result.hadFallback ? ' (FALLBACK)' : ''}`);
 
       if (!result.success) {
-        await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username, action: `${modelKey}_generation`, model: generationData.modelName || 'unknown', prompt, hasImage: !!imageInput, provider: providerName });
-        await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, `❌ Помилка генерації (${providerName}).\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`);
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId, username, action: `${modelKey}_generation`,
+          model: generationData.modelName || 'unknown',
+          prompt,
+          hasImage: !!imageInput,
+          provider: providerName,
+          triedProviders: result.triedProviders?.join(', '),
+          hadFallback: result.hadFallback
+        });
+
+        const errorMsg = result.hadFallback
+          ? `❌ Помилка генерації.\n\nСпробували: ${result.triedProviders.join(' → ')}\nВсі провайдери недоступні.\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`
+          : `❌ Помилка генерації (${providerName}).\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`;
+
+        await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, errorMsg);
 
         const isTrial = await isTrialUser(userId);
         await monitoringLoggers.logUsageEvent({
@@ -9648,7 +9746,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
           isTrial,
           isFree: isTrial,
           errorCode: result.error?.substring(0, 100),
-          provider: useKieAI ? 'kie' : 'replicate'
+          provider: actualProvider || 'unknown'
         });
 
         finished = true;
@@ -9671,7 +9769,11 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         success: true,
         isTrial: isTrialImg,
         isFree: isTrialImg,
-        provider: useKieAI ? 'kie' : 'replicate'
+        provider: actualProvider,
+        metadata: {
+          hadFallback: result.hadFallback,
+          triedProviders: result.triedProviders
+        }
       });
 
       const fileSize = await getFileSize(result.imageUrl);
