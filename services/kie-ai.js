@@ -883,9 +883,9 @@ async function generateKling3VideoKieAI(options = {}) {
       hasImages: imageUrls?.length || 0
     });
 
-    // ✅ Структура за документацією KIE.AI (sound — рядок 'on'|'off'; при multi_shots обов'язково 'on')
+    // ✅ Структура за документацією KIE.AI (sound — boolean; при multi_shots обов'язково true)
     const input = {
-      sound: multiShots ? 'on' : (sound ? 'on' : 'off'),
+      sound: multiShots ? true : Boolean(sound),
       duration: String(duration),
       mode: mode,
       multi_shots: multiShots
@@ -970,11 +970,21 @@ async function generateKling3VideoKieAI(options = {}) {
       if (responseCode === 500) {
         console.error('❌ KIE.AI Kling 3.0 - Server Error 500:', createResponse?.data);
         console.error('📋 Request payload for support:', JSON.stringify(payload, null, 2));
+        console.error('💡 Possible reasons: 1) Temporary server issue, 2) API parameters changed, 3) Invalid input values');
         return {
           success: false,
-          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          error: '⚠️ Тимчасова проблема на сервері KIE.AI.\n\n' +
+                 'Можливі причини:\n' +
+                 '• Сервер KIE.AI перевантажений\n' +
+                 '• Зміни в API\n' +
+                 '• Невалідні параметри запиту\n\n' +
+                 'Спробуйте:\n' +
+                 '1. Почекати 1-2 хвилини\n' +
+                 '2. Спробувати іншу модель\n' +
+                 '3. Звернутись до адміністратора',
           provider: 'kie-ai',
-          serverError: true
+          serverError: true,
+          requestPayload: payload
         };
       }
 
