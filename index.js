@@ -3022,15 +3022,28 @@ bot.action('gpt_sora_watermark_remover', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
 
+  console.log('🧹 Sora Watermark Remover action clicked by user:', userId);
+
   // Отримуємо динамічну ціну з KIE.AI
   const kieAI = require('./services/kie-ai');
   const modelInfo = await kieAI.getModelInfo('sora-watermark-remover');
   const cost = modelInfo?.cost || 10; // Fallback до 10 токенів якщо не вдалося отримати ціну
 
+  console.log('🧹 Sora Watermark: Model info loaded:', {
+    cost,
+    apiCost: modelInfo?.apiCost,
+    modelDescription: modelInfo?.modelDescription
+  });
+
   userCurrentModel.set(userId, 'sora_watermark_remover');
   userState.set(userId, {
     action: 'sora_watermark_remover',
     step: 'waiting_url'
+  });
+
+  console.log('🧹 Sora Watermark: State set for user', userId, {
+    currentModel: userCurrentModel.get(userId),
+    state: userState.get(userId)
   });
 
   await ctx.reply(
@@ -8107,8 +8120,10 @@ bot.on('text', async (ctx) => {
   };
   
   if (handlers[currentModel]) {
+    console.log(`🔥 Text handler: calling ${currentModel} handler for user ${userId}`);
     runBackgroundTask(handlers[currentModel], `text_handler_${currentModel}`);
   } else {
+    console.log(`⚠️ Text handler: no handler for model "${currentModel}" for user ${userId}`);
     await ctx.reply(`Модель "${currentModel}" ще не підтримується.\nВиберіть іншу модель.`, keyboard.createMainMenu());
   }
 });
@@ -9532,9 +9547,26 @@ async function handleClaudeVision(ctx) {
 async function handleSoraWatermarkRemover(ctx, videoUrl) {
   const userId = ctx.from.id;
   const state = userState.get(userId);
+  const currentModel = userCurrentModel.get(userId);
+
+  console.log('🧹 Sora Watermark Remover handler called:', {
+    userId,
+    hasState: !!state,
+    stateAction: state?.action,
+    stateStep: state?.step,
+    currentModel,
+    videoUrl: videoUrl.substring(0, 50)
+  });
 
   // Перевірка стану
   if (!state || state.action !== 'sora_watermark_remover' || state.step !== 'waiting_url') {
+    console.log('❌ Sora Watermark: Invalid state', {
+      noState: !state,
+      wrongAction: state?.action !== 'sora_watermark_remover',
+      wrongStep: state?.step !== 'waiting_url',
+      actualAction: state?.action,
+      actualStep: state?.step
+    });
     await ctx.reply('❌ Помилка. Почніть заново: 🧠 Помічники → 🧹 Видалити Sora Watermark');
     return;
   }
