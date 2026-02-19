@@ -3438,7 +3438,7 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // A2E Motion без меж 🔥
+  // A2E Motion без омеженнь 🔥
   if (modelKey === 'a2e_motion') {
     try {
       const a2eService = require('./services/a2e');
@@ -3466,12 +3466,20 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
       });
 
       await ctx.reply(
-        `🔥 <b>Motion без меж</b>\n\n` +
+        `🔥 <b>Motion без омеженнь</b>\n\n` +
         `Анімація зображення з природним рухом та плавними переходами.\n\n` +
-        `🖼️ <b>Крок 1: Надішліть зображення</b>\n\n` +
-        `Це зображення буде анімоване.\n\n` +
         `⏱️ Тривалість: ${durations.join(', ')} секунд\n` +
         `💰 Вартість: ${minCost}—${maxCost}⚡\n\n` +
+        `🚫 <b>Заборонено надсилати:</b>\n` +
+        `• будь-який сексуальний або порнографічний контент\n` +
+        `• оголеність або 18+ матеріали\n` +
+        `• зображення неповнолітніх у будь-якому сексуальному контексті\n` +
+        `• насильницький або незаконний контент\n` +
+        `• матеріали, що порушують права третіх осіб\n\n` +
+        `Користуючись сервісом, ви погоджуєтесь з правилами провайдера:\n` +
+        `🔗 https://a2e.ai/a2e-terms-of-use/\n\n` +
+        `⚠️ Порушення призведе до блокування без повернення коштів.\n\n` +
+        `🖼️ <b>Крок 1: Надішліть зображення</b>\n` +
         `📤 <b>Надішліть одне зображення:</b>`,
         {
           parse_mode: 'HTML',
@@ -5452,7 +5460,7 @@ bot.on('photo', async (ctx, next) => {
     );
 
     await ctx.reply(
-      `🔥 <b>Motion без меж</b>\n\n` +
+      `🔥 <b>Motion без омеженнь</b>\n\n` +
       `✅ Зображення завантажено!\n\n` +
       `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
       `💰 Вартість залежить від тривалості:`,
@@ -6065,7 +6073,7 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
       wrongAction: state?.action !== 'a2e_motion_generation',
       actualAction: state?.action
     });
-    await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без меж');
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без омеженнь');
     return;
   }
 
@@ -6090,7 +6098,7 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
   });
 
   await ctx.reply(
-    `🔥 <b>Motion без меж</b>\n\n` +
+    `🔥 <b>Motion без омеженнь</b>\n\n` +
     `✅ Зображення: Завантажено\n` +
     `⏱️ Тривалість: <b>${duration} сек</b>\n` +
     `💰 Вартість: <b>${a2eCost}⚡</b>\n\n` +
@@ -6108,7 +6116,7 @@ bot.action('a2e_skip_negative', async (ctx) => {
   const state = userState.get(userId);
 
   if (!state || state.action !== 'a2e_motion_generation' || state.step !== 'waiting_negative_prompt') {
-    await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без меж');
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без омеженнь');
     return;
   }
 
@@ -6122,7 +6130,7 @@ bot.action('a2e_skip_negative', async (ctx) => {
   userState.set(userId, updatedState);
 
   await ctx.reply(
-    `🔥 <b>Motion без меж</b>\n\n` +
+    `🔥 <b>Motion без омеженнь</b>\n\n` +
     `✅ Зображення: <b>Завантажено</b>\n` +
     `⏱️ Тривалість: <b>${updatedState.duration} секунд</b>\n` +
     `📝 Промпт: <b>${updatedState.prompt.substring(0, 100)}${updatedState.prompt.length > 100 ? '...' : ''}</b>\n` +
@@ -6173,7 +6181,7 @@ async function generateA2EMotionVideo(ctx, state) {
   }
 
   const statusMsg = await ctx.reply(
-    `🔥 <b>Motion без меж - Генерація</b>\n\n` +
+    `🔥 <b>Motion без омеженнь - Генерація</b>\n\n` +
     `⏱️ Тривалість: ${duration} сек\n` +
     `📝 Промпт: "${state.prompt.substring(0, 100)}${state.prompt.length > 100 ? '...' : ''}"\n\n` +
     `⏱️ Це може зайняти 2-5 хвилин...\n` +
@@ -6349,7 +6357,7 @@ async function generateA2EMotionVideo(ctx, state) {
 
       await bot.telegram.sendMessage(
         chatId,
-        `✅ <b>Motion без меж готово!</b>\n\n` +
+        `✅ <b>Motion без омеженнь готово!</b>\n\n` +
         `⏱️ Тривалість: ${duration} сек\n` +
         `📝 Промпт: ${generationData.prompt.substring(0, 100)}...\n\n` +
         `💰 Витрачено: ${cost}⚡`,
@@ -6357,7 +6365,7 @@ async function generateA2EMotionVideo(ctx, state) {
       );
 
       await safeSendVideo(chatId, finalResult.videoUrl, {
-        caption: `🔥 Motion без меж\n\n⏱️ ${duration} сек\n📝 ${generationData.prompt.substring(0, 80)}...\n\n💰 Витрачено: ${cost}⚡`,
+        caption: `🔥 Motion без омеженнь\n\n⏱️ ${duration} сек\n📝 ${generationData.prompt.substring(0, 80)}...\n\n💰 Витрачено: ${cost}⚡`,
         ...keyboard.createBackButton('video_menu')
       });
 
@@ -7649,7 +7657,7 @@ bot.on('text', async (ctx) => {
     });
 
     await ctx.reply(
-      `🔥 <b>Motion без меж</b>\n\n` +
+      `🔥 <b>Motion без омеженнь</b>\n\n` +
       `✅ Промпт: <b>${text.substring(0, 100)}${text.length > 100 ? '...' : ''}</b>\n\n` +
       `🚫 <b>Крок 4: Negative Prompt</b> (опціонально, до 200 символів)\n\n` +
       `Опишіть що НЕ має бути у відео:\n` +
@@ -7693,7 +7701,7 @@ bot.on('text', async (ctx) => {
     userState.set(userId, updatedState);
 
     await ctx.reply(
-      `🔥 <b>Motion без меж</b>\n\n` +
+      `🔥 <b>Motion без омеженнь</b>\n\n` +
       `✅ Зображення: <b>Завантажено</b>\n` +
       `⏱️ Тривалість: <b>${updatedState.duration} секунд</b>\n` +
       `📝 Промпт: <b>${updatedState.prompt.substring(0, 100)}${updatedState.prompt.length > 100 ? '...' : ''}</b>\n` +
@@ -7779,7 +7787,7 @@ bot.on('text', async (ctx) => {
     if (state.step === 'waiting_image') {
       await ctx.reply(
         '🖼️ <b>Очікується ЗОБРАЖЕННЯ, а не текст!</b>\n\n' +
-        '👉 Для Motion без меж потрібно надіслати фото, яке буде анімоване.\n\n' +
+        '👉 Для Motion без омеженнь потрібно надіслати фото, яке буде анімоване.\n\n' +
         '📤 Надішліть зображення (JPG, PNG).',
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
@@ -7788,9 +7796,9 @@ bot.on('text', async (ctx) => {
     // Якщо інший step (крім prompt/negative_prompt які обробляються вище) - показуємо повідомлення
     if (state.step !== 'waiting_prompt' && state.step !== 'waiting_negative_prompt' && state.step !== 'select_duration') {
       await ctx.reply(
-        '🔥 <b>Motion без меж</b>\n\n' +
+        '🔥 <b>Motion без омеженнь</b>\n\n' +
         '⚠️ Спочатку завершіть налаштування!\n\n' +
-        'Натисніть кнопку Motion без меж в меню відео.',
+        'Натисніть кнопку Motion без омеженнь в меню відео.',
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
       return;
@@ -8024,7 +8032,7 @@ bot.on('text', async (ctx) => {
   // ✅ A2E Motion: якщо currentModel встановлено але це image-to-video модель
   if (currentModel === 'a2e_motion') {
     await ctx.reply(
-      '🖼️ <b>Motion без меж потребує ЗОБРАЖЕННЯ!</b>\n\n' +
+      '🖼️ <b>Motion без омеженнь потребує ЗОБРАЖЕННЯ!</b>\n\n' +
       '👉 Для цієї моделі потрібно надіслати фото, яке буде анімоване.\n\n' +
       '📤 Надішліть зображення (JPG, PNG).',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
@@ -8123,7 +8131,7 @@ bot.on('photo', async (ctx) => {
     );
 
     await ctx.reply(
-      `🔥 <b>Motion без меж</b>\n\n` +
+      `🔥 <b>Motion без омеженнь</b>\n\n` +
       `✅ Зображення завантажено!\n\n` +
       `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
       `💰 Вартість залежить від тривалості:`,
