@@ -52,6 +52,12 @@ async function removeSoraWatermark(videoUrl, uploadMethod = 's3') {
         success: true,
         taskId: response.data.data.taskId
       };
+    } else if (response.data.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        serverError: true
+      };
     } else {
       return {
         success: false,
@@ -64,6 +70,15 @@ async function removeSoraWatermark(videoUrl, uploadMethod = 's3') {
       response: error.response?.data,
       status: error.response?.status
     });
+
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        serverError: true
+      };
+    }
+
     return {
       success: false,
       error: error.response?.data?.msg || error.message

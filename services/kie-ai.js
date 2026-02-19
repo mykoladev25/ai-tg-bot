@@ -288,8 +288,22 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
 
     // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      const responseCode = createResponse?.data?.code;
+      const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+
+      // Спеціальна обробка для 500 помилок
+      if (responseCode === 500) {
+        console.error('❌ KIE.AI Nano Banana - Server Error 500:', createResponse?.data);
+        return {
+          success: false,
+          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          provider: 'kie-ai',
+          serverError: true
+        };
+      }
+
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
@@ -313,9 +327,20 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
 
   } catch (error) {
     console.error('❌ KIE.AI Nano Banana Error:', error.response?.data || error.message);
+
+    // Спеціальна обробка 500 помилок
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
     return {
       success: false,
-      error: error.response?.data?.message || error.message,
+      error: error.response?.data?.msg || error.response?.data?.message || error.message,
       provider: 'kie-ai'
     };
   }
@@ -399,8 +424,21 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
 
     // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      const responseCode = createResponse?.data?.code;
+      const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+
+      if (responseCode === 500) {
+        console.error('❌ KIE.AI Seedream - Server Error 500:', createResponse?.data);
+        return {
+          success: false,
+          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          provider: 'kie-ai',
+          serverError: true
+        };
+      }
+
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
@@ -423,9 +461,19 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
 
   } catch (error) {
     console.error('❌ KIE.AI Seedream Error:', error.response?.data || error.message);
+
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
     return {
       success: false,
-      error: error.response?.data?.message || error.message,
+      error: error.response?.data?.msg || error.response?.data?.message || error.message,
       provider: 'kie-ai'
     };
   }
@@ -610,8 +658,21 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
 
     // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      const responseCode = createResponse?.data?.code;
+      const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+
+      if (responseCode === 500) {
+        console.error('❌ KIE.AI Ideogram - Server Error 500:', createResponse?.data);
+        return {
+          success: false,
+          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          provider: 'kie-ai',
+          serverError: true
+        };
+      }
+
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
@@ -634,9 +695,19 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
 
   } catch (error) {
     console.error('❌ KIE.AI Ideogram Error:', error.response?.data || error.message);
+
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
     return {
       success: false,
-      error: error.response?.data?.message || error.message,
+      error: error.response?.data?.msg || error.response?.data?.message || error.message,
       provider: 'kie-ai'
     };
   }
@@ -924,6 +995,17 @@ async function generateKling3VideoKieAI(options = {}) {
   } catch (error) {
     const res = error.response?.data;
     console.error('❌ KIE.AI Kling 3.0 Error:', res || error.message);
+
+    // Спеціальна обробка 500 помилок
+    if (res?.code === 500 || error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
     const errMsg = (typeof res?.msg === 'string' ? res.msg : null) || res?.message || error.message;
     return {
       success: false,
@@ -1084,6 +1166,16 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
       stack: error.stack
     });
 
+    // Спеціальна обробка 500 помилок
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
     // Формуємо зрозуміле повідомлення для користувача
     let errorMessage = error.message;
 
@@ -1101,8 +1193,7 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
     return {
       success: false,
       error: errorMessage,
-      provider: 'kie-ai',
-      details: error.response?.data
+      provider: 'kie-ai'
     };
   }
 }
@@ -1232,6 +1323,16 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
 
   } catch (error) {
     console.error('❌ KIE.AI Runway Error:', error.response?.data || error.message);
+
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
     return {
       success: false,
       error: error.response?.data?.msg || error.response?.data?.message || error.message,
@@ -1426,8 +1527,21 @@ async function generateVeoKieAI(prompt, options = {}) {
 
     // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      const responseCode = createResponse?.data?.code;
+      const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+
+      if (responseCode === 500) {
+        console.error('❌ KIE.AI Veo - Server Error 500:', createResponse?.data);
+        return {
+          success: false,
+          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          provider: 'kie-ai',
+          serverError: true
+        };
+      }
+
       console.error('❌ Invalid KIE.AI Veo response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI Veo: ${JSON.stringify(createResponse.data)}`);
+      throw new Error(`Неочікувана відповідь від KIE.AI Veo: ${apiMsg || JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
@@ -1453,6 +1567,16 @@ async function generateVeoKieAI(prompt, options = {}) {
 
   } catch (error) {
     console.error('❌ KIE.AI Veo Error:', error.response?.data || error.message);
+
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
     return {
       success: false,
       error: error.response?.data?.msg || error.response?.data?.message || error.message,

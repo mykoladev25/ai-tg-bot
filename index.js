@@ -5213,79 +5213,85 @@ bot.action(/^kling_o1_mode_(std|pro)$/, async (ctx) => {
 });
 
 // Обробка відео для kling_o1_edit
-bot.on('video', async (ctx) => {
-  const userId = ctx.from.id;
-  const state = userState.get(userId);
+// ❌ ВИДАЛЕНО: Дублікат обробника відео (тепер є один універсальний обробник нижче)
+// bot.on('video', async (ctx) => {
+//   const userId = ctx.from.id;
+//   const state = userState.get(userId);
+//
+//   if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'waiting_video') {
+//     return;
+//   }
 
-  if (!state || state.action !== 'kling_o1_edit_generation' || state.step !== 'waiting_video') {
-    return;
-  }
+// ПЕРЕМІЩЕНО В УНІВЕРСАЛЬНИЙ ОБРОБНИК НИЖЧЕ (рядок ~8820)
+// ПЕРЕМІЩЕНО В УНІВЕРСАЛЬНИЙ ОБРОБНИК НИЖЧЕ (рядок ~8820)
 
-  const videoFile = ctx.message.video;
-  if (!videoFile) {
-    await ctx.reply('❌ Помилка: не вдалося отримати відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
-    return;
-  }
+//   const videoFile = ctx.message.video;
+//   if (!videoFile) {
+//     await ctx.reply('❌ Помилка: не вдалося отримати відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+//     return;
+//   }
+//
+//   // Перевірка розміру (200MB max)
+//   const fileSizeMB = (videoFile.file_size || 0) / (1024 * 1024);
+//   if (fileSizeMB > 200) {
+//     await ctx.reply(
+//       `❌ Відео занадто велике!\n\n` +
+//       `Максимальний розмір: 200MB\n` +
+//       `Ваш файл: ${fileSizeMB.toFixed(2)}MB\n\n` +
+//       `Спробуйте стиснути відео або використати коротший кліп.`,
+//       keyboard.createBackButton('video_menu')
+//     );
+//     return;
+//   }
+//
+//   // Перевірка роздільності (мінімум 720px по обох вимірах)
+//   const videoWidth = videoFile.width || 0;
+//   const videoHeight = videoFile.height || 0;
+//   if (videoWidth < 720 || videoHeight < 720) {
+//     await ctx.reply(
+//       `❌ Роздільність відео занадто низька!\n\n` +
+//       `Мінімальна роздільність: 720x720 пікселів\n` +
+//       `Ваше відео: ${videoWidth}x${videoHeight}\n\n` +
+//       `⚠️ Обидва виміри (ширина та висота) повинні бути не менше 720px.\n\n` +
+//       `Спробуйте використати відео з вищою роздільністю.`,
+//       keyboard.createBackButton('video_menu')
+//     );
+//     return;
+//   }
+//
+//   const videoUrl = await getVideoUrl(ctx);
+//   if (!videoUrl) {
+//     await ctx.reply('❌ Помилка: не вдалося завантажити відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+//     return;
+//   }
+//
+//   userState.set(userId, {
+//     ...state,
+//     referenceVideo: videoUrl,
+//     step: 'select_video_type'
+//   });
+//
+//   await ctx.reply(
+//     `✂️ <b>Kling O1 Edit</b>\n\n` +
+//     `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+//     `🎥 Відео: <b>Завантажено</b>\n\n` +
+//     `🎬 <b>Крок 3: Як використовувати відео?</b>\n\n` +
+//     `• <b>Feature</b> — як референс стилю/камери (можна змінювати тривалість)\n` +
+//     `• <b>Base</b> — редагування відео (тривалість як у оригіналі)`,
+//     {
+//       parse_mode: 'HTML',
+//       ...Markup.inlineKeyboard([
+//         [
+//           Markup.button.callback('🎨 Feature', 'kling_o1_video_type_feature'),
+//           Markup.button.callback('✂️ Base', 'kling_o1_video_type_base')
+//         ],
+//         [Markup.button.callback('← Назад', 'video_menu')]
+//       ])
+//     }
+//   );
+// });
 
-  // Перевірка розміру (200MB max)
-  const fileSizeMB = (videoFile.file_size || 0) / (1024 * 1024);
-  if (fileSizeMB > 200) {
-    await ctx.reply(
-      `❌ Відео занадто велике!\n\n` +
-      `Максимальний розмір: 200MB\n` +
-      `Ваш файл: ${fileSizeMB.toFixed(2)}MB\n\n` +
-      `Спробуйте стиснути відео або використати коротший кліп.`,
-      keyboard.createBackButton('video_menu')
-    );
-    return;
-  }
-
-  // Перевірка роздільності (мінімум 720px по обох вимірах)
-  const videoWidth = videoFile.width || 0;
-  const videoHeight = videoFile.height || 0;
-  if (videoWidth < 720 || videoHeight < 720) {
-    await ctx.reply(
-      `❌ Роздільність відео занадто низька!\n\n` +
-      `Мінімальна роздільність: 720x720 пікселів\n` +
-      `Ваше відео: ${videoWidth}x${videoHeight}\n\n` +
-      `⚠️ Обидва виміри (ширина та висота) повинні бути не менше 720px.\n\n` +
-      `Спробуйте використати відео з вищою роздільністю.`,
-      keyboard.createBackButton('video_menu')
-    );
-    return;
-  }
-
-  const videoUrl = await getVideoUrl(ctx);
-  if (!videoUrl) {
-    await ctx.reply('❌ Помилка: не вдалося завантажити відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
-    return;
-  }
-
-  userState.set(userId, {
-    ...state,
-    referenceVideo: videoUrl,
-    step: 'select_video_type'
-  });
-
-  await ctx.reply(
-    `✂️ <b>Kling O1 Edit</b>\n\n` +
-    `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
-    `🎥 Відео: <b>Завантажено</b>\n\n` +
-    `🎬 <b>Крок 3: Як використовувати відео?</b>\n\n` +
-    `• <b>Feature</b> — як референс стилю/камери (можна змінювати тривалість)\n` +
-    `• <b>Base</b> — редагування відео (тривалість як у оригіналі)`,
-    {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
-        [
-          Markup.button.callback('🎨 Feature', 'kling_o1_video_type_feature'),
-          Markup.button.callback('✂️ Base', 'kling_o1_video_type_base')
-        ],
-        [Markup.button.callback('← Назад', 'video_menu')]
-      ])
-    }
-  );
-});
+// ❌ КІНЕЦЬ ЗАКОМЕНТОВАНОГО ОБРОБНИКА
 
 // Крок 3: Вибір video_reference_type
 bot.action(/^kling_o1_video_type_(feature|base)$/, async (ctx) => {
@@ -8821,6 +8827,12 @@ bot.on('video', async (ctx) => {
   const userId = ctx.from.id;
   const state = userState.get(userId);
 
+  console.log('🎥 Video received from user:', userId, 'state:', {
+    action: state?.action,
+    step: state?.step,
+    hasImageUrl: !!state?.imageUrl
+  });
+
   // ✅ KLING 3.0: Відео для елемента (element_input_video_urls)
   if (state?.action === 'kling_3_generation' && state?.step === 'waiting_element_media' && state?.currentElement) {
     const videoUrl = await getVideoUrl(ctx);
@@ -8852,6 +8864,75 @@ bot.on('video', async (ctx) => {
     }
   }
 
+  // ✅ KLING O1 EDIT: Обробка референсного відео
+  if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_video') {
+    const videoFile = ctx.message.video;
+    if (!videoFile) {
+      await ctx.reply('❌ Помилка: не вдалося отримати відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    // Перевірка розміру (200MB max)
+    const fileSizeMB = (videoFile.file_size || 0) / (1024 * 1024);
+    if (fileSizeMB > 200) {
+      await ctx.reply(
+        `❌ Відео занадто велике!\n\n` +
+        `Максимальний розмір: 200MB\n` +
+        `Ваш файл: ${fileSizeMB.toFixed(2)}MB\n\n` +
+        `Спробуйте стиснути відео або використати коротший кліп.`,
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    // Перевірка роздільності (мінімум 720px по обох вимірах)
+    const videoWidth = videoFile.width || 0;
+    const videoHeight = videoFile.height || 0;
+    if (videoWidth < 720 || videoHeight < 720) {
+      await ctx.reply(
+        `❌ Роздільність відео занадто низька!\n\n` +
+        `Мінімальна роздільність: 720x720 пікселів\n` +
+        `Ваше відео: ${videoWidth}x${videoHeight}\n\n` +
+        `⚠️ Обидва виміри (ширина та висота) повинні бути не менше 720px.\n\n` +
+        `Спробуйте використати відео з вищою роздільністю.`,
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const videoUrl = await getVideoUrl(ctx);
+    if (!videoUrl) {
+      await ctx.reply('❌ Помилка: не вдалося завантажити відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      referenceVideo: videoUrl,
+      step: 'select_video_type'
+    });
+
+    await ctx.reply(
+      `✂️ <b>Kling O1 Edit</b>\n\n` +
+      `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
+      `🎥 Відео: <b>Завантажено</b>\n\n` +
+      `🎬 <b>Крок 3: Як використовувати відео?</b>\n\n` +
+      `• <b>Feature</b> — як референс стилю/камери (можна змінювати тривалість)\n` +
+      `• <b>Base</b> — редагування відео (тривалість як у оригіналі)`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('🎨 Feature', 'kling_o1_video_type_feature'),
+            Markup.button.callback('✂️ Base', 'kling_o1_video_type_base')
+          ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
   // ✅ KLING MOTION: Обробка референсного відео
   if (state?.action === 'kling_motion_generation' && state?.step === 'waiting_video' && state?.imageUrl) {
     const model = models.video.models.find(m => m.key === 'kling_motion');
@@ -8872,7 +8953,6 @@ bot.on('video', async (ctx) => {
       step: 'ask_prompt'
     });
 
-    const maxDuration = state.orientation === 'image' ? 10 : 30;
 
     await ctx.reply(
       `✅ <b>Відео з рухами завантажено!</b>\n\n` +
@@ -9585,28 +9665,43 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
     return;
   }
 
+  console.log('✅ Sora Watermark: URL validation passed');
+
   // Отримуємо динамічну ціну
+  console.log('🧹 Sora Watermark: Getting model info...');
   const kieAI = require('./services/kie-ai');
   const modelInfo = await kieAI.getModelInfo('sora-watermark-remover');
   const cost = modelInfo?.cost || 10;
 
+  console.log('✅ Sora Watermark: Model info received:', { cost, apiCost: modelInfo?.apiCost });
+
   // Перевірка балансу
-  if (!(await userBalance.hasTokens(userId, cost))) {
+  console.log('🧹 Sora Watermark: Checking balance for user', userId);
+  const hasBalance = await userBalance.hasTokens(userId, cost);
+  console.log('🧹 Sora Watermark: Balance check result:', { hasBalance, requiredCost: cost });
+
+  if (!hasBalance) {
     await showInsufficientTokens(ctx, cost);
     userState.delete(userId);
     return;
   }
 
+  console.log('✅ Sora Watermark: Balance sufficient');
+
   // Очищаємо стан
+  console.log('🧹 Sora Watermark: Clearing state...');
   userState.delete(userId);
   userCurrentModel.delete(userId);
 
+  console.log('🧹 Sora Watermark: Sending status message...');
   const statusMsg = await ctx.reply(
     '🧹 <b>Видаляю watermark...</b>\n\n' +
     '⏱️ Це може зайняти 30-60 секунд\n' +
     '📊 Статус: обробка...',
     { parse_mode: 'HTML' }
   );
+
+  console.log('✅ Sora Watermark: Status message sent, starting API call...');
 
   try {
     const soraWatermarkRemover = require('./services/sora-watermark-remover');
