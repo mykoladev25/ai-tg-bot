@@ -121,6 +121,66 @@ module.exports = {
     }
   },
 
+  /**
+   * Midjourney
+   * https://docs.kie.ai/mj-api/generate-midjourney-image
+   * https://kie.ai/model-preview/features/mj-api
+   *
+   * ⚠️ Доступно ТІЛЬКИ на KIE.AI!
+   *
+   * KIE.AI Pricing (з офіційного pricing cache):
+   * Text-to-Image:
+   * - relaxed: 3 credits = $0.015
+   * - fast: 8 credits = $0.04
+   * - turbo: 16 credits = $0.08
+   *
+   * Image-to-Image:
+   * - relaxed: 3 credits = $0.015
+   * - fast: 8 credits = $0.04
+   * - turbo: 16 credits = $0.08
+   *
+   * Image-to-Video:
+   * - 60 credits = $0.30
+   *
+   * Upscale & Vary:
+   * - Безкоштовно (використовується з вже згенерованих зображень)
+   *
+   * З націнкою 1.65x (як в інших моделях):
+   * - relaxed: $0.015 × 1.65 = $0.025 → 3 tokens
+   * - fast: $0.04 × 1.65 = $0.066 → 7 tokens
+   * - turbo: $0.08 × 1.65 = $0.132 → 14 tokens
+   * - video: $0.30 × 1.65 = $0.495 → 50 tokens
+   */
+  midjourney: {
+    kie_model: 'midjourney',
+    kie_pricing: {
+      text_to_image_relaxed: { credits: 3, usd: 0.015 },
+      text_to_image_fast: { credits: 8, usd: 0.04 },
+      text_to_image_turbo: { credits: 16, usd: 0.08 },
+      image_to_image_relaxed: { credits: 3, usd: 0.015 },
+      image_to_image_fast: { credits: 8, usd: 0.04 },
+      image_to_image_turbo: { credits: 16, usd: 0.08 },
+      image_to_video: { credits: 60, usd: 0.30 },
+      upscale: { credits: 0, usd: 0 },  // Безкоштовно
+      vary: { credits: 0, usd: 0 }      // Безкоштовно
+    },
+    replicate_model: null,  // Немає на Replicate
+    replicate_pricing: null,
+    features: {
+      speeds: ['relaxed', 'fast', 'turbo'],
+      versions: ['7', '6.1', '6', '5.2', '5.1', 'niji6', 'niji7'],
+      aspect_ratios: ['1:2', '9:16', '2:3', '3:4', '5:6', '6:5', '4:3', '3:2', '1:1', '16:9', '2:1'],
+      supports_image_to_image: true,
+      supports_image_to_video: true,
+      supports_style_reference: true,
+      supports_omni_reference: true,
+      supports_upscale: true,
+      supports_vary: true,
+      max_prompt_length: 2000
+    },
+    notes: '⚠️ Доступно ТІЛЬКИ на KIE.AI! Немає на Replicate.'
+  },
+
   // ==================== VIDEO MODELS ====================
 
   /**

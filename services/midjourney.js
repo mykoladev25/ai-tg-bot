@@ -1,206 +1,324 @@
 const axios = require('axios');
 
-const MIDJOURNEY_API = process.env.MIDJOURNEY_API_URL;
-const API_KEY = process.env.MIDJOURNEY_API_KEY;
+const KIE_API_BASE = 'https://api.kie.ai';
+const KIE_API_KEY = process.env.KIE_API_KEY;
+const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://neurolab.fun/webhook/kie-ai';
+
+/**
+ * =====================================================
+ * MIDJOURNEY API SERVICE (KIE.AI)
+ * =====================================================
+ *
+ * API Documentation:
+ * - Generate: https://docs.kie.ai/mj-api/generate-midjourney-image
+ * - Get Status: https://docs.kie.ai/mj-api/get-midjourney-task-details
+ * - Upscale: https://docs.kie.ai/mj-api/upscale
+ * - Vary: https://docs.kie.ai/mj-api/vary
+ *
+ * Pricing:
+ * - Text-to-image (relaxed): 3 credits = $0.015
+ * - Text-to-image (fast): 8 credits = $0.04
+ * - Text-to-image (turbo): 16 credits = $0.08
+ * - Image-to-image (same pricing as text-to-image)
+ * - Image-to-video: 60 credits = $0.30
+ * - Upscale: безкоштовно
+ * - Vary: безкоштовно
+ */
 
 /**
  * Генерація зображення через Midjourney
+ * @param {Object} options - Параметри генерації
+ * @param {string} options.prompt - Текстовий опис
+ * @param {string} options.taskType - Тип задачі (mj_txt2img, mj_img2img, mj_video, mj_style_reference, mj_omni_reference)
+ * @param {string} [options.speed='fast'] - Швидкість (relaxed, fast, turbo)
+ * @param {string} [options.fileUrl] - URL зображення (для img2img, video)
+ * @param {string[]} [options.fileUrls] - Масив URL зображень (рекомендовано)
+ * @param {string} [options.aspectRatio='1:1'] - Пропорції
+ * @param {string} [options.version='7'] - Версія моделі
+ * @param {number} [options.variety=10] - Різноманітність (0-100)
+ * @param {number} [options.stylization=1] - Стилізація (0-1000)
+ * @param {number} [options.weirdness=1] - Дивність (0-3000)
+ * @param {number} [options.ow=500] - Omni intensity (для mj_omni_reference)
+ * @param {string} [options.waterMark] - Водяний знак
+ * @returns {Promise<Object>} Результат генерації з taskId
  */
-async function generateImage(prompt) {
+async function generateImage(options) {
   try {
-    console.log('Starting Midjourney generation:', prompt);
+    const {
+      prompt,
+      taskType = 'mj_txt2img',
+      speed = 'fast',
+      fileUrl,
+      fileUrls,
+      aspectRatio = '1:1',
+      version = '7',
+      variety = 10,
+      stylization = 1,
+      weirdness = 1,
+      ow = 500,
+      waterMark = ''
+    } = options;
 
-    // Створюємо задачу
+    console.log('🖼️ Midjourney: Starting generation', {
+      taskType,
+      speed,
+      hasFileUrl: !!fileUrl,
+      hasFileUrls: !!fileUrls,
+      prompt: prompt?.substring(0, 100)
+    });
+
+    const payload = {
+      taskType,
+      prompt,
+      speed,
+      aspectRatio,
+      version,
+      variety,
+      stylization,
+      weirdness,
+      waterMark,
+      callBackUrl: WEBHOOK_URL
+    };
+
+    // Додаємо файли якщо є
+    if (fileUrls && fileUrls.length > 0) {
+      payload.fileUrls = fileUrls;
+    } else if (fileUrl) {
+      payload.fileUrl = fileUrl;
+    }
+
+    // Додаємо ow для omni reference
+    if (taskType === 'mj_omni_reference') {
+      payload.ow = ow;
+    }
+
+    // Не передаємо speed для video та omni reference
+    if (taskType === 'mj_video' || taskType === 'mj_omni_reference') {
+      delete payload.speed;
+    }
+
+    console.log('📤 Midjourney API Request:', JSON.stringify(payload, null, 2));
+
     const response = await axios.post(
-      `${MIDJOURNEY_API}/imagine`,
-      {
-        prompt: prompt,
-        process_mode: 'fast'
-      },
+      `${KIE_API_BASE}/api/v1/mj/generate`,
+      payload,
       {
         headers: {
-          'Authorization': `Bearer ${API_KEY}`,
+          'Authorization': `Bearer ${KIE_API_KEY}`,
           'Content-Type': 'application/json'
         }
       }
     );
 
-    const taskId = response.data.task_id;
-    console.log('IMAGINE RESPONSE:', JSON.stringify(response.data, null, 2));
+    console.log('✅ Midjourney API Response:', JSON.stringify(response.data, null, 2));
 
-    console.log('Task created:', taskId);
-
-    // Чекаємо результат (polling)
-    let result = null;
-    let attempts = 0;
-    const maxAttempts = 60; // 5 хвилин максимум
-
-    while (!result && attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // Чекаємо 5 секунд
-      
-      const statusResponse = await axios.get(
-        `${MIDJOURNEY_API}/result/${taskId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${API_KEY}`
-          }
-        }
-      );
-
-      console.log(`Attempt ${attempts + 1}: Status = ${statusResponse.data.status}`);
-
-      if (statusResponse.data.status === 'completed') {
-        result = statusResponse.data;
-        break;
-      } else if (statusResponse.data.status === 'failed') {
-        throw new Error('Midjourney generation failed');
-      }
-
-      attempts++;
+    if (response.data.code === 200 && response.data.data?.taskId) {
+      return {
+        success: true,
+        taskId: response.data.data.taskId
+      };
+    } else {
+      throw new Error(response.data.msg || 'Unknown error');
     }
-
-    if (!result) {
-      throw new Error('Timeout waiting for generation');
-    }
-
-    return {
-      success: true,
-      imageUrl: result.image_url,
-      taskId: taskId,
-      thumbnails: result.thumbnails || []
-    };
 
   } catch (error) {
-    console.error('Midjourney API Error:', error.response?.data || error.message);
+    console.error('❌ Midjourney API Error:', error.response?.data || error.message);
     return {
       success: false,
-      error: error.response?.data?.message || error.message
+      error: error.response?.data?.msg || error.message
     };
   }
 }
 
 /**
- * Upscale зображення
+ * Отримати статус задачі Midjourney
+ * @param {string} taskId - ID задачі
+ * @returns {Promise<Object>} Статус та результати
  */
-async function upscaleImage(taskId, index) {
+async function getTaskStatus(taskId) {
   try {
-    const response = await axios.post(
-      `${MIDJOURNEY_API}/upscale`,
+    const response = await axios.get(
+      `${KIE_API_BASE}/api/v1/mj/record-info`,
       {
-        task_id: taskId,
-        index: index
-      },
-      {
+        params: { taskId },
         headers: {
-          'Authorization': `Bearer ${API_KEY}`,
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${KIE_API_KEY}`
         }
       }
     );
 
-    // Чекаємо результат
-    const upscaleTaskId = response.data.task_id;
-    let result = null;
-    let attempts = 0;
+    console.log('🔍 Midjourney Status Response:', JSON.stringify(response.data, null, 2));
 
-    while (!result && attempts < 40) {
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      const statusResponse = await axios.get(
-        `${MIDJOURNEY_API}/result/${upscaleTaskId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${API_KEY}`
-          }
-        }
-      );
+    if (response.data.code === 200 && response.data.data) {
+      const data = response.data.data;
 
-      if (statusResponse.data.status === 'completed') {
-        result = statusResponse.data;
-        break;
-      } else if (statusResponse.data.status === 'failed') {
-        throw new Error('Upscale failed');
-      }
-
-      attempts++;
+      return {
+        success: true,
+        taskId: data.taskId,
+        taskType: data.taskType,
+        status: data.successFlag,  // 0=Generating, 1=Success, 2=Failed, 3=Generation Failed
+        resultUrls: data.resultInfoJson?.resultUrls?.map(item => item.resultUrl) || [],
+        errorCode: data.errorCode,
+        errorMessage: data.errorMessage,
+        createTime: data.createTime,
+        completeTime: data.completeTime,
+        paramJson: data.paramJson
+      };
+    } else {
+      throw new Error(response.data.msg || 'Unknown error');
     }
 
-    return {
-      success: true,
-      imageUrl: result.image_url
-    };
-
   } catch (error) {
-    console.error('Midjourney Upscale Error:', error);
+    console.error('❌ Midjourney getTaskStatus Error:', error.response?.data || error.message);
     return {
       success: false,
-      error: error.message
+      error: error.response?.data?.msg || error.message
     };
   }
 }
 
 /**
- * Варіації зображення
+ * Upscale зображення (безкоштовно)
+ * @param {string} taskId - ID оригінальної задачі
+ * @param {number} imageIndex - Індекс зображення (1-4)
+ * @param {string} [waterMark] - Водяний знак
+ * @returns {Promise<Object>} Результат з новим taskId
  */
-async function variateImage(taskId, index) {
+async function upscaleImage(taskId, imageIndex, waterMark = '') {
   try {
+    console.log('🔍 Midjourney: Starting upscale', { taskId, imageIndex });
+
     const response = await axios.post(
-      `${MIDJOURNEY_API}/variation`,
+      `${KIE_API_BASE}/api/v1/mj/generateUpscale`,
       {
-        task_id: taskId,
-        index: index
+        taskId,
+        imageIndex: imageIndex - 1,  // API використовує 0-based index
+        waterMark,
+        callBackUrl: WEBHOOK_URL
       },
       {
         headers: {
-          'Authorization': `Bearer ${API_KEY}`,
+          'Authorization': `Bearer ${KIE_API_KEY}`,
           'Content-Type': 'application/json'
         }
       }
     );
 
-    const variationTaskId = response.data.task_id;
-    let result = null;
-    let attempts = 0;
+    console.log('✅ Midjourney Upscale Response:', JSON.stringify(response.data, null, 2));
 
-    while (!result && attempts < 60) {
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      const statusResponse = await axios.get(
-        `${MIDJOURNEY_API}/result/${variationTaskId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${API_KEY}`
-          }
-        }
-      );
-
-      if (statusResponse.data.status === 'completed') {
-        result = statusResponse.data;
-        break;
-      } else if (statusResponse.data.status === 'failed') {
-        throw new Error('Variation failed');
-      }
-
-      attempts++;
+    if (response.data.code === 200 && response.data.data?.taskId) {
+      return {
+        success: true,
+        taskId: response.data.data.taskId
+      };
+    } else {
+      throw new Error(response.data.msg || 'Unknown error');
     }
 
-    return {
-      success: true,
-      imageUrl: result.image_url,
-      taskId: variationTaskId
-    };
-
   } catch (error) {
-    console.error('Midjourney Variation Error:', error);
+    console.error('❌ Midjourney Upscale Error:', error.response?.data || error.message);
     return {
       success: false,
-      error: error.message
+      error: error.response?.data?.msg || error.message
     };
   }
+}
+
+/**
+ * Створити варіації зображення (безкоштовно)
+ * @param {string} taskId - ID оригінальної задачі
+ * @param {number} imageIndex - Індекс зображення (1-4)
+ * @param {string} [waterMark] - Водяний знак
+ * @returns {Promise<Object>} Результат з новим taskId
+ */
+async function variateImage(taskId, imageIndex, waterMark = '') {
+  try {
+    console.log('🎨 Midjourney: Starting vary', { taskId, imageIndex });
+
+    const response = await axios.post(
+      `${KIE_API_BASE}/api/v1/mj/generateVary`,
+      {
+        taskId,
+        imageIndex,  // API використовує 1-based index для vary
+        waterMark,
+        callBackUrl: WEBHOOK_URL
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${KIE_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log('✅ Midjourney Vary Response:', JSON.stringify(response.data, null, 2));
+
+    if (response.data.code === 200 && response.data.data?.taskId) {
+      return {
+        success: true,
+        taskId: response.data.data.taskId
+      };
+    } else {
+      throw new Error(response.data.msg || 'Unknown error');
+    }
+
+  } catch (error) {
+    console.error('❌ Midjourney Vary Error:', error.response?.data || error.message);
+    return {
+      success: false,
+      error: error.response?.data?.msg || error.message
+    };
+  }
+}
+
+/**
+ * Чекати завершення задачі (polling)
+ * @param {string} taskId - ID задачі
+ * @param {number} [maxAttempts=60] - Максимальна кількість спроб
+ * @param {number} [interval=5000] - Інтервал між спробами (мс)
+ * @returns {Promise<Object>} Результат задачі
+ */
+async function waitForCompletion(taskId, maxAttempts = 60, interval = 5000) {
+  console.log('⏳ Waiting for Midjourney task completion:', taskId);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, interval));
+
+    const status = await getTaskStatus(taskId);
+
+    if (!status.success) {
+      return status;
+    }
+
+    console.log(`⏳ Attempt ${attempt}/${maxAttempts}: Status = ${status.status}`);
+
+    // successFlag: 0=Generating, 1=Success, 2=Failed, 3=Generation Failed
+    if (status.status === 1) {
+      console.log('✅ Midjourney task completed successfully');
+      return {
+        success: true,
+        ...status
+      };
+    } else if (status.status === 2 || status.status === 3) {
+      console.error('❌ Midjourney task failed:', status.errorMessage);
+      return {
+        success: false,
+        error: status.errorMessage || 'Generation failed'
+      };
+    }
+  }
+
+  console.error('⏱️ Midjourney task timeout');
+  return {
+    success: false,
+    error: 'Timeout waiting for generation'
+  };
 }
 
 module.exports = {
   generateImage,
+  getTaskStatus,
   upscaleImage,
-  variateImage
+  variateImage,
+  waitForCompletion
 };

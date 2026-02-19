@@ -180,7 +180,8 @@ async function logUsageEvent(payload) {
       latencyMs,
       requestId = generateRequestId(),
       chatId,
-      metadata = {}
+      metadata = {},
+      provider  // Optional: можна явно передати провайдера
     } = payload;
 
     const modelConfig = getModelConfig(modelKey);
@@ -190,6 +191,20 @@ async function logUsageEvent(payload) {
     // Revenue = 0 for trial/free users
     const estimatedRevenueUSD = (isTrial || isFree) ? 0 : tokensSpent * TOKEN_PRICE_USD;
 
+    // ✅ АВТОМАТИЧНЕ ВИЗНАЧЕННЯ ПРОВАЙДЕРА
+    // Якщо провайдер не переданий явно, визначаємо автоматично
+    let detectedProvider = provider || 'replicate';
+
+    // Перевіряємо чи це KIE.AI модель
+    if (!provider && modelConfig) {
+      // KIE.AI ONLY моделі (недоступні на Replicate) - завжди KIE
+      if (modelConfig.kieAIOnly) {
+        detectedProvider = 'kie';
+      }
+      // Моделі які є на обох провайдерах - НЕ визначаємо автоматично!
+      // Провайдер має бути переданий явно з metadata.provider або options.provider
+    }
+
     const event = new UsageEvent({
       ts: new Date(),
       userId: String(userId),
@@ -197,7 +212,7 @@ async function logUsageEvent(payload) {
       requestId,
       modelKey,
       modelName: modelConfig?.name || modelKey,
-      provider: 'replicate',
+      provider: detectedProvider,
       providerModel: null,
       seconds: options.seconds || options.duration || null,
       tokensSpent,
@@ -218,10 +233,12 @@ async function logUsageEvent(payload) {
     // 📊 Логуємо простими словами
     const trialLabel = isTrial ? '🆓 TRIAL (безкоштовно)' : '💰 PAID (платний)';
     const successLabel = success ? '✅' : '❌';
+    const providerLabel = detectedProvider === 'kie' ? '🔥 KIE.AI' : '🔄 Replicate';
     console.log(`
 📊 ═══════════════════════════════════════
    ГЕНЕРАЦІЯ ${successLabel}
    ├─ 🤖 Модель: ${modelConfig?.name || modelKey}
+   ├─ 🌐 Провайдер: ${providerLabel}
    ├─ 👤 Користувач: ${userId} ${trialLabel}
    ├─ ⚡ Токенів списано: ${tokensSpent}
    ├─ 💵 Собівартість (COGS): $${apiCost.toFixed(4)}

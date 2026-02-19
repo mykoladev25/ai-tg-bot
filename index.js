@@ -2904,7 +2904,8 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
           success: false,
           isTrial,
           isFree: isTrial,
-          errorCode: result.error?.substring(0, 100)
+          errorCode: result.error?.substring(0, 100),
+          provider: useKieAI ? 'kie' : 'replicate'
         });
         return;
       }
@@ -2922,7 +2923,8 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
         modelKey,
         success: true,
         isTrial: isTrialCreative,
-        isFree: isTrialCreative
+        isFree: isTrialCreative,
+        provider: useKieAI ? 'kie' : 'replicate'
       });
 
       // Перевірити розмір файлу
@@ -3121,8 +3123,252 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|4:5|5:4|9:16|10:16|16:10|4:
   userState.delete(userId);
 });
 
+// ==================== MIDJOURNEY SPECIFIC HANDLERS ====================
+
+// Midjourney - вибір швидкості
+bot.action('midjourney', async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const userId = ctx.from.id;
+  const model = models.design.models.find(m => m.key === 'midjourney');
+
+  if (!model || !model.available) {
+    await ctx.reply('❌ Модель недоступна');
+    return;
+  }
+
+  await ctx.reply(
+    `🖼️ <b>${model.name}</b>\n\n` +
+    `⚠️ Доступно ТІЛЬКИ в KIE.AI!\n\n` +
+    `⚡ <b>Крок 1: Оберіть швидкість генерації</b>\n\n` +
+    `• 🐢 Relaxed - найдешевше (${model.speeds.relaxed.cost}⚡)\n` +
+    `  Час: ~2-3 хвилини\n\n` +
+    `• ⚡ Fast - стандарт (${model.speeds.fast.cost}⚡)\n` +
+    `  Час: ~1-1.5 хвилини\n\n` +
+    `• 🚀 Turbo - найшвидше (${model.speeds.turbo.cost}⚡)\n` +
+    `  Час: ~30-60 секунд\n\n` +
+    `💡 Всі швидкості генерують 4 варіанти одночасно!\n` +
+    `🔍 Upscale і 🎨 Vary - безкоштовно!`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🐢 Relaxed (3⚡)', 'mj_speed_relaxed')],
+        [Markup.button.callback('⚡ Fast (7⚡)', 'mj_speed_fast')],
+        [Markup.button.callback('🚀 Turbo (14⚡)', 'mj_speed_turbo')],
+        [Markup.button.callback('← Назад', 'design_menu')]
+      ])
+    }
+  );
+});
+
+// Вибір швидкості Midjourney
+bot.action(/^mj_speed_(relaxed|fast|turbo)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const userId = ctx.from.id;
+  const speed = ctx.match[1];
+  const model = models.design.models.find(m => m.key === 'midjourney');
+  const cost = model.speeds[speed].cost;
+
+  if (!(await userBalance.hasTokens(userId, cost))) {
+    await showInsufficientTokens(ctx, cost);
+    return;
+  }
+
+  // Зберігаємо стан
+  userState.set(userId, {
+    action: 'midjourney_generation',
+    step: 'select_aspect_ratio',
+    speed,
+    taskType: 'mj_txt2img',
+    fileUrls: []
+  });
+
+  await ctx.reply(
+    `🖼️ Midjourney (${speed})\n\n` +
+    `💰 Вартість: ${cost}⚡\n\n` +
+    `📐 <b>Крок 2: Оберіть пропорції</b>`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('1:1', 'mj_aspect_1:1'),
+          Markup.button.callback('16:9', 'mj_aspect_16:9'),
+          Markup.button.callback('9:16', 'mj_aspect_9:16')
+        ],
+        [
+          Markup.button.callback('4:3', 'mj_aspect_4:3'),
+          Markup.button.callback('3:4', 'mj_aspect_3:4'),
+          Markup.button.callback('2:1', 'mj_aspect_2:1')
+        ],
+        [Markup.button.callback('← Назад', 'midjourney')]
+      ])
+    }
+  );
+});
+
+// Вибір aspect ratio Midjourney
+bot.action(/^mj_aspect_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const userId = ctx.from.id;
+  const aspectRatio = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'midjourney_generation') {
+    await ctx.reply('❌ Почніть заново: Зображення → MidJourney');
+    return;
+  }
+
+  state.aspectRatio = aspectRatio;
+  state.step = 'waiting_prompt';
+  userState.set(userId, state);
+
+  const model = models.design.models.find(m => m.key === 'midjourney');
+  const cost = model.speeds[state.speed].cost;
+
+  await ctx.reply(
+    `🖼️ Midjourney (${state.speed})\n\n` +
+    `📐 Пропорції: ${aspectRatio}\n` +
+    `💰 Вартість: ${cost}⚡\n\n` +
+    `✍️ <b>Крок 3: Опишіть що хочете згенерувати</b>\n\n` +
+    `💡 Будьте детальні: опишіть об'єкт, стиль, освітлення, композицію\n\n` +
+    `📝 Приклад: "A majestic lion standing on a cliff at sunset, cinematic lighting, photorealistic, 8k"`,
+    {
+      parse_mode: 'HTML',
+      ...keyboard.createBackButton('midjourney')
+    }
+  );
+});
+
+// Midjourney Upscale
+bot.action(/^mj_upscale_(.+)_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery('🔍 Починаю upscale...');
+
+  const userId = ctx.from.id;
+  const taskId = ctx.match[1];
+  const imageIndex = parseInt(ctx.match[2]);
+
+  const statusMsg = await ctx.reply(
+    `🔍 Виконую Upscale #${imageIndex}...\n\n` +
+    `💰 Вартість: безкоштовно!\n` +
+    `⏱️ Це займе ~30-60 секунд`
+  );
+
+  try {
+    const result = await midjourney.upscaleImage(taskId, imageIndex);
+
+    if (!result.success) {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `❌ Помилка upscale: ${result.error}`
+      );
+      return;
+    }
+
+    // Чекаємо результату
+    const finalResult = await midjourney.waitForCompletion(result.taskId);
+
+    if (finalResult.success && finalResult.resultUrls && finalResult.resultUrls.length > 0) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+
+      await safeSendPhoto(ctx.chat.id, finalResult.resultUrls[0], {
+        caption: `✅ Upscale завершено!\n\n💰 Вартість: безкоштовно!`
+      });
+    } else {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `❌ Помилка: ${finalResult.error || 'Не вдалося отримати результат'}`
+      );
+    }
+
+  } catch (error) {
+    console.error('❌ Midjourney upscale error:', error);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      statusMsg.message_id,
+      null,
+      '❌ Виникла помилка при upscale'
+    );
+  }
+});
+
+// Midjourney Vary
+bot.action(/^mj_vary_(.+)_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery('🎨 Створюю варіації...');
+
+  const userId = ctx.from.id;
+  const taskId = ctx.match[1];
+  const imageIndex = parseInt(ctx.match[2]);
+
+  const statusMsg = await ctx.reply(
+    `🎨 Створюю варіації #${imageIndex}...\n\n` +
+    `💰 Вартість: безкоштовно!\n` +
+    `⏱️ Це займе ~60-90 секунд`
+  );
+
+  try {
+    const result = await midjourney.variateImage(taskId, imageIndex);
+
+    if (!result.success) {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `❌ Помилка vary: ${result.error}`
+      );
+      return;
+    }
+
+    // Чекаємо результату
+    const finalResult = await midjourney.waitForCompletion(result.taskId);
+
+    if (finalResult.success && finalResult.resultUrls && finalResult.resultUrls.length > 0) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+
+      // Відправляємо всі варіації
+      for (let i = 0; i < finalResult.resultUrls.length; i++) {
+        const imageUrl = finalResult.resultUrls[i];
+        const caption = i === 0
+          ? `✅ Варіації готові!\n\n💰 Вартість: безкоштовно!`
+          : undefined;
+
+        await safeSendPhoto(ctx.chat.id, imageUrl, {
+          caption,
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback(`🔍 Upscale #${i + 1}`, `mj_upscale_${result.taskId}_${i + 1}`),
+              Markup.button.callback(`🎨 Vary #${i + 1}`, `mj_vary_${result.taskId}_${i + 1}`)
+            ]
+          ])
+        });
+      }
+    } else {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `❌ Помилка: ${finalResult.error || 'Не вдалося отримати результат'}`
+      );
+    }
+
+  } catch (error) {
+    console.error('❌ Midjourney vary error:', error);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      statusMsg.message_id,
+      null,
+      '❌ Виникла помилка при створенні варіацій'
+    );
+  }
+});
+
 // Design Models
-bot.action(/^(midjourney|flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram)$/, async (ctx) => {
+bot.action(/^(flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
 
@@ -5883,7 +6129,8 @@ async function generateKlingMotionVideo(ctx, state) {
           options: { mode: generationData.mode, orientation: generationData.orientation },
           isTrial,
           isFree: isTrial,
-          errorCode: result.error?.substring(0, 100)
+          errorCode: result.error?.substring(0, 100),
+          provider: useKieAI ? 'kie' : 'replicate'
         });
 
         return;
@@ -5903,7 +6150,8 @@ async function generateKlingMotionVideo(ctx, state) {
         success: true,
         options: { mode: generationData.mode, orientation: generationData.orientation },
         isTrial: isTrialMotion,
-        isFree: isTrialMotion
+        isFree: isTrialMotion,
+        provider: useKieAI ? 'kie' : 'replicate'
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -6603,7 +6851,8 @@ async function generateKlingVideo(ctx, state) {
           options: { duration, generateAudio: generationData.generateAudio === true },
           isTrial,
           isFree: isTrial,
-          errorCode: result.error?.substring(0, 100)
+          errorCode: result.error?.substring(0, 100),
+          provider: useKieAI ? 'kie' : 'replicate'
         });
 
         return;
@@ -6625,7 +6874,8 @@ async function generateKlingVideo(ctx, state) {
         success: true,
         options: { duration, generateAudio: generationData.generateAudio === true },
         isTrial: isTrialKling,
-        isFree: isTrialKling
+        isFree: isTrialKling,
+        provider: useKieAI ? 'kie' : 'replicate'
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -6768,6 +7018,20 @@ async function generateKling3Video(ctx, state) {
           chatId, statusMsg.message_id, null,
           `❌ Помилка генерації Kling 3.0.\n\n${result.error}\n\nСпробуйте ще раз.`
         );
+
+        // 📊 Логуємо невдалу генерацію
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'kling_3',
+          success: false,
+          options: { duration: generationData.duration, mode: generationData.mode, generateAudio: generationData.generateAudio },
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100),
+          provider: 'kie'  // Kling 3.0 тільки на KIE.AI
+        });
+
         return;
       }
 
@@ -6777,6 +7041,18 @@ async function generateKling3Video(ctx, state) {
         prompt: generationData.prompt, duration: generationData.duration,
         hasStartImage: generationData.imageUrls?.length > 0,
         generateAudio: generationData.generateAudio
+      });
+
+      // 📊 Логуємо успішну генерацію
+      const isTrialKling3 = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey: 'kling_3',
+        success: true,
+        options: { duration: generationData.duration, mode: generationData.mode, generateAudio: generationData.generateAudio },
+        isTrial: isTrialKling3,
+        isFree: isTrialKling3,
+        provider: 'kie'  // Kling 3.0 тільки на KIE.AI
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -8105,6 +8381,13 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  // ✅ MIDJOURNEY: обробка промпту
+  if (state?.action === 'midjourney_generation' && state?.step === 'waiting_prompt') {
+    console.log('🖼️ Midjourney: Processing prompt for user', userId);
+    runBackgroundTask(() => handleMidjourneyGeneration(ctx, text), 'midjourney_generation');
+    return;
+  }
+
   const handlers = {
     claude_vision: () => handleClaudeText(ctx, text),
     claude_text: () => handleClaudeText(ctx, text),
@@ -9340,7 +9623,8 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
           success: false,
           isTrial,
           isFree: isTrial,
-          errorCode: 'no_generator'
+          errorCode: 'no_generator',
+          provider: useKieAI ? 'kie' : 'replicate'
         });
         finished = true;
         gracefulShutdown.completeGeneration(requestId, false);
@@ -9363,7 +9647,8 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
           success: false,
           isTrial,
           isFree: isTrial,
-          errorCode: result.error?.substring(0, 100)
+          errorCode: result.error?.substring(0, 100),
+          provider: useKieAI ? 'kie' : 'replicate'
         });
 
         finished = true;
@@ -9385,7 +9670,8 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         modelKey,
         success: true,
         isTrial: isTrialImg,
-        isFree: isTrialImg
+        isFree: isTrialImg,
+        provider: useKieAI ? 'kie' : 'replicate'
       });
 
       const fileSize = await getFileSize(result.imageUrl);
@@ -9893,32 +10179,168 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
 
 async function handleMidjourneyGeneration(ctx, prompt) {
   const userId = ctx.from.id;
-  const model = models.design.models.find(m => m.key === 'midjourney');
-  
-  if (!(await userBalance.hasTokens(userId, model.cost))) {
-    await showInsufficientTokens(ctx, model.cost);
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'midjourney_generation') {
+    console.log('❌ No state for Midjourney generation');
     return;
   }
 
-  const statusMsg = await ctx.reply(`🎨 Генерую зображення через Midjourney...\n\n⏱️ Це займе ~30-60 секунд`);
-  
+  const model = models.design.models.find(m => m.key === 'midjourney');
+  const speed = state.speed || 'fast';
+  const aspectRatio = state.aspectRatio || '1:1';
+  const taskType = state.taskType || 'mj_txt2img';
+  const fileUrls = state.fileUrls || [];
+
+  // Визначаємо вартість залежно від швидкості
+  const cost = model.speeds[speed]?.cost || model.cost;
+  const apiCost = model.speeds[speed]?.apiCost || model.apiCost;
+
+  console.log('🖼️ Midjourney Generation:', {
+    userId,
+    speed,
+    cost,
+    apiCost,
+    taskType,
+    aspectRatio,
+    hasImages: fileUrls.length > 0,
+    prompt: prompt.substring(0, 100)
+  });
+
+  if (!(await userBalance.hasTokens(userId, cost))) {
+    await showInsufficientTokens(ctx, cost);
+    return;
+  }
+
+  const statusMsg = await ctx.reply(
+    `🎨 Генерую зображення через Midjourney...\n\n` +
+    `⚡ Швидкість: ${speed}\n` +
+    `📐 Пропорції: ${aspectRatio}\n` +
+    `⏱️ Це займе ~${speed === 'turbo' ? '30-60' : speed === 'fast' ? '60-90' : '120-180'} секунд`
+  );
+
   try {
-    const result = await midjourney.generateImage(prompt);
-    
-    if (result.success) {
-      await userBalance.deductTokens(userId, model.cost, 'Midjourney generation', { modelKey: 'midjourney', modelName: model.name, apiCost: model.apiCost, prompt });
+    const result = await midjourney.generateImage({
+      prompt,
+      taskType,
+      speed,
+      fileUrls: fileUrls.length > 0 ? fileUrls : undefined,
+      aspectRatio,
+      version: '7'
+    });
+
+    if (!result.success) {
+      await adminNotifier.notifyAdmin(
+        bot,
+        new Error(result.error),
+        {
+          userId,
+          username: ctx.from.username,
+          action: 'midjourney_generation',
+          model: 'Midjourney',
+          speed,
+          prompt,
+          taskType
+        }
+      );
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `❌ Помилка генерації: ${result.error}`
+      );
+      userState.delete(userId);
+      return;
+    }
+
+    console.log('✅ Midjourney task created:', result.taskId);
+
+    // Чекаємо результату (polling або webhook)
+    const finalResult = await midjourney.waitForCompletion(result.taskId);
+
+    if (finalResult.success && finalResult.resultUrls && finalResult.resultUrls.length > 0) {
+      await userBalance.deductTokens(
+        userId,
+        cost,
+        'Midjourney generation',
+        {
+          modelKey: 'midjourney',
+          modelName: model.name,
+          apiCost,
+          speed,
+          taskType,
+          aspectRatio,
+          prompt,
+          taskId: result.taskId
+        }
+      );
+
       const user = await userBalance.getUser(userId, ctx.from);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      await safeSendPhoto(ctx.chat.id, result.imageUrl, {
-        caption: `✅ Готово!\n\nPrompt: ${prompt}\n\n💰 Використано: ${model.cost}⚡\n💰 Залишок: ${user.tokens.toFixed(2)}⚡`,
-        ...keyboard.createGenerationActionsMenu(result.taskId)
-      });
+
+      // Відправляємо результати (4 варіанти)
+      const imageUrls = finalResult.resultUrls.slice(0, 4);
+
+      for (let i = 0; i < imageUrls.length; i++) {
+        const imageUrl = imageUrls[i];
+        const caption = i === 0
+          ? `✅ Midjourney (${speed})\n\n` +
+            `📝 Промпт: ${prompt.substring(0, 200)}${prompt.length > 200 ? '...' : ''}\n\n` +
+            `💰 Використано: ${cost}⚡\n` +
+            `💰 Залишок: ${user.tokens.toFixed(2)}⚡\n\n` +
+            `💡 Оберіть варіант для Upscale (🔍) або Vary (🎨)`
+          : undefined;
+
+        try {
+          await safeSendPhoto(ctx.chat.id, imageUrl, {
+            caption,
+            ...Markup.inlineKeyboard([
+              [
+                Markup.button.callback(`🔍 Upscale #${i + 1}`, `mj_upscale_${result.taskId}_${i + 1}`),
+                Markup.button.callback(`🎨 Vary #${i + 1}`, `mj_vary_${result.taskId}_${i + 1}`)
+              ]
+            ])
+          });
+        } catch (error) {
+          console.error(`Failed to send image ${i + 1}:`, error.message);
+        }
+      }
+
+      userState.delete(userId);
     } else {
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка генерації: ${result.error}`);
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `❌ Помилка: ${finalResult.error || 'Не вдалося отримати результат'}`
+      );
+      userState.delete(userId);
     }
+
   } catch (error) {
-    console.error('Midjourney error:', error);
-    await ctx.reply('❌ Сталася помилка');
+    console.error('❌ Midjourney generation error:', error);
+    await adminNotifier.notifyAdmin(
+      bot,
+      error,
+      {
+        userId,
+        username: ctx.from.username,
+        action: 'midjourney_generation',
+        model: 'Midjourney',
+        prompt
+      }
+    );
+    try {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        '❌ Виникла помилка при генерації'
+      );
+    } catch (e) {
+      await ctx.reply('❌ Виникла помилка при генерації');
+    }
+    userState.delete(userId);
   }
 }
 

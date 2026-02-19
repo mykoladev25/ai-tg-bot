@@ -334,7 +334,43 @@ module.exports = {
       // ideogram $0.03 -> 5
       { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 5, apiCost: 0.03, maxImages: 1, available: true },
 
-      { name: '🖼️ MidJourney', key: 'midjourney', cost: 0, apiCost: 0, available: false }
+      /**
+       * Midjourney - KIE.AI ONLY 💎
+       * Pricing (з націнкою 1.65x):
+       * - relaxed: $0.015 → 3 tokens (найдешевше!)
+       * - fast: $0.04 → 7 tokens (стандарт)
+       * - turbo: $0.08 → 14 tokens (найшвидше)
+       * - video: $0.30 → 50 tokens
+       * - upscale/vary: безкоштовно
+       *
+       * ⚠️ Доступно тільки через KIE.AI!
+       */
+      {
+        name: '🖼️ MidJourney 💎',
+        key: 'midjourney',
+        cost: 7,  // fast (default)
+        apiCost: 0.04,
+        speeds: {
+          relaxed: { cost: 3, apiCost: 0.015 },
+          fast: { cost: 7, apiCost: 0.04 },
+          turbo: { cost: 14, apiCost: 0.08 }
+        },
+        video: {
+          cost: 50,
+          apiCost: 0.30
+        },
+        upscale: {
+          cost: 0,
+          apiCost: 0
+        },
+        vary: {
+          cost: 0,
+          apiCost: 0
+        },
+        maxImages: 4,  // Генерує 4 варіанти одразу
+        available: true,
+        kieAIOnly: true
+      }
     ]
   },
 
