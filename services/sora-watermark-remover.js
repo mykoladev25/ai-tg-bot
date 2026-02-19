@@ -5,17 +5,25 @@ const KIE_BASE_URL = 'https://api.kie.ai/api/v1/jobs';
 
 /**
  * Видалення watermark з Sora відео
- * @param {string} videoUrl - URL Sora відео (має починатися з sora.chatgpt.com)
+ * @param {string} videoUrl - URL Sora відео (має бути формату sora.chatgpt.com/p/s_...)
  * @param {string} uploadMethod - 's3' або 'oss' (за замовчуванням 's3')
  * @returns {Promise<Object>} - { success: boolean, taskId?: string, error?: string }
  */
 async function removeSoraWatermark(videoUrl, uploadMethod = 's3') {
   try {
-    // Перевірка URL
+    // Перевірка URL - має бути формату sora.chatgpt.com/p/s_...
     if (!videoUrl.includes('sora.chatgpt.com')) {
       return {
         success: false,
         error: 'URL має бути з sora.chatgpt.com'
+      };
+    }
+
+    // Перевірка правильного формату (/p/s_...)
+    if (!videoUrl.includes('/p/s_')) {
+      return {
+        success: false,
+        error: 'URL має містити /p/s_... (не /g/gen_). Переконайтеся що це публічне посилання на готове відео.'
       };
     }
 

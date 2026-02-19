@@ -3035,12 +3035,16 @@ bot.action('gpt_sora_watermark_remover', async (ctx) => {
 
   await ctx.reply(
     '🧹 <b>Видалення Sora Watermark</b>\n\n' +
-    '📝 <b>Як використовувати:</b>\n' +
+    '📝 <b>Як отримати правильний URL:</b>\n' +
     '1. Відкрийте ваше відео на sora.chatgpt.com\n' +
-    '2. Скопіюйте URL відео\n' +
-    '3. Надішліть URL сюди\n\n' +
-    '✅ <b>Формат URL:</b>\n' +
+    '2. Натисніть кнопку "Share" (Поділитися)\n' +
+    '3. Скопіюйте публічне посилання\n' +
+    '4. Надішліть URL сюди\n\n' +
+    '✅ <b>Правильний формат URL:</b>\n' +
     '<code>https://sora.chatgpt.com/p/s_...</code>\n\n' +
+    '❌ <b>Неправильний формат:</b>\n' +
+    '<code>https://sora.chatgpt.com/g/gen_...</code>\n' +
+    '<i>(це приватне посилання, потрібне публічне)</i>\n\n' +
     `💰 <b>Вартість:</b> ${cost}⚡\n` +
     '⏱️ <b>Час обробки:</b> ~30-60 секунд\n\n' +
     '📤 Надішліть URL вашого Sora відео:',
@@ -9542,9 +9546,28 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
     await ctx.reply(
       '❌ <b>Невірний URL!</b>\n\n' +
       'URL має бути з sora.chatgpt.com\n\n' +
-      '✅ <b>Приклад:</b>\n' +
+      '✅ <b>Правильний формат:</b>\n' +
       '<code>https://sora.chatgpt.com/p/s_...</code>\n\n' +
       '📤 Надішліть правильний URL:',
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
+
+  // Перевірка формату URL (/p/s_...)
+  if (!videoUrl.includes('/p/s_')) {
+    await ctx.reply(
+      '❌ <b>Невірний формат URL!</b>\n\n' +
+      '🔍 Ви надіслали приватне посилання <code>/g/gen_...</code>\n' +
+      'Потрібне публічне посилання <code>/p/s_...</code>\n\n' +
+      '📝 <b>Як отримати правильний URL:</b>\n' +
+      '1. Відкрийте ваше відео на sora.chatgpt.com\n' +
+      '2. Натисніть кнопку <b>"Share"</b> (Поділитися)\n' +
+      '3. Скопіюйте публічне посилання\n' +
+      '4. Надішліть його сюди\n\n' +
+      '✅ <b>Правильний формат:</b>\n' +
+      '<code>https://sora.chatgpt.com/p/s_...</code>\n\n' +
+      '📤 Надішліть публічний URL:',
       { parse_mode: 'HTML' }
     );
     return;
