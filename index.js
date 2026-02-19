@@ -3035,16 +3035,14 @@ bot.action('gpt_sora_watermark_remover', async (ctx) => {
 
   await ctx.reply(
     '🧹 <b>Видалення Sora Watermark</b>\n\n' +
-    '📝 <b>Як отримати правильний URL:</b>\n' +
-    '1. Відкрийте ваше відео на sora.chatgpt.com\n' +
-    '2. Натисніть кнопку "Share" (Поділитися)\n' +
-    '3. Скопіюйте публічне посилання\n' +
-    '4. Надішліть URL сюди\n\n' +
-    '✅ <b>Правильний формат URL:</b>\n' +
-    '<code>https://sora.chatgpt.com/p/s_...</code>\n\n' +
-    '❌ <b>Неправильний формат:</b>\n' +
-    '<code>https://sora.chatgpt.com/g/gen_...</code>\n' +
-    '<i>(це приватне посилання, потрібне публічне)</i>\n\n' +
+    '📝 <b>Як використовувати:</b>\n' +
+    '1. Згенеруйте відео в Sora (sora.chatgpt.com)\n' +
+    '2. Скопіюйте URL відео\n' +
+    '3. Надішліть URL сюди\n\n' +
+    '✅ <b>Підтримувані формати URL:</b>\n' +
+    '<code>https://sora.chatgpt.com/p/s_...</code>\n' +
+    '<code>https://sora.chatgpt.com/g/gen_...</code>\n\n' +
+    '⚠️ <b>Увага:</b> Якщо відео приватне, API може не мати доступу.\n\n' +
     `💰 <b>Вартість:</b> ${cost}⚡\n` +
     '⏱️ <b>Час обробки:</b> ~30-60 секунд\n\n' +
     '📤 Надішліть URL вашого Sora відео:',
@@ -9546,28 +9544,10 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
     await ctx.reply(
       '❌ <b>Невірний URL!</b>\n\n' +
       'URL має бути з sora.chatgpt.com\n\n' +
-      '✅ <b>Правильний формат:</b>\n' +
+      '✅ <b>Приклад:</b>\n' +
+      '<code>https://sora.chatgpt.com/g/gen_...</code>\n' +
       '<code>https://sora.chatgpt.com/p/s_...</code>\n\n' +
       '📤 Надішліть правильний URL:',
-      { parse_mode: 'HTML' }
-    );
-    return;
-  }
-
-  // Перевірка формату URL (/p/s_...)
-  if (!videoUrl.includes('/p/s_')) {
-    await ctx.reply(
-      '❌ <b>Невірний формат URL!</b>\n\n' +
-      '🔍 Ви надіслали приватне посилання <code>/g/gen_...</code>\n' +
-      'Потрібне публічне посилання <code>/p/s_...</code>\n\n' +
-      '📝 <b>Як отримати правильний URL:</b>\n' +
-      '1. Відкрийте ваше відео на sora.chatgpt.com\n' +
-      '2. Натисніть кнопку <b>"Share"</b> (Поділитися)\n' +
-      '3. Скопіюйте публічне посилання\n' +
-      '4. Надішліть його сюди\n\n' +
-      '✅ <b>Правильний формат:</b>\n' +
-      '<code>https://sora.chatgpt.com/p/s_...</code>\n\n' +
-      '📤 Надішліть публічний URL:',
       { parse_mode: 'HTML' }
     );
     return;
@@ -9603,11 +9583,35 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
     const createResult = await soraWatermarkRemover.removeSoraWatermark(videoUrl);
 
     if (!createResult.success) {
+      // Перевіряємо чи це помилка доступу
+      const isPermissionError = createResult.error?.toLowerCase().includes('permission') ||
+                                 createResult.error?.toLowerCase().includes('access');
+
+      let errorMessage = '❌ <b>Помилка створення задачі</b>\n\n';
+
+      if (isPermissionError) {
+        errorMessage +=
+          '🔒 <b>Немає доступу до відео</b>\n\n' +
+          'KIE.AI API не може отримати доступ до вашого відео.\n\n' +
+          '📝 <b>Можливі причини:</b>\n' +
+          '• Відео є приватним\n' +
+          '• Потрібно опублікувати відео через Share\n' +
+          '• URL може бути застарілим\n\n' +
+          '💡 <b>Спробуйте:</b>\n' +
+          '1. Відкрийте відео на sora.chatgpt.com\n' +
+          '2. Натисніть кнопку "Share" (якщо є)\n' +
+          '3. Скопіюйте новий публічний URL\n' +
+          '4. Надішліть його знову\n\n' +
+          '⚠️ На жаль, Sora може не надавати публічних посилань для всіх відео.';
+      } else {
+        errorMessage += `${createResult.error}`;
+      }
+
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        `❌ <b>Помилка створення задачі</b>\n\n${createResult.error}`,
+        errorMessage,
         { parse_mode: 'HTML' }
       );
       return;
