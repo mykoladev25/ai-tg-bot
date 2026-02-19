@@ -2493,9 +2493,17 @@ bot.action('creative_porcelain_figure', async (ctx) => {
 
   await ctx.reply(
       `✨ <b>Готовий креатив: Порцелянова фігурка</b>\n\n` +
-      `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n\n` +
+      `3D collectible-style портрет з максимальним збереженням рис обличчя, емоцій та гендеру.\n\n` +
       `💰 <b>Вартість:</b> ${effectiveCost4K}⚡\n` +
       `⏱️ <b>Час:</b> ~30-40 секунд\n\n` +
+      `🚫 <b>Заборонено надсилати:</b>\n` +
+      `• будь-який сексуальний або порнографічний контент\n` +
+      `• оголеність або 18+ матеріали\n` +
+      `• зображення неповнолітніх у будь-якому сексуальному контексті\n` +
+      `• насильницький або незаконний контент\n` +
+      `• матеріали, що порушують права третіх осіб\n\n` +
+      `⚠️ Порушення призведе до блокування без повернення коштів.\n\n` +
+      `📸 <b>Крок 1/1:</b> Надішліть своє селфі\n` +
       `👉 Надішліть своє селфі зараз`,
       {
         parse_mode: 'HTML',
@@ -2678,17 +2686,27 @@ Framing: chest-up portrait (from upper chest to top of head), centered, no full-
 
 NEGATIVE: any eyebrow decals, any “ear” shapes, any leaf/animal shapes, any fantasy makeup, any face markings, any graphic eyeliner, any mole removal, any skin-smoothing that erases pores or beauty marks.`
   } else if (creativeType === 'porcelain_figure') {
-    prompt = `Create a hyper-stylized 3D version of the person from the reference image, preserving their unique facial structure, proportions, and recognizable features. The face shape, eyes, nose, lips, jawline, and overall expression should closely match the reference while being translated into a cute, softly exaggerated 3D aesthetic. Maintain the original hairstyle, hair length, parting, and general volume, adapted into smooth, stylized strands without altering identity.
+    prompt = `Create a hyper-stylized 3D version of the person from the reference image, strictly preserving their unique facial structure, proportions, and recognizable features. The face shape, eyes, nose, lips, jawline, eyebrows, and overall expression should closely match the reference while being translated into a cute, softly exaggerated 3D aesthetic. Maintain the original hairstyle, hair length, parting, and general volume, adapted into smooth, stylized strands without altering identity.
+
+CRITICAL FACE PRESERVATION:
+- Strictly preserve the EXACT gender from the reference image. Do NOT feminize male faces or masculinize female faces.
+- Keep the EXACT facial proportions: eye shape, eye spacing, nose shape and size, lip shape and fullness, jawline structure, cheekbones, face width and length ratio.
+- Preserve the EXACT expression and emotions from the reference photo: if smiling - keep the smile; if serious - keep serious; if playful - keep playful. Do not change or neutralize emotions.
+- Keep all distinctive facial features: beauty marks, freckles, facial structure, eyebrow shape and thickness, eye color.
+- Maintain natural skin tones matching the reference person.
+- Do NOT swap or alter gender identity, facial identity, or emotional expression.
 
 The character should be floating against a clean, solid white background. Body proportions must remain logical, cohesive, and clearly readable, with gentle stylization (slightly rounded forms, softened edges) but no distortion of anatomy or facial likeness.
 
 Style & Materials: Render in a polished, collectible-figure style with a glossy porcelain-vinyl surface, subtle iridescent glow, and soft specular highlights. The surface should be smooth, clean, and lightly reflective, resembling a premium designer figurine.
 
-Color & Finish: Use a bright, saturated, cartoon-like color palette while keeping natural skin tones and balanced harmony. Avoid extreme stylization that would obscure facial identity.
+Color & Finish: Use a bright, saturated, cartoon-like color palette while keeping natural skin tones and balanced harmony. Avoid extreme stylization that would obscure facial identity or gender.
 
 Lighting & Camera: Soft studio lighting with gentle highlights and minimal shadows. Use a 3/4 camera angle, slightly from above, to emphasize volume, depth, and facial features.
 
-Composition: The character appears lightly floating in mid-air. No props, no environment, no background elements — only the figure on a pure white backdrop. Ensure a clean silhouette, strong readability, and a refined, finished look.`
+Composition: The character appears lightly floating in mid-air. No props, no environment, no background elements — only the figure on a pure white backdrop. Ensure a clean silhouette, strong readability, and a refined, finished look.
+
+NEGATIVE PROMPT: gender swap, face morphing, altered facial proportions, feminized male features, masculinized female features, different identity, changed expression, neutral emotion when reference shows emotion, removed beauty marks or freckles, changed eye color or shape.`
   } else if (creativeType === 'kittens') {
     prompt = `A cozy dreamy high-fashion editorial portrait of the person from the reference photo. The person is fully surrounded by dozens of ultra-fluffy kittens, filling the entire frame like a soft living cloud. Extremely long, dense, airy fur with plush texture, maximum volume and soft halos. Baby-like kittens with big round eyes and faces in white, cream, beige, gray and soft ginger tones, hyper-realistic fur details.
 
