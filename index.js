@@ -4387,7 +4387,7 @@ bot.action(/^runway_turbo_aspect_(.+)$/, async (ctx) => {
 
   const model = models.video.models.find(m => m.key === 'runway_turbo');
   const duration = state.duration || 5;
-  const costPerSec = model?.costPerSecond || (model?.cost || 22) / 5;
+  const costPerSec = getEffectiveRunwayTurboCostPerSecond(userId);
   const cost = duration * costPerSec;
 
   userState.set(userId, {

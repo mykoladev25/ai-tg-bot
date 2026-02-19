@@ -191,6 +191,7 @@ async function forceUpdate() {
  */
 function getModelPrice(cache, modelKey, options = {}) {
   const { duration, audio, resolution } = options;
+  const quality = options.quality || '720p';  // Додано для Runway
 
   try {
     const parsed = cache.parsed;
@@ -240,9 +241,10 @@ function getModelPrice(cache, modelKey, options = {}) {
 
       case 'runway_turbo': {
         const dur = duration || 5;
+        const qual = quality || '720p';
         const rw = parsed.runway?.find(m => {
           const d = (m.modelDescription || '').toLowerCase();
-          return d.includes('runway') && (d.includes(`${dur}.0s`) || d.includes(`${dur}s`)) && d.includes('720p');
+          return d.includes('runway') && (d.includes(`${dur}.0s`) || d.includes(`${dur}s`)) && d.includes(qual);
         });
         return rw?.usdPrice || null;
       }
@@ -309,7 +311,7 @@ function getKling3TokenCostPerSecondSync(options = {}) {
 }
 
 /** Моделі зображень, для яких є KIE-ціна в кеші */
-const KIE_IMAGE_MODELS = ['nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'stable_diffusion'];
+const KIE_IMAGE_MODELS = ['nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'ideogram', 'stable_diffusion'];
 
 /** Опорна тривалість для переведення Veo "per video" → "per second" (мін. тривалість у боті). */
 const VEO_REF_DURATION_SEC = 4;
@@ -361,7 +363,21 @@ function getKieTokenCostSync(modelKey, options = {}) {
 
     // Зображення: одна ціна за генерацію
     if (KIE_IMAGE_MODELS.includes(modelKey)) {
-      const usd = getModelPriceSync(modelKey);
+      let usd = getModelPriceSync(modelKey);
+
+      // Fallback для Seedream: KIE support підтвердив що немає API (19.02.2026)
+      // Використовуємо hardcoded ціну з kie-ai-models.js
+      if (usd == null && (modelKey === 'seedream_2k' || modelKey === 'seedream_4k')) {
+        usd = kieAiModels.getReplicatePrice(modelKey);
+        console.log(`💡 Using hardcoded Seedream price: $${usd} (6.5 credits)`);
+      }
+
+      // Fallback для Ideogram: використовуємо TURBO режим (найдешевший)
+      if (usd == null && modelKey === 'ideogram') {
+        usd = kieAiModels.getReplicatePrice(modelKey);
+        console.log(`💡 Using hardcoded Ideogram TURBO price: $${usd} (3.5 credits)`);
+      }
+
       if (usd == null) return null;
       const n = typeof usd === 'string' ? parseFloat(usd) : usd;
       if (Number.isNaN(n)) return null;

@@ -599,7 +599,7 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
     const {
       mode = 'reframe',         // 'reframe', 'remix', 'edit'
       imageSize = 'square_hd',  // 'square_hd', 'landscape_hd', 'portrait_hd'
-      renderingSpeed = 'BALANCED',  // 'TURBO', 'BALANCED', 'QUALITY'
+      renderingSpeed = 'TURBO',  // 'TURBO' (3.5 credits = $0.0175) - найдешевший і найшвидший!
       style = 'AUTO',           // 'AUTO', 'REALISTIC', 'DESIGN', etc
       numImages = '1',          // '1' - '4'
       seed = 0,

@@ -322,6 +322,8 @@ module.exports = {
       case 'seedream_2k':
       case 'seedream_4k':
         return 0.0325;  // KIE.AI: 6.5 credits × $0.005 = $0.0325 (18.75% дешевше ніж Replicate $0.04)
+      case 'ideogram':
+        return 0.0175;  // KIE.AI TURBO: 3.5 credits × $0.005 = $0.0175 (42% дешевше ніж Replicate $0.03)
       case 'stable_diffusion':
         return 0.07;
       case 'kling':
