@@ -70,6 +70,7 @@ function parseOurModels(pricing) {
     nano_banana_4k: findModel(pricing.image, 'nano banana pro', '4K'),
     seedream_4k: findModel(pricing.image, 'seedream', '4K'),
     stable_diffusion: findModel(pricing.image, 'stable diffusion', '3.5'),
+    ideogram: findModels(pricing.image, 'ideogram'),  // All ideogram variants
 
     // VIDEO
     kling_2_5: findModels(pricing.video, 'kling 2.5'),
@@ -213,6 +214,16 @@ function getModelPrice(cache, modelKey, options = {}) {
 
       case 'stable_diffusion':
         return parsed.stable_diffusion?.usdPrice || null;
+
+      case 'ideogram': {
+        // Ideogram: використовуємо TURBO режим (найдешевший для text-to-image)
+        // Шукаємо "ideogram v3, text-to-image, TURBO"
+        const ideogram = parsed.ideogram?.find(m => {
+          const desc = m.modelDescription.toLowerCase();
+          return desc.includes('text-to-image') && desc.includes('turbo');
+        });
+        return ideogram?.usdPrice || null;
+      }
 
       case 'kling_v2_6':
         const kling26 = parsed.kling_2_6?.find(m => {
@@ -373,11 +384,8 @@ function getKieTokenCostSync(modelKey, options = {}) {
         console.log(`💡 Using hardcoded Seedream price: $${usd} (6.5 credits)`);
       }
 
-      // Fallback для Ideogram: використовуємо TURBO режим (найдешевший)
-      if (usd == null && modelKey === 'ideogram') {
-        usd = kieAiModels.getReplicatePrice(modelKey);
-        console.log(`💡 Using hardcoded Ideogram TURBO price: $${usd} (3.5 credits)`);
-      }
+      // ✅ Ideogram тепер береться з кешу (ideogram v3 text-to-image TURBO)
+      // Fallback більше не потрібен
 
       if (usd == null) return null;
       const n = typeof usd === 'string' ? parseFloat(usd) : usd;

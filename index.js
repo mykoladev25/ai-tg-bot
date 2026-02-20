@@ -3400,6 +3400,7 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
   // Відновлюємо або створюємо стан з параметрів callback
   let state = userState.get(userId);
   if (!state || state.action !== 'midjourney_generation') {
+    // Створюємо новий стан тільки якщо його немає
     state = {
       action: 'midjourney_generation',
       speed,
@@ -3410,9 +3411,14 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
       weirdness: 0,
       variety: 50
     };
+  } else {
+    // Якщо стан існує, оновлюємо тільки speed і aspectRatio (якщо змінилися)
+    state.speed = speed;
+    state.aspectRatio = aspectRatio;
+    // Зберігаємо існуючі значення stylization, weirdness, variety
   }
 
-  // Ensure default values if undefined
+  // Ensure default values if undefined (тільки для нового стану)
   if (state.stylization === undefined) state.stylization = 100;
   if (state.weirdness === undefined) state.weirdness = 0;
   if (state.variety === undefined) state.variety = 50;
@@ -3445,6 +3451,7 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
   // Відновлюємо або створюємо стан
   let state = userState.get(userId);
   if (!state || state.action !== 'midjourney_generation') {
+    // Створюємо новий стан тільки якщо його немає
     state = {
       action: 'midjourney_generation',
       speed,
@@ -3455,9 +3462,14 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
       weirdness: 0,
       variety: 50
     };
+  } else {
+    // Якщо стан існує, оновлюємо тільки speed і aspectRatio
+    state.speed = speed;
+    state.aspectRatio = aspectRatio;
+    // Зберігаємо існуючі значення stylization, weirdness, variety
   }
 
-  // Ensure default values if undefined
+  // Ensure default values if undefined (тільки для нового стану)
   if (state.stylization === undefined) state.stylization = 100;
   if (state.weirdness === undefined) state.weirdness = 0;
   if (state.variety === undefined) state.variety = 50;
@@ -3490,6 +3502,7 @@ bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
   // Відновлюємо або створюємо стан
   let state = userState.get(userId);
   if (!state || state.action !== 'midjourney_generation') {
+    // Створюємо новий стан тільки якщо його немає
     state = {
       action: 'midjourney_generation',
       speed,
@@ -3500,9 +3513,15 @@ bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
       weirdness: 0,
       variety: 50
     };
+    userState.set(userId, state);
+  } else {
+    // Якщо стан існує, оновлюємо тільки speed і aspectRatio
+    state.speed = speed;
+    state.aspectRatio = aspectRatio;
+    // Зберігаємо існуючі значення stylization, weirdness, variety
   }
 
-  // Ensure default values if undefined
+  // Ensure default values if undefined (тільки для нового стану)
   if (state.stylization === undefined) state.stylization = 100;
   if (state.weirdness === undefined) state.weirdness = 0;
   if (state.variety === undefined) state.variety = 50;
