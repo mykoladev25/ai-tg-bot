@@ -62,28 +62,6 @@ function getDesignModelsWithEffectiveCost(userId) {
 /** Моделі відео, що доступні тільки через KIE (Kling 3.0, Sora 2). */
 const KIE_ONLY_VIDEO_MODELS = ['kling_3', 'sora_2'];
 
-/**
- * Перевірка чи Midjourney доступний.
- * Midjourney потребує не тільки KIE.AI ключ, але й окрему активацію в KIE.AI акаунті.
- * Якщо бачили помилку "You do not have access permissions" - Midjourney не активований.
- */
-let midjourneyAccessChecked = false;
-let midjourneyAccessAvailable = false;
-
-function isMidjourneyAvailable() {
-  // Якщо KIE.AI не налаштований - Midjourney точно недоступний
-  if (!kieAI.isKieAIEnabled) return false;
-
-  // Поки не перевірили доступ - припускаємо що доступний (показуємо в меню)
-  // Після першої помилки "access permissions" - приховуємо
-  return !midjourneyAccessChecked || midjourneyAccessAvailable;
-}
-
-function markMidjourneyAsUnavailable() {
-  midjourneyAccessChecked = true;
-  midjourneyAccessAvailable = false;
-  console.log('⚠️ Midjourney marked as unavailable due to access error');
-}
 
 /**
  * Чи може користувач бачити моделі "тільки KIE" (Kling 3.0, Sora 2).
@@ -11868,26 +11846,49 @@ async function startBot() {
         });
 
         // ============================================================
-        // DESIGN MODELS with debug fields
+        // DESIGN MODELS with debug fields + KIE.AI pricing priority
         // ============================================================
         const designModels = models.design.models
           .filter(m => m.available)
           .map(m => {
+            // 🔥 Пріоритет KIE.AI: якщо модель підтримується на KIE, беремо ціну звідти
+            let effectiveCost = m.cost;
+            let effectiveApiCost = m.apiCost;
+
+            if (kieAI.isKieAIImplemented(m.key)) {
+              try {
+                const kieCost = kiePricingSync.getKieTokenCostSync(m.key);
+                if (typeof kieCost === 'number' && kieCost > 0) {
+                  effectiveCost = kieCost;
+                  // Отримуємо API cost з KIE
+                  const kieApiCost = kiePricingSync.getModelPriceSync(m.key);
+                  if (typeof kieApiCost === 'number') {
+                    effectiveApiCost = kieApiCost;
+                  }
+                }
+              } catch (err) {
+                // Fallback to models.js prices
+              }
+            }
+
             const result = {
               name: m.name.replace(/[🌀🍌🌊🔮🎯🖼️]/g, '').trim(),
               key: m.key,
-              cost: m.cost,
-              priceUSD: +(m.cost * tokenPriceUSD).toFixed(4),
+              cost: effectiveCost,
+              priceUSD: +(effectiveCost * tokenPriceUSD).toFixed(4),
               resolution: m.resolution || m.size || null,
               maxImages: m.maxImages || 1
             };
+
             // Debug fields (optional)
-            if (m.apiCost !== undefined) {
+            if (effectiveApiCost !== undefined) {
               result._debug = {
-                apiCost: m.apiCost,
-                grossMarginPct: calcGrossMargin(m.cost, m.apiCost)
+                apiCost: effectiveApiCost,
+                grossMarginPct: calcGrossMargin(effectiveCost, effectiveApiCost),
+                priceSource: kieAI.isKieAIImplemented(m.key) ? 'kie-ai' : 'replicate'
               };
             }
+
             return result;
           });
 

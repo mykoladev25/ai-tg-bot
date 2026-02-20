@@ -536,7 +536,7 @@ async function getKieSummary(from, to) {
       estimated: totalCogsUSD,
       generations: kieCogs.generationCount || 0,
       successRate: kieCogs.generationCount > 0
-        ? ((kieCogs.successCount || 0) / kieCogs.generationCount * 100).toFixed(1)
+        ? Number(((kieCogs.successCount || 0) / kieCogs.generationCount * 100).toFixed(1))
         : 0,
       activeUsers: kieCogs.activeUsers?.length || 0
     },
@@ -553,7 +553,7 @@ async function getKieSummary(from, to) {
     gross: {
       estimated: grossEstimated,
       marginPercent: revenueUSD > 0
-        ? ((grossEstimated / revenueUSD) * 100).toFixed(1)
+        ? Number(((grossEstimated / revenueUSD) * 100).toFixed(1))
         : 0
     }
   };

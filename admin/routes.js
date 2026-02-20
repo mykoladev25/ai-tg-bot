@@ -874,7 +874,8 @@ router.get('/dashboard', (req, res) => {
     }
     
     function formatPct(val) {
-      return (val || 0).toFixed(1) + '%';
+      const num = Number(val) || 0;
+      return num.toFixed(1) + '%';
     }
 
     function formatDate(val) {
