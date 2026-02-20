@@ -3302,26 +3302,47 @@ bot.action(/^mj_ar_([^_]+)_(.+)$/, async (ctx) => {
 
   const cost = model.speeds[speed].cost;
 
-  // Зберігаємо стан для введення промпту
+  // Зберігаємо стан для вибору налаштувань
   userState.set(userId, {
     action: 'midjourney_generation',
-    step: 'waiting_prompt',
+    step: 'select_settings',
     speed,
     aspectRatio,
     taskType: 'mj_txt2img',
-    fileUrls: []
+    fileUrls: [],
+    // Дефолтні значення
+    stylization: 100,
+    weirdness: 0,
+    variety: 50
   });
 
   await ctx.reply(
     `🖼️ Midjourney (${speed})\n\n` +
     `📐 Пропорції: ${aspectRatio}\n` +
     `💰 Вартість: ${cost}⚡\n\n` +
-    `✍️ <b>Крок 3: Опишіть що хочете згенерувати</b>\n\n` +
-    `💡 Будьте детальні: опишіть об'єкт, стиль, освітлення, композицію\n\n` +
-    `📝 Приклад: "A majestic lion standing on a cliff at sunset, cinematic lighting, photorealistic, 8k"`,
+    `⚙️ <b>Крок 3: Розширені налаштування</b>\n\n` +
+    `🎨 <b>Stylization:</b> 100 (0-1000)\n` +
+    `   Вищі значення = більше художності\n\n` +
+    `🌀 <b>Weirdness:</b> 0 (0-3000)\n` +
+    `   Вищі значення = більше експериментів\n\n` +
+    `🎲 <b>Variety:</b> 50 (0-100)\n` +
+    `   Вищі значення = більше різноманітності\n\n` +
+    `💡 Дефолтні значення оптимальні для більшості задач`,
     {
       parse_mode: 'HTML',
-      ...keyboard.createBackButton('midjourney')
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🎨 Stylization', 'mj_set_stylization'),
+          Markup.button.callback('🌀 Weirdness', 'mj_set_weirdness')
+        ],
+        [
+          Markup.button.callback('🎲 Variety', 'mj_set_variety')
+        ],
+        [
+          Markup.button.callback('✅ Продовжити з цими налаштуваннями', 'mj_settings_done')
+        ],
+        [Markup.button.callback('← Назад', 'midjourney')]
+      ])
     }
   );
 });
@@ -3361,6 +3382,117 @@ bot.action(/^mj_aspect_(.+)$/, async (ctx) => {
       parse_mode: 'HTML',
       ...keyboard.createBackButton('midjourney')
     }
+  );
+});
+
+// Налаштування Stylization
+bot.action('mj_set_stylization', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'midjourney_generation') {
+    await ctx.reply('❌ Сесія застаріла. Почніть заново.');
+    return;
+  }
+
+  state.step = 'awaiting_stylization';
+  userState.set(userId, state);
+
+  await ctx.reply(
+    `🎨 <b>Stylization (0-1000)</b>\n\n` +
+    `Поточне значення: ${state.stylization || 100}\n\n` +
+    `💡 <b>Що це:</b>\n` +
+    `• 0 = мінімум художності, максимум точності\n` +
+    `• 100 = збалансовано (рекомендовано)\n` +
+    `• 500 = більше творчості\n` +
+    `• 1000 = максимум художності\n\n` +
+    `📝 Надішліть число від 0 до 1000:`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('midjourney') }
+  );
+});
+
+// Налаштування Weirdness
+bot.action('mj_set_weirdness', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'midjourney_generation') {
+    await ctx.reply('❌ Сесія застаріла. Почніть заново.');
+    return;
+  }
+
+  state.step = 'awaiting_weirdness';
+  userState.set(userId, state);
+
+  await ctx.reply(
+    `🌀 <b>Weirdness (0-3000)</b>\n\n` +
+    `Поточне значення: ${state.weirdness || 0}\n\n` +
+    `💡 <b>Що це:</b>\n` +
+    `• 0 = стандартні результати (рекомендовано)\n` +
+    `• 500 = помірні експерименти\n` +
+    `• 1500 = незвичайні результати\n` +
+    `• 3000 = максимум дивності\n\n` +
+    `📝 Надішліть число від 0 до 3000:`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('midjourney') }
+  );
+});
+
+// Налаштування Variety
+bot.action('mj_set_variety', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'midjourney_generation') {
+    await ctx.reply('❌ Сесія застаріла. Почніть заново.');
+    return;
+  }
+
+  state.step = 'awaiting_variety';
+  userState.set(userId, state);
+
+  await ctx.reply(
+    `🎲 <b>Variety (0-100)</b>\n\n` +
+    `Поточне значення: ${state.variety || 50}\n\n` +
+    `💡 <b>Що це:</b>\n` +
+    `• 0 = мінімум варіацій між 4 картинками\n` +
+    `• 50 = збалансовано (рекомендовано)\n` +
+    `• 100 = максимум різноманітності\n\n` +
+    `📝 Надішліть число від 0 до 100:`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('midjourney') }
+  );
+});
+
+// Продовжити з налаштуваннями
+bot.action('mj_settings_done', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'midjourney_generation') {
+    await ctx.reply('❌ Сесія застаріла. Почніть заново.');
+    return;
+  }
+
+  state.step = 'waiting_prompt';
+  userState.set(userId, state);
+
+  const model = models.design.models.find(m => m.key === 'midjourney');
+  const cost = model.speeds[state.speed].cost;
+
+  await ctx.reply(
+    `🖼️ Midjourney (${state.speed})\n\n` +
+    `📐 Пропорції: ${state.aspectRatio}\n` +
+    `🎨 Stylization: ${state.stylization || 100}\n` +
+    `🌀 Weirdness: ${state.weirdness || 0}\n` +
+    `🎲 Variety: ${state.variety || 50}\n` +
+    `💰 Вартість: ${cost}⚡\n\n` +
+    `✍️ <b>Крок 4: Опишіть що хочете згенерувати</b>\n\n` +
+    `💡 Будьте детальні: опишіть об'єкт, стиль, освітлення, композицію\n\n` +
+    `📝 Приклад: "A majestic lion standing on a cliff at sunset, cinematic lighting, photorealistic, 8k"`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('midjourney') }
   );
 });
 
@@ -8502,6 +8634,96 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  // ✅ MIDJOURNEY: обробка налаштувань (stylization, weirdness, variety)
+  if (state?.action === 'midjourney_generation') {
+    // Stylization input
+    if (state.step === 'awaiting_stylization') {
+      const value = parseInt(text);
+      if (isNaN(value) || value < 0 || value > 1000) {
+        await ctx.reply('❌ Некоректне значення. Надішліть число від 0 до 1000.');
+        return;
+      }
+      state.stylization = value;
+      state.step = 'select_settings';
+      userState.set(userId, state);
+
+      await ctx.reply(
+        `✅ Stylization встановлено: ${value}\n\n` +
+        `⚙️ Оберіть інший параметр або продовжте:`,
+        {
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback('🎨 Stylization', 'mj_set_stylization'),
+              Markup.button.callback('🌀 Weirdness', 'mj_set_weirdness')
+            ],
+            [Markup.button.callback('🎲 Variety', 'mj_set_variety')],
+            [Markup.button.callback('✅ Продовжити', 'mj_settings_done')],
+            [Markup.button.callback('← Назад', 'midjourney')]
+          ])
+        }
+      );
+      return;
+    }
+
+    // Weirdness input
+    if (state.step === 'awaiting_weirdness') {
+      const value = parseInt(text);
+      if (isNaN(value) || value < 0 || value > 3000) {
+        await ctx.reply('❌ Некоректне значення. Надішліть число від 0 до 3000.');
+        return;
+      }
+      state.weirdness = value;
+      state.step = 'select_settings';
+      userState.set(userId, state);
+
+      await ctx.reply(
+        `✅ Weirdness встановлено: ${value}\n\n` +
+        `⚙️ Оберіть інший параметр або продовжте:`,
+        {
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback('🎨 Stylization', 'mj_set_stylization'),
+              Markup.button.callback('🌀 Weirdness', 'mj_set_weirdness')
+            ],
+            [Markup.button.callback('🎲 Variety', 'mj_set_variety')],
+            [Markup.button.callback('✅ Продовжити', 'mj_settings_done')],
+            [Markup.button.callback('← Назад', 'midjourney')]
+          ])
+        }
+      );
+      return;
+    }
+
+    // Variety input
+    if (state.step === 'awaiting_variety') {
+      const value = parseInt(text);
+      if (isNaN(value) || value < 0 || value > 100) {
+        await ctx.reply('❌ Некоректне значення. Надішліть число від 0 до 100.');
+        return;
+      }
+      state.variety = value;
+      state.step = 'select_settings';
+      userState.set(userId, state);
+
+      await ctx.reply(
+        `✅ Variety встановлено: ${value}\n\n` +
+        `⚙️ Оберіть інший параметр або продовжте:`,
+        {
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback('🎨 Stylization', 'mj_set_stylization'),
+              Markup.button.callback('🌀 Weirdness', 'mj_set_weirdness')
+            ],
+            [Markup.button.callback('🎲 Variety', 'mj_set_variety')],
+            [Markup.button.callback('✅ Продовжити', 'mj_settings_done')],
+            [Markup.button.callback('← Назад', 'midjourney')]
+          ])
+        }
+      );
+      return;
+    }
+  }
+
   // ✅ MIDJOURNEY: обробка промпту
   if (state?.action === 'midjourney_generation' && state?.step === 'waiting_prompt') {
     console.log('🖼️ Midjourney: Processing prompt for user', userId);
@@ -10382,6 +10604,11 @@ async function handleMidjourneyGeneration(ctx, prompt) {
   const taskType = state.taskType || 'mj_txt2img';
   const fileUrls = state.fileUrls || [];
 
+  // ✨ Розширені налаштування
+  const stylization = state.stylization !== undefined ? state.stylization : 100;
+  const weirdness = state.weirdness !== undefined ? state.weirdness : 0;
+  const variety = state.variety !== undefined ? state.variety : 50;
+
   // ⚠️ Перевірка чи Midjourney доступний (потрібен KIE.AI API key)
   if (!kieAI.isKieAIEnabled) {
     console.error('❌ Midjourney unavailable: KIE_AI_API_KEY not configured');
@@ -10410,6 +10637,9 @@ async function handleMidjourneyGeneration(ctx, prompt) {
     apiCost,
     taskType,
     aspectRatio,
+    stylization,
+    weirdness,
+    variety,
     hasImages: fileUrls.length > 0,
     prompt: prompt.substring(0, 100)
   });
@@ -10423,6 +10653,9 @@ async function handleMidjourneyGeneration(ctx, prompt) {
     `🎨 Генерую зображення через Midjourney...\n\n` +
     `⚡ Швидкість: ${speed}\n` +
     `📐 Пропорції: ${aspectRatio}\n` +
+    `🎨 Stylization: ${stylization}\n` +
+    `🌀 Weirdness: ${weirdness}\n` +
+    `🎲 Variety: ${variety}\n` +
     `⏱️ Це займе ~${speed === 'turbo' ? '30-60' : speed === 'fast' ? '60-90' : '120-180'} секунд`
   );
 
@@ -10433,7 +10666,10 @@ async function handleMidjourneyGeneration(ctx, prompt) {
       speed,
       fileUrls: fileUrls.length > 0 ? fileUrls : undefined,
       aspectRatio,
-      version: '7'
+      version: '7',
+      stylization,
+      weirdness,
+      variety
     });
 
     if (!result.success) {
