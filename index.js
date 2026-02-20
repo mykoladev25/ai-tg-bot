@@ -3600,7 +3600,6 @@ bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
     state._timestamp = Date.now();
     // Зберігаємо існуючі значення stylization, weirdness, variety
   }
-  }
 
   // Ensure default values if undefined (тільки для нового стану)
   if (state.stylization === undefined) state.stylization = 100;
