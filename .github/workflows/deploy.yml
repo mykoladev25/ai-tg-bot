@@ -19,23 +19,34 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
           script: |
+            set -e  # Exit on any error
+            
             echo "📦 Deploying neuro-lab-ai-bot..."
             cd /var/www/ai-tg-bot
             
             echo "🔄 Pulling latest changes..."
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
             
-            echo "📋 Checking if dependencies need update..."
-            npm ci --production
+            echo "📋 Installing/updating dependencies..."
+            npm ci --production --prefer-offline --no-audit
             
             echo "♻️  Restarting PM2 process..."
-            pm2 restart neurolab-bot
+            pm2 restart neurolab-bot --update-env
+            
+            echo "⏳ Waiting for process to start..."
+            sleep 3
             
             echo "✅ Deployment completed!"
             
+            echo ""
             echo "📊 PM2 Status:"
-            pm2 list
+            pm2 list | grep neurolab
             
-            echo "📝 Recent logs (last 20 lines):"
-            pm2 logs neurolab-bot --lines 20 --nostream
+            echo ""
+            echo "📝 Recent logs (last 30 lines):"
+            pm2 logs neurolab-bot --lines 30 --nostream || echo "⚠️ Could not fetch logs"
+            
+            echo ""
+            echo "🎉 Deploy finished successfully!"
 
