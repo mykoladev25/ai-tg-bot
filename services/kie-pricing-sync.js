@@ -150,7 +150,7 @@ async function loadPricingCache() {
 function ensureParsedComplete(cache) {
   if (!cache || !cache.pricing) return cache;
   const parsed = cache.parsed || {};
-  const requiredKeys = ['nano_banana', 'ideogram', 'recraft_upscale', 'seedream_4k', 'stable_diffusion'];
+  const requiredKeys = ['nano_banana', 'ideogram', 'recraft_upscale'];
   const missing = requiredKeys.filter(k => parsed[k] === undefined);
   if (missing.length === 0) return cache;
 
