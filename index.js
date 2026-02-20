@@ -3412,14 +3412,19 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
     };
   }
 
-  console.log('🔍 mj_set_stylization - userId:', userId, 'state:', state);
+  // Ensure default values if undefined
+  if (state.stylization === undefined) state.stylization = 100;
+  if (state.weirdness === undefined) state.weirdness = 0;
+  if (state.variety === undefined) state.variety = 50;
+
+  console.log('🔍 mj_set_stylization - userId:', userId, 'current stylization:', state.stylization);
 
   state.step = 'awaiting_stylization';
   userState.set(userId, state);
 
   await ctx.reply(
     `🎨 <b>Stylization (0-1000)</b>\n\n` +
-    `Поточне значення: ${state.stylization || 100}\n\n` +
+    `Поточне значення: ${state.stylization}\n\n` +
     `💡 <b>Що це:</b>\n` +
     `• 0 = мінімум художності, максимум точності\n` +
     `• 100 = збалансовано (рекомендовано)\n` +
@@ -3452,12 +3457,19 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
     };
   }
 
+  // Ensure default values if undefined
+  if (state.stylization === undefined) state.stylization = 100;
+  if (state.weirdness === undefined) state.weirdness = 0;
+  if (state.variety === undefined) state.variety = 50;
+
+  console.log('🔍 mj_set_weirdness - userId:', userId, 'current weirdness:', state.weirdness);
+
   state.step = 'awaiting_weirdness';
   userState.set(userId, state);
 
   await ctx.reply(
     `🌀 <b>Weirdness (0-3000)</b>\n\n` +
-    `Поточне значення: ${state.weirdness || 0}\n\n` +
+    `Поточне значення: ${state.weirdness}\n\n` +
     `💡 <b>Що це:</b>\n` +
     `• 0 = стандартні результати (рекомендовано)\n` +
     `• 500 = помірні експерименти\n` +
@@ -3490,12 +3502,19 @@ bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
     };
   }
 
+  // Ensure default values if undefined
+  if (state.stylization === undefined) state.stylization = 100;
+  if (state.weirdness === undefined) state.weirdness = 0;
+  if (state.variety === undefined) state.variety = 50;
+
+  console.log('🔍 mj_set_variety - userId:', userId, 'current variety:', state.variety);
+
   state.step = 'awaiting_variety';
   userState.set(userId, state);
 
   await ctx.reply(
     `🎲 <b>Variety (0-100)</b>\n\n` +
-    `Поточне значення: ${state.variety || 50}\n\n` +
+    `Поточне значення: ${state.variety}\n\n` +
     `💡 <b>Що це:</b>\n` +
     `• 0 = мінімум варіацій між 4 картинками\n` +
     `• 50 = збалансовано (рекомендовано)\n` +
@@ -8694,6 +8713,13 @@ bot.on('text', async (ctx) => {
         await ctx.reply('❌ Некоректне значення. Надішліть число від 0 до 1000.');
         return;
       }
+
+      // Логування зміни дефолтного значення
+      const defaultValue = 100;
+      if (value !== defaultValue) {
+        console.log(`🎨 Midjourney Stylization змінено з дефолту: userId=${userId}, default=${defaultValue}, new=${value}, diff=${value - defaultValue}`);
+      }
+
       state.stylization = value;
       state.step = 'select_settings';
       userState.set(userId, state);
@@ -8726,6 +8752,13 @@ bot.on('text', async (ctx) => {
         await ctx.reply('❌ Некоректне значення. Надішліть число від 0 до 3000.');
         return;
       }
+
+      // Логування зміни дефолтного значення
+      const defaultValue = 0;
+      if (value !== defaultValue) {
+        console.log(`🌀 Midjourney Weirdness змінено з дефолту: userId=${userId}, default=${defaultValue}, new=${value}, diff=+${value}`);
+      }
+
       state.weirdness = value;
       state.step = 'select_settings';
       userState.set(userId, state);
