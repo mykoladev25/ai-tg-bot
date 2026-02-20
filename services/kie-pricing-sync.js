@@ -144,13 +144,42 @@ async function loadPricingCache() {
 }
 
 /**
+ * Перевірити чи parsed секція кешу містить всі потрібні моделі.
+ * Якщо ні — перепарсити з існуючих pricing даних (без повторного fetch з API).
+ */
+function ensureParsedComplete(cache) {
+  if (!cache || !cache.pricing) return cache;
+  const parsed = cache.parsed || {};
+  const requiredKeys = ['nano_banana', 'ideogram', 'recraft_upscale', 'seedream_4k', 'stable_diffusion'];
+  const missing = requiredKeys.filter(k => parsed[k] === undefined);
+  if (missing.length === 0) return cache;
+
+  console.log(`🔄 Re-parsing pricing cache (missing: ${missing.join(', ')})`);
+  cache.parsed = parseOurModels(cache.pricing);
+
+  // Зберігаємо оновлений кеш синхронно
+  try {
+    const fsSync = require('fs');
+    fsSync.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), 'utf-8');
+    console.log(`💾 Pricing cache re-parsed and saved`);
+  } catch (e) {
+    console.warn('⚠️ Could not save re-parsed cache:', e.message);
+  }
+
+  return cache;
+}
+
+/**
  * Оновити ціни якщо потрібно
  */
 async function updatePricingIfNeeded() {
-  const cache = await loadPricingCache();
+  let cache = await loadPricingCache();
 
   // Перевіряємо чи потрібно оновлювати
   if (cache) {
+    // Перепарсити якщо parsed неповний (нові моделі додані в parseOurModels)
+    cache = ensureParsedComplete(cache);
+
     const age = Date.now() - cache.timestamp;
     if (age < UPDATE_INTERVAL) {
       const hoursLeft = Math.ceil((UPDATE_INTERVAL - age) / (60 * 60 * 1000));
@@ -300,7 +329,8 @@ function getModelPriceSync(modelKey, options = {}) {
   try {
     const fs = require('fs');
     const cacheData = fs.readFileSync(CACHE_FILE, 'utf-8');
-    const cache = JSON.parse(cacheData);
+    let cache = JSON.parse(cacheData);
+    cache = ensureParsedComplete(cache);
     return getModelPrice(cache, modelKey, options);
   } catch (error) {
     // Якщо кеш недоступний - повертаємо fallback ціни
