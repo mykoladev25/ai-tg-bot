@@ -1,7 +1,7 @@
 const axios = require('axios');
 
-const KIE_API_KEY = process.env.KIE_API_KEY;
-const KIE_BASE_URL = 'https://api.kie.ai/api/v1/jobs';
+const KIE_API_KEY = process.env.KIE_AI_API_KEY;  // ✅ Виправлено: було KIE_API_KEY, має бути KIE_AI_API_KEY
+const KIE_API_BASE = 'https://api.kie.ai';
 
 /**
  * Видалення watermark з Sora відео

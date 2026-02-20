@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 const KIE_API_BASE = 'https://api.kie.ai';
-const KIE_API_KEY = process.env.KIE_API_KEY;
+const KIE_API_KEY = process.env.KIE_AI_API_KEY;  // ✅ Виправлено: було KIE_API_KEY, має бути KIE_AI_API_KEY
 const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://neurolab.fun/webhook/kie-ai';
 
 /**

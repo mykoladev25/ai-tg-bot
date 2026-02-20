@@ -42,16 +42,48 @@ const accessControl = require('./config/access');
 
 /**
  * Список моделей дизайну з ефективною ціною для кнопок меню (KIE/Replicate за вибором юзера).
+ * Фільтрує Midjourney якщо він недоступний (немає KIE.AI або немає доступу до Midjourney API).
  */
 function getDesignModelsWithEffectiveCost(userId) {
-  return models.design.models.map(m => ({
-    ...m,
-    cost: getEffectiveImageCost(userId, m, m.key)
-  }));
+  return models.design.models
+    .filter(m => {
+      // Midjourney доступний тільки якщо KIE.AI налаштований і є доступ до MJ API
+      if (m.key === 'midjourney') {
+        return isMidjourneyAvailable();
+      }
+      return true;
+    })
+    .map(m => ({
+      ...m,
+      cost: getEffectiveImageCost(userId, m, m.key)
+    }));
 }
 
 /** Моделі відео, що доступні тільки через KIE (Kling 3.0, Sora 2). */
 const KIE_ONLY_VIDEO_MODELS = ['kling_3', 'sora_2'];
+
+/**
+ * Перевірка чи Midjourney доступний.
+ * Midjourney потребує не тільки KIE.AI ключ, але й окрему активацію в KIE.AI акаунті.
+ * Якщо бачили помилку "You do not have access permissions" - Midjourney не активований.
+ */
+let midjourneyAccessChecked = false;
+let midjourneyAccessAvailable = false;
+
+function isMidjourneyAvailable() {
+  // Якщо KIE.AI не налаштований - Midjourney точно недоступний
+  if (!kieAI.isKieAIEnabled) return false;
+
+  // Поки не перевірили доступ - припускаємо що доступний (показуємо в меню)
+  // Після першої помилки "access permissions" - приховуємо
+  return !midjourneyAccessChecked || midjourneyAccessAvailable;
+}
+
+function markMidjourneyAsUnavailable() {
+  midjourneyAccessChecked = true;
+  midjourneyAccessAvailable = false;
+  console.log('⚠️ Midjourney marked as unavailable due to access error');
+}
 
 /**
  * Чи може користувач бачити моделі "тільки KIE" (Kling 3.0, Sora 2).
@@ -10357,6 +10389,23 @@ async function handleMidjourneyGeneration(ctx, prompt) {
   const taskType = state.taskType || 'mj_txt2img';
   const fileUrls = state.fileUrls || [];
 
+  // ⚠️ Перевірка чи Midjourney доступний (потрібен KIE.AI API key)
+  if (!kieAI.isKieAIEnabled) {
+    console.error('❌ Midjourney unavailable: KIE_AI_API_KEY not configured');
+    await ctx.reply(
+      '⚠️ <b>Midjourney тимчасово недоступний</b>\n\n' +
+      'На жаль, сервіс Midjourney зараз не налаштований.\n' +
+      'Спробуйте інші моделі або зверніться до адміністратора.\n\n' +
+      '💡 Доступні альтернативи:\n' +
+      '• 🍌 Nano Banana Pro 2K/4K\n' +
+      '• 🌱 Seedream 4K\n' +
+      '• 🎨 Ideogram',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    userState.delete(userId);
+    return;
+  }
+
   // Визначаємо вартість залежно від швидкості
   const cost = model.speeds[speed]?.cost || model.cost;
   const apiCost = model.speeds[speed]?.apiCost || model.apiCost;
@@ -10395,6 +10444,39 @@ async function handleMidjourneyGeneration(ctx, prompt) {
     });
 
     if (!result.success) {
+      // Спеціальна обробка для помилок доступу
+      const isAccessError = result.error && (
+        result.error.includes('access permissions') ||
+        result.error.includes('unauthorized') ||
+        result.error.includes('Invalid API key')
+      );
+
+      if (isAccessError) {
+        console.error('❌ Midjourney access error:', result.error);
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          '⚠️ <b>Помилка доступу до Midjourney</b>\n\n' +
+          `${result.error}\n\n` +
+          '<b>Можливі причини:</b>\n' +
+          '• Недостатньо коштів на балансі KIE.AI\n' +
+          '• API ключ застарілий або невалідний\n\n' +
+          '💡 <b>Доступні альтернативи:</b>\n' +
+          '• 🍌 Nano Banana Pro 2K/4K\n' +
+          '• 🌱 Seedream 4K\n' +
+          '• 🎨 Ideogram',
+          { parse_mode: 'HTML' }
+        );
+      } else {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          `❌ Помилка генерації: ${result.error}`
+        );
+      }
+
       await adminNotifier.notifyAdmin(
         bot,
         new Error(result.error),
@@ -10405,15 +10487,11 @@ async function handleMidjourneyGeneration(ctx, prompt) {
           model: 'Midjourney',
           speed,
           prompt,
-          taskType
+          taskType,
+          isAccessError
         }
       );
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Помилка генерації: ${result.error}`
-      );
+
       userState.delete(userId);
       return;
     }
