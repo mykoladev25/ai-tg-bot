@@ -3397,10 +3397,27 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
   const speed = ctx.match[1];
   const aspectRatio = ctx.match[2];
 
+  console.log(`🔍 [STYLIZATION BUTTON] Callback triggered - userId=${userId}, speed=${speed}, aspectRatio=${aspectRatio}`);
+
   // Відновлюємо або створюємо стан з параметрів callback
   let state = userState.get(userId);
 
-  console.log(`🔍 mj_set_stylization ENTRY - userId: ${userId}, hasState: ${!!state}, action: ${state?.action}, stylization: ${state?.stylization}, step: ${state?.step}`);
+  // Детальне логування стану
+  if (state) {
+    console.log(`🔍 [STYLIZATION BUTTON] State found:`, JSON.stringify({
+      action: state.action,
+      step: state.step,
+      speed: state.speed,
+      aspectRatio: state.aspectRatio,
+      stylization: state.stylization,
+      weirdness: state.weirdness,
+      variety: state.variety,
+      _timestamp: state._timestamp,
+      age: state._timestamp ? `${Date.now() - state._timestamp}ms` : 'unknown'
+    }, null, 2));
+  }
+
+  console.log(`🔍 mj_set_stylization ENTRY - userId: ${userId}, hasState: ${!!state}, action: ${state?.action}, stylization: ${state?.stylization}, step: ${state?.step}, stateTimestamp: ${state?._timestamp}`);
 
   if (!state || state.action !== 'midjourney_generation') {
     // Створюємо новий стан тільки якщо його немає
@@ -3413,14 +3430,18 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
       fileUrls: [],
       stylization: 100,
       weirdness: 0,
-      variety: 50
+      variety: 50,
+      _timestamp: Date.now()
     };
     userState.set(userId, state); // Зберігаємо одразу
+    console.log(`🔍 [STYLIZATION BUTTON] Created and saved new state`);
   } else {
     // Якщо стан існує, оновлюємо тільки speed і aspectRatio (якщо змінилися)
-    console.log(`✅ Using EXISTING state, preserving stylization=${state.stylization}, weirdness=${state.weirdness}, variety=${state.variety}`);
+    const stateAge = Date.now() - (state._timestamp || 0);
+    console.log(`✅ Using EXISTING state, age=${stateAge}ms, preserving stylization=${state.stylization}, weirdness=${state.weirdness}, variety=${state.variety}`);
     state.speed = speed;
     state.aspectRatio = aspectRatio;
+    state._timestamp = Date.now();
     // Зберігаємо існуючі значення stylization, weirdness, variety
   }
 
@@ -3454,10 +3475,27 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
   const speed = ctx.match[1];
   const aspectRatio = ctx.match[2];
 
+  console.log(`🔍 [WEIRDNESS BUTTON] Callback triggered - userId=${userId}, speed=${speed}, aspectRatio=${aspectRatio}`);
+
   // Відновлюємо або створюємо стан
   let state = userState.get(userId);
 
-  console.log(`🔍 mj_set_weirdness ENTRY - userId: ${userId}, hasState: ${!!state}, action: ${state?.action}, weirdness: ${state?.weirdness}, step: ${state?.step}`);
+  // Детальне логування стану
+  if (state) {
+    console.log(`🔍 [WEIRDNESS BUTTON] State found:`, JSON.stringify({
+      action: state.action,
+      step: state.step,
+      speed: state.speed,
+      aspectRatio: state.aspectRatio,
+      stylization: state.stylization,
+      weirdness: state.weirdness,
+      variety: state.variety,
+      _timestamp: state._timestamp,
+      age: state._timestamp ? `${Date.now() - state._timestamp}ms` : 'unknown'
+    }, null, 2));
+  }
+
+  console.log(`🔍 mj_set_weirdness ENTRY - userId: ${userId}, hasState: ${!!state}, action: ${state?.action}, weirdness: ${state?.weirdness}, step: ${state?.step}, stateTimestamp: ${state?._timestamp}`);
 
   if (!state || state.action !== 'midjourney_generation') {
     // Створюємо новий стан тільки якщо його немає
@@ -3470,14 +3508,18 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
       fileUrls: [],
       stylization: 100,
       weirdness: 0,
-      variety: 50
+      variety: 50,
+      _timestamp: Date.now()
     };
     userState.set(userId, state); // Зберігаємо одразу
+    console.log(`🔍 [WEIRDNESS BUTTON] Created and saved new state`);
   } else {
     // Якщо стан існує, оновлюємо тільки speed і aspectRatio
-    console.log(`✅ Using EXISTING state, preserving stylization=${state.stylization}, weirdness=${state.weirdness}, variety=${state.variety}`);
+    const stateAge = Date.now() - (state._timestamp || 0);
+    console.log(`✅ Using EXISTING state, age=${stateAge}ms, preserving stylization=${state.stylization}, weirdness=${state.weirdness}, variety=${state.variety}`);
     state.speed = speed;
     state.aspectRatio = aspectRatio;
+    state._timestamp = Date.now();
     // Зберігаємо існуючі значення stylization, weirdness, variety
   }
 
@@ -3511,8 +3553,25 @@ bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
   const speed = ctx.match[1];
   const aspectRatio = ctx.match[2];
 
+  console.log(`🔍 [VARIETY BUTTON] Callback triggered - userId=${userId}, speed=${speed}, aspectRatio=${aspectRatio}`);
+
   // Відновлюємо або створюємо стан
   let state = userState.get(userId);
+
+  // Детальне логування стану
+  if (state) {
+    console.log(`🔍 [VARIETY BUTTON] State found:`, JSON.stringify({
+      action: state.action,
+      step: state.step,
+      speed: state.speed,
+      aspectRatio: state.aspectRatio,
+      stylization: state.stylization,
+      weirdness: state.weirdness,
+      variety: state.variety,
+      _timestamp: state._timestamp,
+      age: state._timestamp ? `${Date.now() - state._timestamp}ms` : 'unknown'
+    }, null, 2));
+  }
 
   console.log(`🔍 mj_set_variety ENTRY - userId: ${userId}, hasState: ${!!state}, action: ${state?.action}, variety: ${state?.variety}, step: ${state?.step}`);
 
@@ -3527,15 +3586,20 @@ bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
       fileUrls: [],
       stylization: 100,
       weirdness: 0,
-      variety: 50
+      variety: 50,
+      _timestamp: Date.now()
     };
     userState.set(userId, state);
+    console.log(`🔍 [VARIETY BUTTON] Created and saved new state`);
   } else {
     // Якщо стан існує, оновлюємо тільки speed і aspectRatio
-    console.log(`✅ Using EXISTING state, preserving stylization=${state.stylization}, weirdness=${state.weirdness}, variety=${state.variety}`);
+    const stateAge = Date.now() - (state._timestamp || 0);
+    console.log(`✅ Using EXISTING state, age=${stateAge}ms, preserving stylization=${state.stylization}, weirdness=${state.weirdness}, variety=${state.variety}`);
     state.speed = speed;
     state.aspectRatio = aspectRatio;
+    state._timestamp = Date.now();
     // Зберігаємо існуючі значення stylization, weirdness, variety
+  }
   }
 
   // Ensure default values if undefined (тільки для нового стану)
@@ -8750,6 +8814,8 @@ bot.on('text', async (ctx) => {
         return;
       }
 
+      console.log(`🔍 [STYLIZATION TEXT] Before update - userId=${userId}, state exists: ${!!userState.get(userId)}, current stylization: ${state.stylization}`);
+
       // Логування зміни дефолтного значення
       const defaultValue = 100;
       if (value !== defaultValue) {
@@ -8758,10 +8824,18 @@ bot.on('text', async (ctx) => {
 
       state.stylization = value;
       state.step = 'select_settings';
+      state._timestamp = Date.now();
+
+      console.log(`🔍 [STYLIZATION TEXT] After update, before save - stylization=${state.stylization}, step=${state.step}, timestamp=${state._timestamp}`);
+
       userState.set(userId, state);
+
+      console.log(`🔍 [STYLIZATION TEXT] After save - state in Map: ${!!userState.get(userId)}, stylization in Map: ${userState.get(userId)?.stylization}`);
 
       const speed = state.speed || 'fast';
       const aspectRatio = state.aspectRatio || '1:1';
+
+      console.log(`🔍 [STYLIZATION TEXT] About to send reply with buttons - speed=${speed}, aspectRatio=${aspectRatio}`);
 
       await ctx.reply(
         `✅ Stylization встановлено: ${value}\n\n` +
@@ -8778,6 +8852,9 @@ bot.on('text', async (ctx) => {
           ])
         }
       );
+
+      console.log(`🔍 [STYLIZATION TEXT] After reply sent - state still in Map: ${!!userState.get(userId)}, stylization still in Map: ${userState.get(userId)?.stylization}`);
+
       return;
     }
 
@@ -8789,6 +8866,8 @@ bot.on('text', async (ctx) => {
         return;
       }
 
+      console.log(`🔍 [WEIRDNESS TEXT] Before update - userId=${userId}, state exists: ${!!userState.get(userId)}, current weirdness: ${state.weirdness}`);
+
       // Логування зміни дефолтного значення
       const defaultValue = 0;
       if (value !== defaultValue) {
@@ -8797,10 +8876,18 @@ bot.on('text', async (ctx) => {
 
       state.weirdness = value;
       state.step = 'select_settings';
+      state._timestamp = Date.now();
+
+      console.log(`🔍 [WEIRDNESS TEXT] After update, before save - weirdness=${state.weirdness}, step=${state.step}, timestamp=${state._timestamp}`);
+
       userState.set(userId, state);
+
+      console.log(`🔍 [WEIRDNESS TEXT] After save - state in Map: ${!!userState.get(userId)}, weirdness in Map: ${userState.get(userId)?.weirdness}`);
 
       const speed = state.speed || 'fast';
       const aspectRatio = state.aspectRatio || '1:1';
+
+      console.log(`🔍 [WEIRDNESS TEXT] About to send reply with buttons - speed=${speed}, aspectRatio=${aspectRatio}`);
 
       await ctx.reply(
         `✅ Weirdness встановлено: ${value}\n\n` +
@@ -8817,6 +8904,9 @@ bot.on('text', async (ctx) => {
           ])
         }
       );
+
+      console.log(`🔍 [WEIRDNESS TEXT] After reply sent - state still in Map: ${!!userState.get(userId)}, weirdness still in Map: ${userState.get(userId)?.weirdness}`);
+
       return;
     }
 
@@ -8828,6 +8918,8 @@ bot.on('text', async (ctx) => {
         return;
       }
 
+      console.log(`🔍 [VARIETY TEXT] Before update - userId=${userId}, state exists: ${!!userState.get(userId)}, current variety: ${state.variety}`);
+
       // Логування зміни дефолтного значення
       const defaultValue = 50;
       if (value !== defaultValue) {
@@ -8836,10 +8928,18 @@ bot.on('text', async (ctx) => {
 
       state.variety = value;
       state.step = 'select_settings';
+      state._timestamp = Date.now();
+
+      console.log(`🔍 [VARIETY TEXT] After update, before save - variety=${state.variety}, step=${state.step}, timestamp=${state._timestamp}`);
+
       userState.set(userId, state);
+
+      console.log(`🔍 [VARIETY TEXT] After save - state in Map: ${!!userState.get(userId)}, variety in Map: ${userState.get(userId)?.variety}`);
 
       const speed = state.speed || 'fast';
       const aspectRatio = state.aspectRatio || '1:1';
+
+      console.log(`🔍 [VARIETY TEXT] About to send reply with buttons - speed=${speed}, aspectRatio=${aspectRatio}`);
 
       await ctx.reply(
         `✅ Variety встановлено: ${value}\n\n` +
@@ -8856,6 +8956,9 @@ bot.on('text', async (ctx) => {
           ])
         }
       );
+
+      console.log(`🔍 [VARIETY TEXT] After reply sent - state still in Map: ${!!userState.get(userId)}, variety still in Map: ${userState.get(userId)?.variety}`);
+
       return;
     }
   }
