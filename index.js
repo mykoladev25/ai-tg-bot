@@ -1991,10 +1991,6 @@ bot.hears('👤 Профіль', async (ctx) => {
 bot.command('provider', async (ctx) => {
   const userId = ctx.from.id;
 
-  // Перевіряємо доступ через централізований модуль
-  if (!accessControl.canUseProviderChoice(userId)) {
-    return ctx.reply('⛔ Ця команда не доступна для вас.\n\n💡 Запитайте у адміністратора для активації.');
-  }
 
   if (!kieAI.isKieAIEnabled) {
     return ctx.reply('❌ KIE.AI не увімкнена. Додайте KIE_AI_API_KEY в .env файл.');
@@ -2038,10 +2034,6 @@ bot.command('provider', async (ctx) => {
 bot.action('provider_kie-ai', async (ctx) => {
   const userId = ctx.from.id;
 
-  if (!accessControl.canUseProviderChoice(userId)) {
-    return ctx.answerCbQuery('⛔ Немає доступу', 1);
-  }
-
   userProviderChoice.set(userId, 'kie-ai');
   saveProviderChoice();
 
@@ -2060,10 +2052,6 @@ bot.action('provider_kie-ai', async (ctx) => {
 
 bot.action('provider_replicate', async (ctx) => {
   const userId = ctx.from.id;
-
-  if (!accessControl.canUseProviderChoice(userId)) {
-    return ctx.answerCbQuery('⛔ Немає доступу', 1);
-  }
 
   userProviderChoice.set(userId, 'replicate');
   saveProviderChoice();
@@ -2090,10 +2078,6 @@ bot.action('provider_replicate', async (ctx) => {
 bot.action('provider_auto', async (ctx) => {
   const userId = ctx.from.id;
 
-  if (!accessControl.canUseProviderChoice(userId)) {
-    return ctx.answerCbQuery('⛔ Немає доступу', 1);
-  }
-
   userProviderChoice.delete(userId);  // видаляємо вибір, щоб використовувати автоматичний
   saveProviderChoice();
 
@@ -2119,10 +2103,6 @@ bot.action('provider_auto', async (ctx) => {
 bot.action('provider_menu', async (ctx) => {
   const userId = ctx.from.id;
 
-  // Перевіряємо доступ
-  if (!accessControl.canUseProviderChoice(userId)) {
-    return ctx.answerCbQuery('⛔ Немає доступу', 1);
-  }
 
   if (!kieAI.isKieAIEnabled) {
     return ctx.answerCbQuery('❌ KIE.AI не увімкнена', 1);
@@ -12391,10 +12371,11 @@ async function startBot() {
                 const kieCost = kiePricingSync.getKieTokenCostSync(m.key);
                 if (typeof kieCost === 'number' && kieCost > 0) {
                   effectiveCost = kieCost;
-                  // Отримуємо API cost з KIE
+                  // Отримуємо API cost з KIE (може бути string)
                   const kieApiCost = kiePricingSync.getModelPriceSync(m.key);
-                  if (typeof kieApiCost === 'number') {
-                    effectiveApiCost = kieApiCost;
+                  if (kieApiCost != null) {
+                    const parsed = typeof kieApiCost === 'string' ? parseFloat(kieApiCost) : kieApiCost;
+                    if (!isNaN(parsed)) effectiveApiCost = parsed;
                   }
                 }
               } catch (err) {
@@ -12413,10 +12394,11 @@ async function startBot() {
 
             // Debug fields (optional)
             if (effectiveApiCost !== undefined) {
+              const usedKie = kieAI.isKieAIImplemented(m.key) && (effectiveCost !== m.cost || m.kieAIOnly);
               result._debug = {
                 apiCost: effectiveApiCost,
                 grossMarginPct: calcGrossMargin(effectiveCost, effectiveApiCost),
-                priceSource: kieAI.isKieAIImplemented(m.key) ? 'kie-ai' : 'replicate'
+                priceSource: usedKie ? 'kie-ai' : 'replicate'
               };
             }
 
@@ -12560,12 +12542,20 @@ async function startBot() {
         // Build usage from models.js (single source of truth)
         const trialUsage = {};
 
-        // Design models (available only)
+        // Design models (available only) — use KIE prices when available
         models.design.models
           .filter(m => m.available)
           .forEach((m) => {
             const blocked = isBlockedModel(m.key);
-            const entry = buildUsageEntry(m.key, m.cost || 0, { blocked });
+            // КIE пріоритет: якщо модель підтримується на KIE — використати KIE ціну
+            let cost = m.cost || 0;
+            if (kieAI.isKieAIImplemented(m.key)) {
+              try {
+                const kieCost = kiePricingSync.getKieTokenCostSync(m.key);
+                if (typeof kieCost === 'number' && kieCost > 0) cost = kieCost;
+              } catch (e) { /* fallback */ }
+            }
+            const entry = buildUsageEntry(m.key, cost, { blocked });
             if (entry) trialUsage[m.key] = entry;
           });
 
