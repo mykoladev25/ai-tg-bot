@@ -71,6 +71,7 @@ function parseOurModels(pricing) {
     seedream_4k: findModel(pricing.image, 'seedream', '4K'),
     stable_diffusion: findModel(pricing.image, 'stable diffusion', '3.5'),
     ideogram: findModels(pricing.image, 'ideogram'),  // All ideogram variants
+    recraft_upscale: findModel(pricing.image, 'recraft crisp upscale'),  // Recraft Crisp Upscale
 
     // VIDEO
     kling_2_5: findModels(pricing.video, 'kling 2.5'),
@@ -199,6 +200,9 @@ function getModelPrice(cache, modelKey, options = {}) {
     const parsed = cache.parsed;
 
     switch(modelKey) {
+      case 'nano_banana':
+        return parsed.nano_banana?.usdPrice || null;
+
       case 'nano_banana_2k':
         return parsed.nano_banana_2k?.usdPrice || '0.09';
 
@@ -214,6 +218,9 @@ function getModelPrice(cache, modelKey, options = {}) {
 
       case 'stable_diffusion':
         return parsed.stable_diffusion?.usdPrice || null;
+
+      case 'recraft_upscale':
+        return parsed.recraft_upscale?.usdPrice || null;
 
       case 'ideogram': {
         // Ideogram: використовуємо TURBO режим (найдешевший для text-to-image)
@@ -323,7 +330,7 @@ function getKling3TokenCostPerSecondSync(options = {}) {
 }
 
 /** Моделі зображень, для яких є KIE-ціна в кеші */
-const KIE_IMAGE_MODELS = ['nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'ideogram', 'stable_diffusion'];
+const KIE_IMAGE_MODELS = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'ideogram', 'recraft_upscale'];
 
 /** Опорна тривалість для переведення Veo "per video" → "per second" (мін. тривалість у боті). */
 const VEO_REF_DURATION_SEC = 4;
@@ -384,8 +391,23 @@ function getKieTokenCostSync(modelKey, options = {}) {
         console.log(`💡 Using hardcoded Seedream price: $${usd} (6.5 credits)`);
       }
 
-      // ✅ Ideogram тепер береться з кешу (ideogram v3 text-to-image TURBO)
-      // Fallback більше не потрібен
+      // Fallback для Nano Banana base: $0.02 (4 credits)
+      if (usd == null && modelKey === 'nano_banana') {
+        usd = 0.02;  // KIE.AI: 4.0 credits × $0.005 = $0.02
+        console.log(`💡 Using hardcoded Nano Banana price: $${usd} (4.0 credits)`);
+      }
+
+      // Fallback для Recraft Crisp Upscale: $0.0025 (0.5 credits)
+      if (usd == null && modelKey === 'recraft_upscale') {
+        usd = 0.0025;  // KIE.AI: 0.5 credits × $0.005 = $0.0025
+        console.log(`💡 Using hardcoded Recraft Upscale price: $${usd} (0.5 credits)`);
+      }
+
+      // Fallback для Ideogram: $0.0175 (3.5 credits TURBO)
+      if (usd == null && modelKey === 'ideogram') {
+        usd = kieAiModels.getReplicatePrice(modelKey);
+        console.log(`💡 Using hardcoded Ideogram TURBO price: $${usd} (3.5 credits)`);
+      }
 
       if (usd == null) return null;
       const n = typeof usd === 'string' ? parseFloat(usd) : usd;

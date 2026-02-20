@@ -13,7 +13,7 @@
  * - 'all_users' - для всіх користувачів
  * - 'disabled' - функція вимкнена повністю
  */
-const PROVIDER_CHOICE_ACCESS = process.env.PROVIDER_CHOICE_ACCESS || 'admin_only';
+const PROVIDER_CHOICE_ACCESS = process.env.PROVIDER_CHOICE_ACCESS || 'all_users';
 
 /**
  * Контролювати хто має доступ до KIE.AI функцій (Kling 3.0 тощо)

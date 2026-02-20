@@ -2070,15 +2070,21 @@ bot.action('provider_replicate', async (ctx) => {
 
   await ctx.editMessageText(
     '✅ <b>Replicate вибрана</b>\n\n' +
-    '🟣 Тепер все генерації будуть використовувати Replicate\n\n' +
+    '🟣 Тепер всі генерації будуть використовувати Replicate\n\n' +
+    '⚠️ <b>Увага:</b> Вартість генерацій на Replicate зазвичай <b>дорожча</b> ніж на KIE.AI!\n' +
+    'Наприклад: Nano Banana — 7⚡ (Replicate) vs 4⚡ (KIE.AI)\n\n' +
+    '💡 Рекомендуємо <b>KIE.AI</b> або <b>Автоматичний</b> режим для економії\n\n' +
     '💡 Командa: /provider для зміни вибору',
     {
       parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([[Markup.button.callback('🏠 Назад', 'main_menu')]])
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🔵 Повернути KIE.AI', 'provider_kie-ai')],
+        [Markup.button.callback('🏠 Назад', 'main_menu')]
+      ])
     }
   );
 
-  await ctx.answerCbQuery('✅ Replicate обрана!');
+  await ctx.answerCbQuery('⚠️ Replicate обрана (дорожчі ціни)');
 });
 
 bot.action('provider_auto', async (ctx) => {
@@ -2130,14 +2136,15 @@ bot.action('provider_menu', async (ctx) => {
 
 <b>Поточний:</b> ${currentChoice === 'auto' ? '🤖 Автоматичний (KIE.AI)' : currentChoice === 'kie-ai' ? '🔵 KIE.AI' : '🟣 Replicate'}
 
-<b>Описання:</b>
-🔵 <b>KIE.AI</b> - часто швидше
-🟣 <b>Replicate</b> - більш стабільний
-🤖 <b>Автоматичний</b> - KIE.AI якщо доступна`;
+🔵 <b>KIE.AI</b> — дешевший, рекомендований ✅
+🟣 <b>Replicate</b> — дорожчий, альтернативний
+🤖 <b>Автоматичний</b> — спершу KIE.AI, якщо недоступна → Replicate
+
+⚠️ При виборі Replicate ціни генерацій будуть вищими!`;
 
   const providerKeyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('🔵 KIE.AI', 'provider_kie-ai')],
-    [Markup.button.callback('🟣 Replicate', 'provider_replicate')],
+    [Markup.button.callback('🔵 KIE.AI (рекомендовано)', 'provider_kie-ai')],
+    [Markup.button.callback('🟣 Replicate (дорожчий)', 'provider_replicate')],
     [Markup.button.callback('🤖 Автоматичний', 'provider_auto')],
     [Markup.button.callback('🏠 Профіль', 'profile_menu')]
   ]);
@@ -2174,11 +2181,10 @@ bot.hears('⚙️ Налаштування', async (ctx) => {
 ${choiceEmoji[currentChoice]} Провайдер: <b>${choiceText[currentChoice]}</b>
 
 <b>Що таке провайдер?</b>
-• 🔵 <b>KIE.AI</b> - дешевший, пріоритетний (рекомендовано)
-• 🟣 <b>Replicate</b> - альтернативний провайдер
-• 🤖 <b>Автоматичний</b> - спершу пробує KIE.AI, потім Replicate
+• 🔵 <b>KIE.AI</b> - дешевший, пріоритетний ✅
+• 🟣 <b>Replicate</b> - альтернативний (дорожчий)
+• 🤖 <b>Автоматичний</b> - спершу KIE.AI, потім Replicate
 
-<b>Нова система fallback:</b>
 ✅ Якщо один провайдер не працює - автоматично перемикається на інший!
 
 Оберіть опцію нижче 👇`;

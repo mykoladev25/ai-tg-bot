@@ -1125,7 +1125,7 @@ router.get('/dashboard', (req, res) => {
                     <span class="badge">\${username}</span><br/>
                     <span class="card-subtitle">ID: \${u.userId}</span>
                   </td>
-                  <td><strong>\${(u.tokensSpent || 0).toFixed(0)}⚡</strong></td>
+                  <td><strong>\${Number(u.tokensSpent || 0).toFixed(0)}⚡</strong></td>
                   <td>\${u.generations || 0}</td>
                   <td>\${formatUSD(u.cogs)}</td>
                   <td>\${formatUSD(u.revenue)}</td>
