@@ -3389,10 +3389,15 @@ bot.action(/^mj_aspect_(.+)$/, async (ctx) => {
 bot.action('mj_set_stylization', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  const state = userState.get(userId);
+  let state = userState.get(userId);
 
-  if (!state || state.action !== 'midjourney_generation') {
-    await ctx.reply('❌ Сесія застаріла. Почніть заново.');
+  // Якщо стану немає або він некоректний, повідомляємо зрозуміліше
+  if (!state || state.action !== 'midjourney_generation' || !state.speed || !state.aspectRatio) {
+    await ctx.reply(
+      '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
+      '💡 Почніть заново: Зображення → MidJourney',
+      keyboard.createBackButton('design_menu')
+    );
     return;
   }
 
@@ -3469,10 +3474,14 @@ bot.action('mj_set_variety', async (ctx) => {
 bot.action('mj_settings_done', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  const state = userState.get(userId);
+  let state = userState.get(userId);
 
-  if (!state || state.action !== 'midjourney_generation') {
-    await ctx.reply('❌ Сесія застаріла. Почніть заново.');
+  if (!state || state.action !== 'midjourney_generation' || !state.speed || !state.aspectRatio) {
+    await ctx.reply(
+      '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
+      '💡 Почніть заново: Зображення → MidJourney',
+      keyboard.createBackButton('design_menu')
+    );
     return;
   }
 
