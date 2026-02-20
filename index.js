@@ -8758,6 +8758,13 @@ bot.on('text', async (ctx) => {
         await ctx.reply('❌ Некоректне значення. Надішліть число від 0 до 100.');
         return;
       }
+
+      // Логування зміни дефолтного значення
+      const defaultValue = 50;
+      if (value !== defaultValue) {
+        console.log(`🎲 Midjourney Variety змінено з дефолту: userId=${userId}, default=${defaultValue}, new=${value}, diff=${value - defaultValue}`);
+      }
+
       state.variety = value;
       state.step = 'select_settings';
       userState.set(userId, state);
