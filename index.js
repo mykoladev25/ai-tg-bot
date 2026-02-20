@@ -9610,6 +9610,15 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
                 generationData.aspectRatio
               );
 
+            case 'nano_banana':
+              return await kieAI.generateWithNanoBananaKieAI(
+                generationData.prompt,
+                generationData.imageInput,
+                '1K',
+                generationData.aspectRatio,
+                0.5
+              );
+
             case 'nano_banana_2k':
               return await kieAI.generateWithNanoBananaKieAI(
                 generationData.prompt,
