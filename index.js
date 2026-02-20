@@ -3399,8 +3399,12 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
 
   // Відновлюємо або створюємо стан з параметрів callback
   let state = userState.get(userId);
+
+  console.log(`🔍 mj_set_stylization ENTRY - userId: ${userId}, hasState: ${!!state}, action: ${state?.action}, stylization: ${state?.stylization}, step: ${state?.step}`);
+
   if (!state || state.action !== 'midjourney_generation') {
     // Створюємо новий стан тільки якщо його немає
+    console.log(`⚠️ Creating NEW state for stylization (state=${!!state}, action=${state?.action})`);
     state = {
       action: 'midjourney_generation',
       speed,
@@ -3411,8 +3415,10 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
       weirdness: 0,
       variety: 50
     };
+    userState.set(userId, state); // Зберігаємо одразу
   } else {
     // Якщо стан існує, оновлюємо тільки speed і aspectRatio (якщо змінилися)
+    console.log(`✅ Using EXISTING state, preserving stylization: ${state.stylization}`);
     state.speed = speed;
     state.aspectRatio = aspectRatio;
     // Зберігаємо існуючі значення stylization, weirdness, variety
@@ -3450,8 +3456,12 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
 
   // Відновлюємо або створюємо стан
   let state = userState.get(userId);
+
+  console.log(`🔍 mj_set_weirdness ENTRY - userId: ${userId}, hasState: ${!!state}, action: ${state?.action}, weirdness: ${state?.weirdness}, step: ${state?.step}`);
+
   if (!state || state.action !== 'midjourney_generation') {
     // Створюємо новий стан тільки якщо його немає
+    console.log(`⚠️ Creating NEW state for weirdness (state=${!!state}, action=${state?.action})`);
     state = {
       action: 'midjourney_generation',
       speed,
@@ -3462,8 +3472,10 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
       weirdness: 0,
       variety: 50
     };
+    userState.set(userId, state); // Зберігаємо одразу
   } else {
     // Якщо стан існує, оновлюємо тільки speed і aspectRatio
+    console.log(`✅ Using EXISTING state, preserving weirdness: ${state.weirdness}`);
     state.speed = speed;
     state.aspectRatio = aspectRatio;
     // Зберігаємо існуючі значення stylization, weirdness, variety
