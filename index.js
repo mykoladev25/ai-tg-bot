@@ -3246,14 +3246,14 @@ bot.action(/^mj_speed_(relaxed|fast|turbo)$/, async (ctx) => {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
         [
-          Markup.button.callback('1:1', 'mj_aspect_1:1'),
-          Markup.button.callback('16:9', 'mj_aspect_16:9'),
-          Markup.button.callback('9:16', 'mj_aspect_9:16')
+          Markup.button.callback('1:1', `mj_ar_${speed}_1:1`),
+          Markup.button.callback('16:9', `mj_ar_${speed}_16:9`),
+          Markup.button.callback('9:16', `mj_ar_${speed}_9:16`)
         ],
         [
-          Markup.button.callback('4:3', 'mj_aspect_4:3'),
-          Markup.button.callback('3:4', 'mj_aspect_3:4'),
-          Markup.button.callback('2:1', 'mj_aspect_2:1')
+          Markup.button.callback('4:3', `mj_ar_${speed}_4:3`),
+          Markup.button.callback('3:4', `mj_ar_${speed}_3:4`),
+          Markup.button.callback('2:1', `mj_ar_${speed}_2:1`)
         ],
         [Markup.button.callback('← Назад', 'midjourney')]
       ])
@@ -3261,7 +3261,47 @@ bot.action(/^mj_speed_(relaxed|fast|turbo)$/, async (ctx) => {
   );
 });
 
-// Вибір aspect ratio Midjourney
+// Вибір aspect ratio Midjourney (новий формат з швидкістю в callback)
+bot.action(/^mj_ar_([^_]+)_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const userId = ctx.from.id;
+  const speed = ctx.match[1];
+  const aspectRatio = ctx.match[2];
+
+  const model = models.design.models.find(m => m.key === 'midjourney');
+  if (!model || !model.speeds[speed]) {
+    await ctx.reply('❌ Помилка: невідома швидкість. Спробуйте ще раз.');
+    return;
+  }
+
+  const cost = model.speeds[speed].cost;
+
+  // Зберігаємо стан для введення промпту
+  userState.set(userId, {
+    action: 'midjourney_generation',
+    step: 'waiting_prompt',
+    speed,
+    aspectRatio,
+    taskType: 'mj_txt2img',
+    fileUrls: []
+  });
+
+  await ctx.reply(
+    `🖼️ Midjourney (${speed})\n\n` +
+    `📐 Пропорції: ${aspectRatio}\n` +
+    `💰 Вартість: ${cost}⚡\n\n` +
+    `✍️ <b>Крок 3: Опишіть що хочете згенерувати</b>\n\n` +
+    `💡 Будьте детальні: опишіть об'єкт, стиль, освітлення, композицію\n\n` +
+    `📝 Приклад: "A majestic lion standing on a cliff at sunset, cinematic lighting, photorealistic, 8k"`,
+    {
+      parse_mode: 'HTML',
+      ...keyboard.createBackButton('midjourney')
+    }
+  );
+});
+
+// Старий обробник для зворотної сумісності зі старими кнопками
 bot.action(/^mj_aspect_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -3270,7 +3310,11 @@ bot.action(/^mj_aspect_(.+)$/, async (ctx) => {
   const state = userState.get(userId);
 
   if (!state || state.action !== 'midjourney_generation') {
-    await ctx.reply('❌ Почніть заново: Зображення → MidJourney');
+    await ctx.reply(
+      '❌ Сесія застаріла (бот був перезапущений)\n\n' +
+      '💡 Почніть заново: Зображення → MidJourney',
+      keyboard.createBackButton('design_menu')
+    );
     return;
   }
 
