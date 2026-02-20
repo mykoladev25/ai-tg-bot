@@ -2027,7 +2027,7 @@ module.exports = {
   // Підтримувані моделі на KIE.AI
   SUPPORTED_MODELS: {
     image: [
-      // ❌ 'nano_banana' - базова версія ТІЛЬКИ на Replicate!
+      'nano_banana',      // ✅ google/nano-banana (base) на KIE.AI
       'nano_banana_2k',   // ✅ nano-banana-pro (2K) на KIE.AI
       'nano_banana_4k',   // ✅ nano-banana-pro (4K) на KIE.AI
       'seedream_4k',      // ✅ seedream/4.5-text-to-image, seedream/4.5-edit

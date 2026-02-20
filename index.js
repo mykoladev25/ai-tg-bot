@@ -9595,7 +9595,18 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
     try {
       // 🎯 НОВА СИСТЕМА: Автоматичний fallback між провайдерами
       const userChosenProvider = userProviderChoice.get(userId);
-      const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
+      const hasKieAccess = accessControl.canUseKieAI(userId);
+      const kieEnabled = kieAI.isKieAIEnabled;
+      const canUseKieAI = hasKieAccess && kieEnabled;
+
+      console.log(`🔍 Provider check for ${generationData.modelKey}:`, {
+        userId,
+        hasKieAccess,
+        kieEnabled,
+        canUseKieAI,
+        userChoice: userChosenProvider,
+        isKieImplemented: kieAI.isKieAIImplemented(generationData.modelKey)
+      });
 
       // Генеруємо через систему з fallback
       const result = await providerFallback.generateWithFallback({
@@ -10788,6 +10799,17 @@ async function startBot() {
 
     // Виводимо поточні налаштування доступу
     accessControl.printConfig();
+
+    // 🔍 Перевірка стану KIE.AI
+    console.log('\n╔════════════════════════════════════════════════════════╗');
+    console.log('║              KIE.AI PROVIDER STATUS                    ║');
+    console.log('╠════════════════════════════════════════════════════════╣');
+    console.log(`║ API Key configured:  ${kieAI.isKieAIEnabled ? '✅ YES' : '❌ NO'}`);
+    console.log(`║ Supported models:    ${kieAI.SUPPORTED_MODELS.image.length} image, ${kieAI.SUPPORTED_MODELS.video.length} video`);
+    if (kieAI.isKieAIEnabled) {
+      console.log(`║ Image models:        ${kieAI.SUPPORTED_MODELS.image.join(', ')}`);
+    }
+    console.log('╚════════════════════════════════════════════════════════╝\n');
 
     console.log('✅ Bot started successfully!');
     console.log('📱 Bot username: @neuro_lab_ai_bot');
