@@ -65,6 +65,7 @@ async function fetchKieAIPricing() {
 function parseOurModels(pricing) {
   const ourModels = {
     // IMAGE
+    nano_banana: findModel(pricing.image, 'nano banana', 'text-to-image'),  // Base model
     nano_banana_2k: findModel(pricing.image, 'nano banana pro', '1/2K'),
     nano_banana_4k: findModel(pricing.image, 'nano banana pro', '4K'),
     seedream_4k: findModel(pricing.image, 'seedream', '4K'),

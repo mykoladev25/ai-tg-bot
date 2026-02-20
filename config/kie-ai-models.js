@@ -37,6 +37,41 @@ module.exports = {
   // ==================== IMAGE MODELS ====================
 
   /**
+   * Google Nano Banana (Base)
+   * https://docs.kie.ai/market/google/nano-banana
+   *
+   * KIE.AI Pricing (з pricing cache 13.02.2026):
+   * - 4.0 credits per image = $0.02
+   * - Підтримує text-to-image та image editing (до 3 референсів)
+   * - Image sizes: 1:1, 9:16, 16:9, 3:4, 4:3, 3:2, 2:3, 5:4, 4:5, 21:9, auto
+   *
+   * Replicate Pricing (для порівняння):
+   * - $0.039/image (fal.ai)
+   *
+   * З нашою націнкою 1.65x:
+   * - API cost: $0.02
+   * - User cost: $0.02 × 1.65 = $0.033 → 4 tokens (округлено вгору)
+   */
+  nano_banana: {
+    kie_model: 'google/nano-banana',
+    kie_pricing: {
+      credits: 4.0,
+      usd: 0.02,  // 4.0 × $0.005
+      note: 'Отримано з офіційного pricing API KIE.AI (13.02.2026)'
+    },
+    replicate_model: 'google/nano-banana',
+    replicate_pricing: {
+      per_image: 0.039
+    },
+    features: {
+      max_images: 3,
+      image_sizes: ['1:1', '9:16', '16:9', '3:4', '4:3', '3:2', '2:3', '5:4', '4:5', '21:9', 'auto'],
+      output_formats: ['png', 'jpeg']
+    },
+    notes: '💡 Базова версія Nano Banana. Для вищої якості використовуйте nano_banana_2k або nano_banana_4k'
+  },
+
+  /**
    * Google Nano Banana Pro
    * https://docs.kie.ai/market/google/nano-banana-pro
    *

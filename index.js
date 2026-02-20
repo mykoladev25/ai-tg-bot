@@ -1257,6 +1257,9 @@ bot.command('kiepricing', async (ctx) => {
 
     // IMAGE
     message += `🎨 <b>ЗОБРАЖЕННЯ:</b>\n`;
+    if (parsed.nano_banana) {
+      message += `  🍌 Nano Base: $${parsed.nano_banana.usdPrice} (${parsed.nano_banana.creditPrice} cr)\n`;
+    }
     if (parsed.nano_banana_2k) {
       message += `  🍌 Nano 2K: $${parsed.nano_banana_2k.usdPrice} (${parsed.nano_banana_2k.creditPrice} cr)\n`;
     }
@@ -9611,12 +9614,11 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
               );
 
             case 'nano_banana':
-              return await kieAI.generateWithNanoBananaKieAI(
+              return await kieAI.generateWithNanoBananaBaseKieAI(
                 generationData.prompt,
                 generationData.imageInput,
-                '1K',
                 generationData.aspectRatio,
-                0.5
+                'png'
               );
 
             case 'nano_banana_2k':

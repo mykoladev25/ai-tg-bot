@@ -196,6 +196,148 @@ function extractVideoUrl(result) {
 // ==================== IMAGE GENERATION ====================
 
 /**
+ * Генерація зображення через KIE.AI - Nano Banana (Base)
+ *
+ * Документація: https://docs.kie.ai/market/google/nano-banana
+ *
+ * Підтримує:
+ * - text2img (без зображень)
+ * - img2img (з референсами, до 3 зображень)
+ *
+ * Параметри:
+ * - prompt: текстовий опис (обов'язково, max 20000 chars)
+ * - imageInput: URL або масив URL зображень (до 3, опційно)
+ * - image_size: "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9", "auto" (default: "1:1")
+ * - output_format: "png" або "jpeg" (default: "png")
+ */
+async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageSize = "1:1", outputFormat = "png") {
+  try {
+    if (!KIE_API_KEY) {
+      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+    }
+
+    if (!prompt) {
+      throw new Error('Prompt є обов\'язковим для Nano Banana');
+    }
+
+    // Обрізаємо промпт до максимальної довжини
+    const truncatedPrompt = prompt.length > 20000 ? prompt.substring(0, 20000) : prompt;
+
+    // Нормалізуємо зображення (до 3 штук для базової моделі, або пустий масив для text2img)
+    const images = imageInput ? normalizeImageInput(imageInput, 3) : [];
+    const isText2Img = images.length === 0;
+
+    console.log(`🎨 KIE.AI Nano Banana Base (${isText2Img ? 'text2img' : 'img2img'}):`, {
+      prompt: truncatedPrompt.substring(0, 100),
+      imageSize,
+      outputFormat,
+      imageCount: images.length
+    });
+
+    // ✅ Структура за документацією KIE.AI
+    // https://docs.kie.ai/market/google/nano-banana
+    const payload = {
+      model: 'google/nano-banana',
+      input: {
+        prompt: truncatedPrompt,
+        image_size: imageSize || '1:1',
+        output_format: outputFormat || 'png'
+      }
+    };
+
+    console.log(`📤 KIE.AI Nano Banana Base request:`, {
+      model: payload.model,
+      mode: isText2Img ? 'text2img' : 'img2img',
+      images: images.length,
+      imageSize
+    });
+
+    // Логуємо актуальну ціну KIE.AI
+    try {
+      const kiePricingSync = require('./kie-pricing-sync');
+      const kiePrice = kiePricingSync.getModelPriceSync('nano_banana');
+      if (kiePrice) {
+        console.log(`💰 KIE.AI price: $${kiePrice}`);
+      }
+    } catch (err) {
+      // Не критично
+    }
+
+    // Створюємо таск на KIE.AI
+    const createResponse = await axios.post(
+      `${KIE_API_BASE}/jobs/createTask`,
+      payload,
+      {
+        headers: {
+          'Authorization': `Bearer ${KIE_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log(`📥 KIE.AI Nano Banana Base response:`, JSON.stringify(createResponse.data, null, 2));
+
+    // Перевіряємо структуру відповіді
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      const responseCode = createResponse?.data?.code;
+      const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+
+      // Спеціальна обробка для 500 помилок
+      if (responseCode === 500) {
+        console.error('❌ KIE.AI Nano Banana Base - Server Error 500:', createResponse?.data);
+        return {
+          success: false,
+          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          provider: 'kie-ai',
+          serverError: true
+        };
+      }
+
+      console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
+    }
+
+    const taskId = createResponse.data.data.taskId;
+    console.log(`✅ KIE.AI task created: ${taskId}`);
+
+    // Очікуємо на результат (polling)
+    const result = await pollJobStatus(taskId, 600, 5000, 'Nano Banana Base (KIE.AI)');
+
+    // Отримуємо URL зображення з результату
+    const imageUrl = extractImageUrl(result);
+    if (!imageUrl) {
+      throw new Error('KIE.AI returned no image in output');
+    }
+
+    return {
+      success: true,
+      imageUrl: imageUrl,
+      taskId: taskId,
+      provider: 'kie-ai'
+    };
+
+  } catch (error) {
+    console.error('❌ KIE.AI Nano Banana Base Error:', error.response?.data || error.message);
+
+    // Спеціальна обробка 500 помилок
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
+    return {
+      success: false,
+      error: error.response?.data?.msg || error.response?.data?.message || error.message,
+      provider: 'kie-ai'
+    };
+  }
+}
+
+/**
  * Генерація зображення через KIE.AI - Nano Banana Pro
  *
  * Документація: https://docs.kie.ai/market/google/nano-banana-pro
@@ -1885,9 +2027,9 @@ module.exports = {
   // Підтримувані моделі на KIE.AI
   SUPPORTED_MODELS: {
     image: [
-      'nano_banana',      // ✅ nano-banana-pro (1K)
-      'nano_banana_2k',   // ✅ nano-banana-pro (2K)
-      'nano_banana_4k',   // ✅ nano-banana-pro (4K)
+      // ❌ 'nano_banana' - базова версія ТІЛЬКИ на Replicate!
+      'nano_banana_2k',   // ✅ nano-banana-pro (2K) на KIE.AI
+      'nano_banana_4k',   // ✅ nano-banana-pro (4K) на KIE.AI
       'seedream_4k',      // ✅ seedream/4.5-text-to-image, seedream/4.5-edit
       'ideogram',         // ✅ ideogram/v3-reframe, v3-remix, v3-edit
       'recraft_upscale'   // ✅ recraft/crisp-upscale
@@ -1926,7 +2068,7 @@ module.exports = {
   // Маппінг наших ключів моделей на KIE.AI моделі
   MODEL_MAPPING: {
     // Image
-    nano_banana: { model: 'nano-banana-pro', resolution: '1K' },
+    nano_banana: { model: 'google/nano-banana' },  // Base model
     nano_banana_2k: { model: 'nano-banana-pro', resolution: '2K' },
     nano_banana_4k: { model: 'nano-banana-pro', resolution: '4K' },
     seedream_4k: { model: 'seedream/4.5-text-to-image', edit: 'seedream/4.5-edit' },
