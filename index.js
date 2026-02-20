@@ -3389,10 +3389,12 @@ bot.action(/^mj_aspect_(.+)$/, async (ctx) => {
 bot.action('mj_set_stylization', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  let state = userState.get(userId);
+  const state = userState.get(userId);
 
-  // Якщо стану немає або він некоректний, повідомляємо зрозуміліше
-  if (!state || state.action !== 'midjourney_generation' || !state.speed || !state.aspectRatio) {
+  console.log('🔍 mj_set_stylization - userId:', userId, 'state:', state);
+
+  if (!state || state.action !== 'midjourney_generation') {
+    console.log('❌ mj_set_stylization - invalid state');
     await ctx.reply(
       '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
       '💡 Почніть заново: Зображення → MidJourney',
@@ -3424,7 +3426,11 @@ bot.action('mj_set_weirdness', async (ctx) => {
   const state = userState.get(userId);
 
   if (!state || state.action !== 'midjourney_generation') {
-    await ctx.reply('❌ Сесія застаріла. Почніть заново.');
+    await ctx.reply(
+      '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
+      '💡 Почніть заново: Зображення → MidJourney',
+      keyboard.createBackButton('design_menu')
+    );
     return;
   }
 
@@ -3451,7 +3457,11 @@ bot.action('mj_set_variety', async (ctx) => {
   const state = userState.get(userId);
 
   if (!state || state.action !== 'midjourney_generation') {
-    await ctx.reply('❌ Сесія застаріла. Почніть заново.');
+    await ctx.reply(
+      '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
+      '💡 Почніть заново: Зображення → MidJourney',
+      keyboard.createBackButton('design_menu')
+    );
     return;
   }
 
@@ -3474,9 +3484,9 @@ bot.action('mj_set_variety', async (ctx) => {
 bot.action('mj_settings_done', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  let state = userState.get(userId);
+  const state = userState.get(userId);
 
-  if (!state || state.action !== 'midjourney_generation' || !state.speed || !state.aspectRatio) {
+  if (!state || state.action !== 'midjourney_generation') {
     await ctx.reply(
       '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
       '💡 Почніть заново: Зображення → MidJourney',
