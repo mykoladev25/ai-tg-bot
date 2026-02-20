@@ -308,10 +308,10 @@ async function waitForCompletion(taskId, maxAttempts = 60, interval = 5000) {
     }
   }
 
-  console.error('⏱️ Midjourney task timeout');
+  console.error('⏱️ Midjourney task timeout after', maxAttempts, 'attempts');
   return {
     success: false,
-    error: 'Timeout waiting for generation'
+    error: `Timeout waiting for generation (waited ${(maxAttempts * interval) / 1000}s)`
   };
 }
 

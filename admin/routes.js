@@ -1229,7 +1229,8 @@ router.get('/dashboard', (req, res) => {
             tbody.innerHTML = '<tr><td colspan="6">Немає KIE генерацій за період</td></tr>';
           } else {
             tbody.innerHTML = models.data.map(m => {
-              const marginClass = m.marginPercent > 50 ? 'success' : m.marginPercent > 30 ? 'warning' : 'danger';
+              const marginPct = Number(m.marginPercent) || 0;
+              const marginClass = marginPct > 50 ? 'success' : marginPct > 30 ? 'warning' : 'danger';
               const failRate = m.count > 0 ? ((m.failCount / m.count) * 100) : 0;
               const failClass = failRate < 5 ? 'success' : failRate < 15 ? 'warning' : 'danger';
               return \`
@@ -1238,7 +1239,7 @@ router.get('/dashboard', (req, res) => {
                   <td>\${m.count}</td>
                   <td>\${formatUSD(m.cogs)}</td>
                   <td>\${formatUSD(m.revenue)}</td>
-                  <td><span class="badge badge-\${marginClass}">\${formatPct(m.marginPercent)}</span></td>
+                  <td><span class="badge badge-\${marginClass}">\${formatPct(marginPct)}</span></td>
                   <td><span class="badge badge-\${failClass}">\${formatPct(failRate)}</span></td>
                 </tr>
               \`;

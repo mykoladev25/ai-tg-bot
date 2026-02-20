@@ -3362,7 +3362,7 @@ bot.action(/^mj_aspect_(.+)$/, async (ctx) => {
 
   if (!state || state.action !== 'midjourney_generation') {
     await ctx.reply(
-      '❌ Сесія застаріла (бот був перезапущений)\n\n' +
+      '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
       '💡 Почніть заново: Зображення → MidJourney',
       keyboard.createBackButton('design_menu')
     );
@@ -10734,37 +10734,50 @@ async function handleMidjourneyGeneration(ctx, prompt) {
 
     if (!result.success) {
       // Спеціальна обробка для помилок доступу
-      const isAccessError = result.error && (
-        result.error.includes('access permissions') ||
-        result.error.includes('unauthorized') ||
-        result.error.includes('Invalid API key')
-      );
+      const errorMsg = result.error || 'Unknown error';
+      const isAccessError = errorMsg.includes('access permissions') ||
+        errorMsg.includes('unauthorized') ||
+        errorMsg.includes('Invalid API key') ||
+        errorMsg.includes('insufficient credits');
 
+      const isServerError = errorMsg.includes('No response from MidJourney Official') ||
+        errorMsg.includes('multiple attempts') ||
+        errorMsg.includes('server error') ||
+        errorMsg.includes('500');
+
+      console.error('❌ Midjourney error:', errorMsg);
+
+      let userMessage;
       if (isAccessError) {
-        console.error('❌ Midjourney access error:', result.error);
-        await ctx.telegram.editMessageText(
-          ctx.chat.id,
-          statusMsg.message_id,
-          null,
-          '⚠️ <b>Помилка доступу до Midjourney</b>\n\n' +
-          `${result.error}\n\n` +
-          '<b>Можливі причини:</b>\n' +
-          '• Недостатньо коштів на балансі KIE.AI\n' +
-          '• API ключ застарілий або невалідний\n\n' +
-          '💡 <b>Доступні альтернативи:</b>\n' +
+        userMessage =
+          '⚠️ <b>Midjourney тимчасово недоступний</b>\n\n' +
+          'На жаль, сервіс зараз не може обробити запит.\n' +
+          'Це може бути через технічні роботи або обмеження API.\n\n' +
+          '💡 <b>Спробуйте альтернативи:</b>\n' +
           '• 🍌 Nano Banana Pro 2K/4K\n' +
           '• 🌱 Seedream 4K\n' +
-          '• 🎨 Ideogram',
-          { parse_mode: 'HTML' }
-        );
+          '• 🎯 Ideogram v3.0\n\n' +
+          'Або спробуйте Midjourney пізніше.';
+      } else if (isServerError) {
+        userMessage =
+          '⚠️ <b>Midjourney перевантажений</b>\n\n' +
+          'Офіційний сервіс Midjourney не відповідає.\n' +
+          'Спробуйте через кілька хвилин.\n\n' +
+          '💡 <b>Або оберіть альтернативу:</b>\n' +
+          '• 🍌 Nano Banana Pro\n' +
+          '• 🌱 Seedream\n' +
+          '• 🎯 Ideogram';
       } else {
-        await ctx.telegram.editMessageText(
-          ctx.chat.id,
-          statusMsg.message_id,
-          null,
-          `❌ Помилка генерації: ${result.error}`
-        );
+        userMessage = `❌ Помилка генерації\n\nСпробуйте ще раз або оберіть іншу модель.`;
       }
+
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        userMessage,
+        { parse_mode: 'HTML' }
+      );
 
       await adminNotifier.notifyAdmin(
         bot,
@@ -10840,11 +10853,29 @@ async function handleMidjourneyGeneration(ctx, prompt) {
 
       userState.delete(userId);
     } else {
+      const errorMsg = finalResult.error || 'Не вдалося отримати результат';
+      const isTimeout = errorMsg.includes('Timeout') || errorMsg.includes('timeout');
+
+      let userMessage;
+      if (isTimeout) {
+        userMessage =
+          '⏱️ <b>Генерація триває довше очікуваного</b>\n\n' +
+          `Швидкість: ${speed}\n` +
+          'Очікуваний час: ~' + (speed === 'turbo' ? '30-60' : speed === 'fast' ? '60-90' : '120-180') + ' секунд\n\n' +
+          '💡 Спробуйте:\n' +
+          '• Зачекати ще трохи та спробувати знову\n' +
+          '• Обрати швидшу опцію (Turbo)\n' +
+          '• Використати альтернативну модель';
+      } else {
+        userMessage = `❌ Помилка: ${errorMsg}`;
+      }
+
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        `❌ Помилка: ${finalResult.error || 'Не вдалося отримати результат'}`
+        userMessage,
+        { parse_mode: 'HTML' }
       );
       userState.delete(userId);
     }
