@@ -45,6 +45,11 @@ const accessControl = require('./config/access');
  * Фільтрує Midjourney якщо KIE.AI не налаштований (Midjourney доступний тільки через KIE.AI).
  */
 function getDesignModelsWithEffectiveCost(userId) {
+  if (!models?.design?.models || !Array.isArray(models.design.models)) {
+    console.error('❌ models.design.models is not available');
+    return [];
+  }
+
   return models.design.models
     .filter(m => {
       // Midjourney доступний тільки якщо KIE.AI налаштований
@@ -3332,14 +3337,14 @@ bot.action(/^mj_ar_([^_]+)_(.+)$/, async (ctx) => {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
         [
-          Markup.button.callback('🎨 Stylization', 'mj_set_stylization'),
-          Markup.button.callback('🌀 Weirdness', 'mj_set_weirdness')
+          Markup.button.callback('🎨 Stylization', `mj_set_stylization_${speed}_${aspectRatio}`),
+          Markup.button.callback('🌀 Weirdness', `mj_set_weirdness_${speed}_${aspectRatio}`)
         ],
         [
-          Markup.button.callback('🎲 Variety', 'mj_set_variety')
+          Markup.button.callback('🎲 Variety', `mj_set_variety_${speed}_${aspectRatio}`)
         ],
         [
-          Markup.button.callback('✅ Продовжити з цими налаштуваннями', 'mj_settings_done')
+          Markup.button.callback('✅ Продовжити з цими налаштуваннями', `mj_settings_done_${speed}_${aspectRatio}`)
         ],
         [Markup.button.callback('← Назад', 'midjourney')]
       ])
@@ -3386,22 +3391,28 @@ bot.action(/^mj_aspect_(.+)$/, async (ctx) => {
 });
 
 // Налаштування Stylization
-bot.action('mj_set_stylization', async (ctx) => {
+bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  const state = userState.get(userId);
+  const speed = ctx.match[1];
+  const aspectRatio = ctx.match[2];
+
+  // Відновлюємо або створюємо стан з параметрів callback
+  let state = userState.get(userId);
+  if (!state || state.action !== 'midjourney_generation') {
+    state = {
+      action: 'midjourney_generation',
+      speed,
+      aspectRatio,
+      taskType: 'mj_txt2img',
+      fileUrls: [],
+      stylization: 100,
+      weirdness: 0,
+      variety: 50
+    };
+  }
 
   console.log('🔍 mj_set_stylization - userId:', userId, 'state:', state);
-
-  if (!state || state.action !== 'midjourney_generation') {
-    console.log('❌ mj_set_stylization - invalid state');
-    await ctx.reply(
-      '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
-      '💡 Почніть заново: Зображення → MidJourney',
-      keyboard.createBackButton('design_menu')
-    );
-    return;
-  }
 
   state.step = 'awaiting_stylization';
   userState.set(userId, state);
@@ -3420,18 +3431,25 @@ bot.action('mj_set_stylization', async (ctx) => {
 });
 
 // Налаштування Weirdness
-bot.action('mj_set_weirdness', async (ctx) => {
+bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  const state = userState.get(userId);
+  const speed = ctx.match[1];
+  const aspectRatio = ctx.match[2];
 
+  // Відновлюємо або створюємо стан
+  let state = userState.get(userId);
   if (!state || state.action !== 'midjourney_generation') {
-    await ctx.reply(
-      '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
-      '💡 Почніть заново: Зображення → MidJourney',
-      keyboard.createBackButton('design_menu')
-    );
-    return;
+    state = {
+      action: 'midjourney_generation',
+      speed,
+      aspectRatio,
+      taskType: 'mj_txt2img',
+      fileUrls: [],
+      stylization: 100,
+      weirdness: 0,
+      variety: 50
+    };
   }
 
   state.step = 'awaiting_weirdness';
@@ -3451,18 +3469,25 @@ bot.action('mj_set_weirdness', async (ctx) => {
 });
 
 // Налаштування Variety
-bot.action('mj_set_variety', async (ctx) => {
+bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  const state = userState.get(userId);
+  const speed = ctx.match[1];
+  const aspectRatio = ctx.match[2];
 
+  // Відновлюємо або створюємо стан
+  let state = userState.get(userId);
   if (!state || state.action !== 'midjourney_generation') {
-    await ctx.reply(
-      '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
-      '💡 Почніть заново: Зображення → MidJourney',
-      keyboard.createBackButton('design_menu')
-    );
-    return;
+    state = {
+      action: 'midjourney_generation',
+      speed,
+      aspectRatio,
+      taskType: 'mj_txt2img',
+      fileUrls: [],
+      stylization: 100,
+      weirdness: 0,
+      variety: 50
+    };
   }
 
   state.step = 'awaiting_variety';
@@ -3481,29 +3506,36 @@ bot.action('mj_set_variety', async (ctx) => {
 });
 
 // Продовжити з налаштуваннями
-bot.action('mj_settings_done', async (ctx) => {
+bot.action(/^mj_settings_done_([^_]+)_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  const state = userState.get(userId);
+  const speed = ctx.match[1];
+  const aspectRatio = ctx.match[2];
 
+  // Відновлюємо або створюємо стан
+  let state = userState.get(userId);
   if (!state || state.action !== 'midjourney_generation') {
-    await ctx.reply(
-      '❌ Сесія застаріла (можливо бот перезапущувався)\n\n' +
-      '💡 Почніть заново: Зображення → MidJourney',
-      keyboard.createBackButton('design_menu')
-    );
-    return;
+    state = {
+      action: 'midjourney_generation',
+      speed,
+      aspectRatio,
+      taskType: 'mj_txt2img',
+      fileUrls: [],
+      stylization: 100,
+      weirdness: 0,
+      variety: 50
+    };
   }
 
   state.step = 'waiting_prompt';
   userState.set(userId, state);
 
   const model = models.design.models.find(m => m.key === 'midjourney');
-  const cost = model.speeds[state.speed].cost;
+  const cost = model.speeds[speed].cost;
 
   await ctx.reply(
-    `🖼️ Midjourney (${state.speed})\n\n` +
-    `📐 Пропорції: ${state.aspectRatio}\n` +
+    `🖼️ Midjourney (${speed})\n\n` +
+    `📐 Пропорції: ${aspectRatio}\n` +
     `🎨 Stylization: ${state.stylization || 100}\n` +
     `🌀 Weirdness: ${state.weirdness || 0}\n` +
     `🎲 Variety: ${state.variety || 50}\n` +
@@ -8666,17 +8698,20 @@ bot.on('text', async (ctx) => {
       state.step = 'select_settings';
       userState.set(userId, state);
 
+      const speed = state.speed || 'fast';
+      const aspectRatio = state.aspectRatio || '1:1';
+
       await ctx.reply(
         `✅ Stylization встановлено: ${value}\n\n` +
         `⚙️ Оберіть інший параметр або продовжте:`,
         {
           ...Markup.inlineKeyboard([
             [
-              Markup.button.callback('🎨 Stylization', 'mj_set_stylization'),
-              Markup.button.callback('🌀 Weirdness', 'mj_set_weirdness')
+              Markup.button.callback('🎨 Stylization', `mj_set_stylization_${speed}_${aspectRatio}`),
+              Markup.button.callback('🌀 Weirdness', `mj_set_weirdness_${speed}_${aspectRatio}`)
             ],
-            [Markup.button.callback('🎲 Variety', 'mj_set_variety')],
-            [Markup.button.callback('✅ Продовжити', 'mj_settings_done')],
+            [Markup.button.callback('🎲 Variety', `mj_set_variety_${speed}_${aspectRatio}`)],
+            [Markup.button.callback('✅ Продовжити', `mj_settings_done_${speed}_${aspectRatio}`)],
             [Markup.button.callback('← Назад', 'midjourney')]
           ])
         }
@@ -8695,17 +8730,20 @@ bot.on('text', async (ctx) => {
       state.step = 'select_settings';
       userState.set(userId, state);
 
+      const speed = state.speed || 'fast';
+      const aspectRatio = state.aspectRatio || '1:1';
+
       await ctx.reply(
         `✅ Weirdness встановлено: ${value}\n\n` +
         `⚙️ Оберіть інший параметр або продовжте:`,
         {
           ...Markup.inlineKeyboard([
             [
-              Markup.button.callback('🎨 Stylization', 'mj_set_stylization'),
-              Markup.button.callback('🌀 Weirdness', 'mj_set_weirdness')
+              Markup.button.callback('🎨 Stylization', `mj_set_stylization_${speed}_${aspectRatio}`),
+              Markup.button.callback('🌀 Weirdness', `mj_set_weirdness_${speed}_${aspectRatio}`)
             ],
-            [Markup.button.callback('🎲 Variety', 'mj_set_variety')],
-            [Markup.button.callback('✅ Продовжити', 'mj_settings_done')],
+            [Markup.button.callback('🎲 Variety', `mj_set_variety_${speed}_${aspectRatio}`)],
+            [Markup.button.callback('✅ Продовжити', `mj_settings_done_${speed}_${aspectRatio}`)],
             [Markup.button.callback('← Назад', 'midjourney')]
           ])
         }
@@ -8724,17 +8762,20 @@ bot.on('text', async (ctx) => {
       state.step = 'select_settings';
       userState.set(userId, state);
 
+      const speed = state.speed || 'fast';
+      const aspectRatio = state.aspectRatio || '1:1';
+
       await ctx.reply(
         `✅ Variety встановлено: ${value}\n\n` +
         `⚙️ Оберіть інший параметр або продовжте:`,
         {
           ...Markup.inlineKeyboard([
             [
-              Markup.button.callback('🎨 Stylization', 'mj_set_stylization'),
-              Markup.button.callback('🌀 Weirdness', 'mj_set_weirdness')
+              Markup.button.callback('🎨 Stylization', `mj_set_stylization_${speed}_${aspectRatio}`),
+              Markup.button.callback('🌀 Weirdness', `mj_set_weirdness_${speed}_${aspectRatio}`)
             ],
-            [Markup.button.callback('🎲 Variety', 'mj_set_variety')],
-            [Markup.button.callback('✅ Продовжити', 'mj_settings_done')],
+            [Markup.button.callback('🎲 Variety', `mj_set_variety_${speed}_${aspectRatio}`)],
+            [Markup.button.callback('✅ Продовжити', `mj_settings_done_${speed}_${aspectRatio}`)],
             [Markup.button.callback('← Назад', 'midjourney')]
           ])
         }
