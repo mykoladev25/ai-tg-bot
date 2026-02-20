@@ -42,14 +42,14 @@ const accessControl = require('./config/access');
 
 /**
  * Список моделей дизайну з ефективною ціною для кнопок меню (KIE/Replicate за вибором юзера).
- * Фільтрує Midjourney якщо він недоступний (немає KIE.AI або немає доступу до Midjourney API).
+ * Фільтрує Midjourney якщо KIE.AI не налаштований (Midjourney доступний тільки через KIE.AI).
  */
 function getDesignModelsWithEffectiveCost(userId) {
   return models.design.models
     .filter(m => {
-      // Midjourney доступний тільки якщо KIE.AI налаштований і є доступ до MJ API
+      // Midjourney доступний тільки якщо KIE.AI налаштований
       if (m.key === 'midjourney') {
-        return isMidjourneyAvailable();
+        return kieAI.isKieAIEnabled;
       }
       return true;
     })
@@ -1943,10 +1943,19 @@ bot.hears('🎬 Відео', async (ctx) => {
 });
 
 bot.hears('🖼️ Зображення', async (ctx) => {
-  await ctx.reply(
-    '🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇',
-    keyboard.createInlineMenu(getDesignModelsWithEffectiveCost(ctx.from.id), 1)
-  );
+  try {
+    await ctx.reply(
+      '🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇',
+      keyboard.createInlineMenu(getDesignModelsWithEffectiveCost(ctx.from.id), 1)
+    );
+  } catch (error) {
+    console.error('❌ Error loading design menu:', error);
+    await ctx.reply(
+      '⚠️ Помилка завантаження меню.\n\n' +
+      'Спробуйте ще раз або зверніться до адміністратора.',
+      keyboard.createBackButton()
+    );
+  }
 });
 
 bot.hears('🎙️ Аудіо з AI', async (ctx) => {
