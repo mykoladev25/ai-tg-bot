@@ -793,6 +793,11 @@ bot.on('callback_query', async (ctx, next) => {
     return next();
   }
 
+  // ✅ Дозволяємо midjourney state
+  if (state?.action === 'midjourney_generation') {
+    return next();
+  }
+
   userCurrentModel.delete(userId);
   userState.delete(userId);
   
