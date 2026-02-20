@@ -171,8 +171,14 @@ function getVideoModelsForUser(userId) {
 function getEffectiveImageCost(userId, model, modelKey) {
   if (!useKiePriceForDisplay(userId)) return model.cost;
   if (!kieAI.isKieAIImplemented(modelKey)) return model.cost;
-  const kieCost = kiePricingSync.getKieTokenCostSync(modelKey);
-  return typeof kieCost === 'number' ? kieCost : model.cost;
+
+  try {
+    const kieCost = kiePricingSync.getKieTokenCostSync(modelKey);
+    return typeof kieCost === 'number' ? kieCost : model.cost;
+  } catch (error) {
+    console.warn(`⚠️ Could not get KIE price for ${modelKey}, using fallback:`, error.message);
+    return model.cost;
+  }
 }
 
 /**
