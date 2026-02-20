@@ -870,7 +870,8 @@ router.get('/dashboard', (req, res) => {
     }
     
     function formatUSD(val) {
-      return '$' + (val || 0).toFixed(2);
+      const num = Number(val) || 0;
+      return '$' + num.toFixed(2);
     }
     
     function formatPct(val) {
