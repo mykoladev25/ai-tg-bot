@@ -335,6 +335,22 @@ module.exports = {
       { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 5, apiCost: 0.03, maxImages: 1, available: true },
 
       /**
+       * Z-Image - KIE.AI ONLY 💎
+       * Qwen Z-Image: 0.8 credits = $0.004 per image
+       * tokens = ceil(0.004 * 1.65 / 0.01) = 1
+       * Найдешевша модель зображень!
+       */
+      {
+        name: '⚡ Z-Image 💎',
+        key: 'z_image',
+        cost: 1,
+        apiCost: 0.004,
+        maxImages: 1,
+        available: true,
+        kieAIOnly: true
+      },
+
+      /**
        * Midjourney - KIE.AI ONLY 💎
        * Pricing (з націнкою 1.65x):
        * - relaxed: $0.015 → 3 tokens (найдешевше!)

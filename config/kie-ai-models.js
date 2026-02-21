@@ -157,6 +157,38 @@ module.exports = {
   },
 
   /**
+   * Qwen Z-Image
+   * https://docs.kie.ai/market/qwen/z-image
+   *
+   * ⚠️ Доступно ТІЛЬКИ на KIE.AI!
+   *
+   * KIE.AI Pricing (з pricing cache):
+   * - 0.8 credits per image = $0.004
+   * - text-to-image
+   * - Aspect ratios: 1:1, 4:3, 3:4, 16:9, 9:16
+   *
+   * З націнкою 1.65x:
+   * - API cost: $0.004
+   * - User cost: $0.004 × 1.65 = $0.0066 → 1 token (округлено вгору)
+   */
+  z_image: {
+    kie_model: 'z-image',
+    kie_pricing: {
+      credits: 0.8,
+      usd: 0.004,
+      note: 'Qwen Z-Image. Отримано з pricing API KIE.AI.'
+    },
+    replicate_model: null,  // Немає на Replicate
+    replicate_pricing: null,
+    features: {
+      max_images: 1,
+      aspect_ratios: ['1:1', '4:3', '3:4', '16:9', '9:16'],
+      max_prompt_length: 1000
+    },
+    notes: '⚠️ Доступно ТІЛЬКИ на KIE.AI! Найдешевша модель зображень.'
+  },
+
+  /**
    * Midjourney
    * https://docs.kie.ai/mj-api/generate-midjourney-image
    * https://kie.ai/model-preview/features/mj-api
@@ -401,6 +433,7 @@ module.exports = {
       'seedream_2k': 'seedream-4.5',
       'seedream_4k': 'seedream-4.5',
       'stable_diffusion': 'stable-diffusion-3.5',
+      'z_image': 'z-image',
       'kling': 'kling-2.5',
       'kling_v2_6': 'kling-2.6',
       'kling_3_0': 'kling-3.0',
@@ -511,6 +544,7 @@ module.exports = {
       'nano_banana_2k', 'nano_banana_4k',
       'seedream_2k', 'seedream_4k',
       'stable_diffusion',
+      'z_image',
       'kling', 'kling_v2_6', 'kling_3_0', 'kling_motion',
       'veo', 'sora_2'
     ];

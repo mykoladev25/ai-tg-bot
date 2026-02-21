@@ -27,7 +27,8 @@ function isAvailableOnReplicate(modelKey) {
   // Моделі які є ТІЛЬКИ на KIE (не на Replicate)
   const kieOnlyModels = [
     'kling_3',           // Kling 3.0 Pro
-    'midjourney'         // Midjourney
+    'midjourney',        // Midjourney
+    'z_image'            // Z-Image (Qwen)
   ];
 
   return !kieOnlyModels.includes(modelKey);

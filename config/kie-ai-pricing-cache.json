@@ -5596,6 +5596,18 @@
       "anchor": "https://kie.ai/recraft-crisp-upscale",
       "discountPrice": false
     },
+    "z_image": {
+      "modelDescription": "Qwen z-image, text-to-image, 1.0s",
+      "interfaceType": "image",
+      "provider": "Qwen",
+      "creditPrice": "0.8",
+      "creditUnit": "per image",
+      "usdPrice": "0.004",
+      "falPrice": "0.005",
+      "discountRate": 20,
+      "anchor": "https://kie.ai/z-image",
+      "discountPrice": false
+    },
     "kling_2_5": [
       {
         "modelDescription": "kling 2.5 turbo , text-to-video, Turbo Pro-10.0s",

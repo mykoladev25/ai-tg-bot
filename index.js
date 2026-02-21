@@ -52,8 +52,8 @@ function getDesignModelsWithEffectiveCost(userId) {
 
   return models.design.models
     .filter(m => {
-      // Midjourney доступний тільки якщо KIE.AI налаштований
-      if (m.key === 'midjourney') {
+      // Midjourney та Z-Image доступні тільки якщо KIE.AI налаштований
+      if (m.key === 'midjourney' || m.key === 'z_image') {
         return kieAI.isKieAIEnabled;
       }
       return true;
@@ -590,6 +590,7 @@ const IMAGE_MODELS = [
   'nano_banana_4k',
   'seedream_4k',
   'ideogram',
+  'z_image',
   'clarity',
   'recraft_upscale'
 ];
@@ -601,7 +602,8 @@ const MODELS_WITH_ASPECT_RATIO = [
   'nano_banana_4k',
   'seedream_4k',
   'stable_diffusion',
-  'ideogram'
+  'ideogram',
+  'z_image'
 ];
 
 // ✅ МАСИВ МОДЕЛЕЙ З БАГАТОКРОКОВИМ ПРОЦЕСОМ
@@ -621,7 +623,8 @@ const ASPECT_RATIO_OPTIONS = {
   nano_banana_2k: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   nano_banana_4k: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   stable_diffusion: ['1:1', '16:9', '21:9', '2:3', '3:2', '4:5', '5:4', '9:16', '9:21'],
-  ideogram: ['1:3', '3:1', '1:2', '2:1', '9:16', '16:9', '10:16', '16:10', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '1:1']
+  ideogram: ['1:3', '3:1', '1:2', '2:1', '9:16', '16:9', '10:16', '16:10', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '1:1'],
+  z_image: ['1:1', '4:3', '3:4', '16:9', '9:16']
 };
 
 const ASPECT_RATIO_LABELS = {
@@ -657,7 +660,8 @@ const TEXT_ASPECT_RATIO_MODELS = new Set([
   'nano_banana_4k',
   'seedream_4k',
   'ideogram',
-  'stable_diffusion'
+  'stable_diffusion',
+  'z_image'
 ]);
 
 function getAspectRatiosForModel(modelKey, hasImageInput = true) {
@@ -3783,7 +3787,7 @@ bot.action(/^mj_vary_(.+)_(\d+)$/, async (ctx) => {
 });
 
 // Design Models
-bot.action(/^(flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram)$/, async (ctx) => {
+bot.action(/^(flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram|z_image)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
 
@@ -3889,7 +3893,13 @@ bot.action(/^(flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|se
       refsStep +
       `Опишіть детально що хочете згенерувати.\n` +
       `💰 Вартість: ${effectiveCost}⚡\n` +
-      `⏱️ Час: ~20-40 секунд`
+      `⏱️ Час: ~20-40 секунд`,
+
+    z_image: `⚡ <b>${model.name}</b>\n\n` +
+      `🖼️ Найшвидша та найдешевша модель зображень!\n\n` +
+      `✍️ Введіть промпт (до 1000 символів)\n\n` +
+      `💰 Вартість: ${effectiveCost}⚡\n` +
+      `⏱️ Час: ~10-20 секунд`
   };
 
   // Для nano_banana та seedream моделей використовуємо спільний шаблон
@@ -10174,6 +10184,12 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
                 '4K',
                 generationData.aspectRatio,
                 0.5
+              );
+
+            case 'z_image':
+              return await kieAI.generateWithZImageKieAI(
+                generationData.prompt,
+                generationData.aspectRatio
               );
 
             default:

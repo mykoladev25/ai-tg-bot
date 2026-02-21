@@ -72,6 +72,7 @@ function parseOurModels(pricing) {
     stable_diffusion: findModel(pricing.image, 'stable diffusion', '3.5'),
     ideogram: findModels(pricing.image, 'ideogram'),  // All ideogram variants
     recraft_upscale: findModel(pricing.image, 'recraft crisp upscale'),  // Recraft Crisp Upscale
+    z_image: findModel(pricing.image, 'z-image', 'text-to-image'),  // Qwen Z-Image
 
     // VIDEO
     kling_2_5: findModels(pricing.video, 'kling 2.5'),
@@ -150,7 +151,7 @@ async function loadPricingCache() {
 function ensureParsedComplete(cache) {
   if (!cache || !cache.pricing) return cache;
   const parsed = cache.parsed || {};
-  const requiredKeys = ['nano_banana', 'ideogram', 'recraft_upscale'];
+  const requiredKeys = ['nano_banana', 'ideogram', 'recraft_upscale', 'z_image'];
   const missing = requiredKeys.filter(k => parsed[k] === undefined);
   if (missing.length === 0) return cache;
 
@@ -250,6 +251,9 @@ function getModelPrice(cache, modelKey, options = {}) {
 
       case 'recraft_upscale':
         return parsed.recraft_upscale?.usdPrice || null;
+
+      case 'z_image':
+        return parsed.z_image?.usdPrice || null;
 
       case 'ideogram': {
         // Ideogram: використовуємо TURBO режим (найдешевший для text-to-image)
@@ -360,7 +364,7 @@ function getKling3TokenCostPerSecondSync(options = {}) {
 }
 
 /** Моделі зображень, для яких є KIE-ціна в кеші */
-const KIE_IMAGE_MODELS = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'ideogram', 'recraft_upscale'];
+const KIE_IMAGE_MODELS = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'ideogram', 'recraft_upscale', 'z_image'];
 
 /** Опорна тривалість для переведення Veo "per video" → "per second" (мін. тривалість у боті). */
 const VEO_REF_DURATION_SEC = 4;
@@ -437,6 +441,12 @@ function getKieTokenCostSync(modelKey, options = {}) {
       if (usd == null && modelKey === 'ideogram') {
         usd = kieAiModels.getReplicatePrice(modelKey);
         console.log(`💡 Using hardcoded Ideogram TURBO price: $${usd} (3.5 credits)`);
+      }
+
+      // Fallback для Z-Image: $0.004 (0.8 credits)
+      if (usd == null && modelKey === 'z_image') {
+        usd = 0.004;  // KIE.AI: 0.8 credits × $0.005 = $0.004
+        console.log(`💡 Using hardcoded Z-Image price: $${usd} (0.8 credits)`);
       }
 
       if (usd == null) return null;

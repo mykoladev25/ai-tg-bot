@@ -338,6 +338,130 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
 }
 
 /**
+ * Генерація зображення через KIE.AI - Z-Image (Qwen)
+ *
+ * Документація: https://docs.kie.ai/market/qwen/z-image
+ *
+ * Параметри:
+ * - prompt: текстовий опис (обов'язково, max 1000 chars)
+ * - aspectRatio: "1:1", "4:3", "3:4", "16:9", "9:16" (default: "1:1")
+ */
+async function generateWithZImageKieAI(prompt, aspectRatio = "1:1") {
+  try {
+    if (!KIE_API_KEY) {
+      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+    }
+
+    if (!prompt) {
+      throw new Error('Prompt є обов\'язковим для Z-Image');
+    }
+
+    // Обрізаємо промпт до максимальної довжини
+    const truncatedPrompt = prompt.length > 1000 ? prompt.substring(0, 1000) : prompt;
+
+    console.log(`⚡ KIE.AI Z-Image (text2img):`, {
+      prompt: truncatedPrompt.substring(0, 100),
+      aspectRatio
+    });
+
+    // ✅ Структура за документацією KIE.AI
+    const payload = {
+      model: 'z-image',
+      input: {
+        prompt: truncatedPrompt,
+        aspect_ratio: aspectRatio || '1:1'
+      }
+    };
+
+    console.log(`📤 KIE.AI Z-Image request:`, {
+      model: payload.model,
+      aspectRatio
+    });
+
+    // Логуємо актуальну ціну KIE.AI
+    try {
+      const kiePricingSync = require('./kie-pricing-sync');
+      const kiePrice = kiePricingSync.getModelPriceSync('z_image');
+      if (kiePrice) {
+        console.log(`💰 KIE.AI Z-Image price: $${kiePrice}`);
+      }
+    } catch (err) {
+      // Не критично
+    }
+
+    // Створюємо таск на KIE.AI
+    const createResponse = await axios.post(
+      `${KIE_API_BASE}/jobs/createTask`,
+      payload,
+      {
+        headers: {
+          'Authorization': `Bearer ${KIE_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log(`📥 KIE.AI Z-Image response:`, JSON.stringify(createResponse.data, null, 2));
+
+    // Перевіряємо структуру відповіді
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      const responseCode = createResponse?.data?.code;
+      const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+
+      if (responseCode === 500) {
+        console.error('❌ KIE.AI Z-Image - Server Error 500:', createResponse?.data);
+        return {
+          success: false,
+          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини.',
+          provider: 'kie-ai',
+          serverError: true
+        };
+      }
+
+      console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
+      throw new Error(`Неочікувана відповідь від KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
+    }
+
+    const taskId = createResponse.data.data.taskId;
+    console.log(`✅ KIE.AI Z-Image task created: ${taskId}`);
+
+    // Очікуємо на результат (polling)
+    const result = await pollJobStatus(taskId, 600, 5000, 'Z-Image (KIE.AI)');
+
+    // Отримуємо URL зображення з результату
+    const imageUrl = extractImageUrl(result);
+    if (!imageUrl) {
+      throw new Error('KIE.AI returned no image in output');
+    }
+
+    return {
+      success: true,
+      imageUrl: imageUrl,
+      taskId: taskId,
+      provider: 'kie-ai'
+    };
+
+  } catch (error) {
+    console.error('❌ KIE.AI Z-Image Error:', error.response?.data || error.message);
+
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
+    return {
+      success: false,
+      error: error.response?.data?.msg || error.response?.data?.message || error.message,
+      provider: 'kie-ai'
+    };
+  }
+}
+
+/**
  * Генерація зображення через KIE.AI - Nano Banana Pro
  *
  * Документація: https://docs.kie.ai/market/google/nano-banana-pro
@@ -2003,11 +2127,13 @@ module.exports = {
   isAdminUser,
 
   // Генерація зображень
+  generateWithNanoBananaBaseKieAI,   // ✅ Nano Banana (Base)
   generateWithNanoBananaKieAI,
   generateWithSeedreamKieAI,
   generateWithStableDiffusionKieAI,  // ❌ Повертає помилку - не підтримується
   generateWithIdeogramKieAI,         // ✅ Ideogram v3
   generateWithRecraftUpscaleKieAI,   // ✅ Recraft Crisp Upscale
+  generateWithZImageKieAI,           // ✅ Z-Image (Qwen)
 
   // Генерація відео
   generateKlingMotionKieAI,          // ✅ Kling Motion Control
@@ -2032,7 +2158,8 @@ module.exports = {
       'nano_banana_4k',   // ✅ nano-banana-pro (4K) на KIE.AI
       'seedream_4k',      // ✅ seedream/4.5-text-to-image, seedream/4.5-edit
       'ideogram',         // ✅ ideogram/v3-reframe, v3-remix, v3-edit
-      'recraft_upscale'   // ✅ recraft/crisp-upscale
+      'recraft_upscale',  // ✅ recraft/crisp-upscale
+      'z_image'           // ✅ z-image (Qwen)
     ],
     video: [
       'kling',            // ✅ kling/v2-5-turbo-image-to-video-pro
@@ -2045,7 +2172,8 @@ module.exports = {
     ],
     // Моделі які ТІЛЬКИ на KIE.AI - немає на Replicate!
     kieAIOnly: [
-      'kling_3'           // ⚠️ Kling 3.0 - немає на Replicate
+      'kling_3',           // ⚠️ Kling 3.0 - немає на Replicate
+      'z_image'            // ⚠️ Z-Image - немає на Replicate
     ],
     // Моделі які НЕ підтримуються на KIE.AI — ціна та запуск через Replicate
     notSupported: [
@@ -2074,6 +2202,7 @@ module.exports = {
     seedream_4k: { model: 'seedream/4.5-text-to-image', edit: 'seedream/4.5-edit' },
     ideogram: { model: 'ideogram/v3-reframe', remix: 'ideogram/v3-remix', edit: 'ideogram/v3-edit' },
     recraft_upscale: { model: 'recraft/crisp-upscale' },
+    z_image: { model: 'z-image' },
 
     // Video
     kling: { model: 'kling/v2-5-turbo-image-to-video-pro' },
