@@ -6451,6 +6451,110 @@ bot.action('kling_o1_skip_ref_images', async (ctx) => {
   );
 });
 
+// ==================== SHARED VIDEO RECOVERY POLLING ====================
+/**
+ * Запускає фоновий polling для відео яке не встигло завершитись під час основного polling.
+ * Використовується коли KIE.AI повертає pending: true після таймауту.
+ *
+ * @param {object} opts
+ *   chatId, userId, username, modelKey, modelLabel, taskId,
+ *   cost, apiCostObj, deductMeta, promptSnippet, resultMeta (рядок для caption),
+ *   isRunway (bool) — чи використовувати runway endpoint для опитування,
+ *   monitorOptions (object) — передається в logUsageEvent
+ */
+async function startVideoRecoveryPolling({
+  chatId, userId, username,
+  modelKey, modelLabel, taskId,
+  cost, deductDescription, deductMeta,
+  promptSnippet, captionLine,
+  isRunway = false,
+  monitorOptions = {}
+}) {
+  const maxAttempts = 720; // 60 хвилин (720 * 5s)
+  const interval = 5000;
+  let attempts = 0;
+
+  console.log(`🔄 [Recovery] Starting for ${modelLabel} task ${taskId}, user ${userId}`);
+
+  while (attempts < maxAttempts) {
+    try {
+      await new Promise(r => setTimeout(r, interval));
+      attempts++;
+
+      let job;
+      let state;
+      let videoUrl;
+
+      if (isRunway) {
+        job = await kieAI.fetchRunwayTaskInfoExported(taskId);
+        state = job?.state || '';
+        videoUrl = job?.videoInfo?.videoUrl || null;
+      } else {
+        job = await kieAI.fetchTaskRecordInfoExported(taskId);
+        state = (job?.state || job?.status || '').toLowerCase();
+        videoUrl = kieAI.extractVideoUrlExported(job);
+      }
+
+      if (!job) continue;
+
+      console.log(`🔄 [Recovery] ${modelLabel} (${attempts}): taskId=${taskId} state=${state}`);
+
+      if (state === 'success' || state === 'completed') {
+        if (!videoUrl) {
+          await bot.telegram.sendMessage(chatId,
+            `❌ ${modelLabel}: відео згенеровано, але URL не знайдено.\nTaskId: <code>${taskId}</code>\nЗверніться до підтримки.`,
+            { parse_mode: 'HTML' }
+          );
+          return;
+        }
+
+        // Списуємо токени
+        await userBalance.deductTokens(userId, cost, deductDescription, deductMeta);
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId, modelKey, success: true, isTrial, isFree: isTrial, ...monitorOptions
+        });
+
+        await bot.telegram.sendMessage(chatId,
+          `✅ <b>${modelLabel} готово!</b>\n\n` +
+          `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
+          `${promptSnippet}\n💰 Витрачено: ${cost}⚡`,
+          { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+        );
+        await safeSendVideo(chatId, videoUrl, {
+          caption: `${captionLine}\n\n💰 Витрачено: ${cost}⚡`,
+          ...keyboard.createBackButton('video_menu')
+        });
+        return;
+      }
+
+      if (state === 'fail' || state === 'failed' || state === 'error') {
+        const errMsg = job.failMsg || job.failCode || 'Unknown error';
+        console.error(`❌ [Recovery] ${modelLabel} task ${taskId} failed: ${errMsg}`);
+        await bot.telegram.sendMessage(chatId,
+          `❌ ${modelLabel}: генерація не вдалась.\n${errMsg}\n\nТокени НЕ списано.`
+        );
+        return;
+      }
+    } catch (e) {
+      console.error(`⚠️ [Recovery] ${modelLabel} poll error (${attempts}):`, e.message);
+    }
+  }
+
+  // Вичерпали всі спроби
+  console.error(`❌ [Recovery] ${modelLabel} task ${taskId} never completed`);
+  await bot.telegram.sendMessage(chatId,
+    `❌ <b>${modelLabel}: Генерація не завершилась</b>\n\n` +
+    `Ваші токени НЕ були списані.\n` +
+    `TaskId: <code>${taskId}</code>\n\n` +
+    `Зверніться до підтримки.`,
+    { parse_mode: 'HTML' }
+  );
+  await adminNotifier.notifyAdmin(bot, new Error(`Recovery exhausted: ${modelLabel} ${taskId}`), {
+    userId, username, action: `${modelKey}_recovery`, taskId
+  });
+}
+
 // ==================== KLING MOTION GENERATION FUNCTION ====================
 
 async function generateKlingMotionVideo(ctx, state) {
@@ -6533,6 +6637,24 @@ async function generateKlingMotionVideo(ctx, state) {
             generationData.prompt || '',
             generationData.keepOriginalSound
           );
+
+      if (!result.success && result.pending && result.taskId) {
+        console.log(`⏱️ Kling Motion task ${result.taskId} pending — recovery for user ${userId}`);
+        await bot.telegram.editMessageText(chatId, statusMsg.message_id, null,
+          `⏳ <b>Kling Motion ще генерується...</b>\n\nВідео буде надіслано автоматично.\n🔄 Перевіряємо у фоні...`,
+          { parse_mode: 'HTML' }
+        );
+        startVideoRecoveryPolling({
+          chatId, userId, username, modelKey: 'kling_motion', modelLabel: 'Kling Motion',
+          taskId: result.taskId, cost: motionCost, deductDescription: `${modelName} generation`,
+          deductMeta: { modelKey: 'kling_motion', modelName, apiCost,
+            mode: generationData.mode, orientation: generationData.orientation },
+          promptSnippet: `⚙️ ${generationData.mode.toUpperCase()} | ${generationData.orientation}`,
+          captionLine: `🔥 Kling Motion\n⚙️ ${generationData.mode?.toUpperCase()} | ${generationData.orientation}`,
+          monitorOptions: { options: { mode: generationData.mode, orientation: generationData.orientation }, provider: 'kie' }
+        });
+        return;
+      }
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
@@ -7255,6 +7377,25 @@ async function generateKlingVideo(ctx, state) {
           );
       }
 
+      if (!result.success && result.pending && result.taskId) {
+        console.log(`⏱️ Kling task ${result.taskId} pending — recovery for user ${userId}`);
+        await bot.telegram.editMessageText(chatId, statusMsg.message_id, null,
+          `⏳ <b>${model.name} ще генерується...</b>\n\nВідео буде надіслано автоматично.\n🔄 Перевіряємо у фоні...`,
+          { parse_mode: 'HTML' }
+        );
+        startVideoRecoveryPolling({
+          chatId, userId, username, modelKey, modelLabel: model.name,
+          taskId: result.taskId, cost: klingCost, deductDescription: `${model.name} generation`,
+          deductMeta: { modelKey, modelName: model.name, apiCost,
+            prompt: generationData.prompt, duration, hasStartImage, hasEndImage,
+            generateAudio: generationData.generateAudio === true },
+          promptSnippet: `⏱️ ${duration} сек | 📐 ${generationData.aspectRatio || '16:9'}`,
+          captionLine: `${model.name}\n⏱️ ${duration}сек | 📐 ${generationData.aspectRatio || '16:9'}`,
+          monitorOptions: { options: { duration, generateAudio: generationData.generateAudio === true }, provider: useKieAI ? 'kie' : 'replicate' }
+        });
+        return;
+      }
+
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
           userId, username, action: 'kling_generation', model: model.name,
@@ -7431,6 +7572,26 @@ async function generateKling3Video(ctx, state) {
         multiPrompt: generationData.multiShots ? generationData.multiPrompt : undefined,
         klingElements: generationData.klingElements?.length ? generationData.klingElements : undefined
       });
+
+      if (!result.success && result.pending && result.taskId) {
+        console.log(`⏱️ Kling 3.0 task ${result.taskId} pending — recovery for user ${userId}`);
+        await bot.telegram.editMessageText(chatId, statusMsg.message_id, null,
+          `⏳ <b>Kling 3.0 Pro ще генерується...</b>\n\nВідео буде надіслано автоматично.\n🔄 Перевіряємо у фоні...`,
+          { parse_mode: 'HTML' }
+        );
+        const apiCostK3 = generationData.duration * (generationData.generateAudio ? model.apiCostPerSecondAudio : model.apiCostPerSecondNoAudio);
+        startVideoRecoveryPolling({
+          chatId, userId, username, modelKey: 'kling_3', modelLabel: 'Kling 3.0 Pro 💎',
+          taskId: result.taskId, cost: kling3Cost, deductDescription: `${model.name} generation`,
+          deductMeta: { modelKey: 'kling_3', modelName: model.name, apiCost: apiCostK3,
+            prompt: generationData.prompt, duration: generationData.duration,
+            hasStartImage: generationData.imageUrls?.length > 0, generateAudio: generationData.generateAudio },
+          promptSnippet: `⏱️ ${generationData.duration} сек | 📐 ${generationData.aspectRatio} | ${generationData.generateAudio ? '🔊' : '🔇'}`,
+          captionLine: `🎭 Kling 3.0 Pro 💎\n⏱️ ${generationData.duration}сек | 📐 ${generationData.aspectRatio} | ${generationData.generateAudio ? '🔊' : '🔇'}`,
+          monitorOptions: { options: { duration: generationData.duration, mode: generationData.mode, generateAudio: generationData.generateAudio }, provider: 'kie' }
+        });
+        return;
+      }
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
@@ -7731,6 +7892,98 @@ async function generateVeoVideo(ctx, state) {
             generationData.startImage || null,
             generateAudio
           );
+
+      // ⏱️ PENDING: відео ще генерується після таймауту polling — продовжуємо у фоні
+      if (!result.success && result.pending && result.taskId) {
+        console.log(`⏱️ Veo task ${result.taskId} pending — starting background recovery for user ${userId}`);
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `⏳ <b>Google Veo 3.1 ще генерується...</b>\n\n` +
+          `Генерація займає більше часу ніж очікувалось.\n` +
+          `Відео буде надіслано автоматично, коли буде готове.\n\n` +
+          `🔄 Продовжуємо перевіряти статус у фоні...`,
+          { parse_mode: 'HTML' }
+        );
+
+        // Фоновий recovery polling
+        const recoveryTaskId = result.taskId;
+        (async () => {
+          const maxRecoveryAttempts = 720; // ще 60 хвилин (720 * 5s)
+          const recoveryInterval = 5000;
+          let recoveryAttempts = 0;
+          while (recoveryAttempts < maxRecoveryAttempts) {
+            try {
+              await new Promise(r => setTimeout(r, recoveryInterval));
+              recoveryAttempts++;
+              const job = await kieAI.fetchTaskRecordInfoExported(recoveryTaskId);
+              if (!job) continue;
+              const jobState = (job.state || job.status || '').toLowerCase();
+              console.log(`🔄 Veo recovery poll (${recoveryAttempts}): taskId=${recoveryTaskId} state=${jobState}`);
+              if (jobState === 'success' || jobState === 'completed') {
+                const videoUrl = kieAI.extractVideoUrlExported(job);
+                if (!videoUrl) {
+                  await bot.telegram.sendMessage(chatId, `❌ Veo 3.1: відео згенеровано, але URL не знайдено. Зверніться до підтримки. TaskId: ${recoveryTaskId}`);
+                  return;
+                }
+                // Списуємо токени
+                await userBalance.deductTokens(userId, veoCost, `${model.name} generation`, {
+                  modelKey: 'veo', modelName: model.name, apiCost: apiCost,
+                  prompt: generationData.prompt, aspectRatio: generationData.aspectRatio,
+                  duration: duration, generateAudio: generateAudio,
+                  hasStartImage: hasStartImage,
+                  references: generationData.references?.length || 0,
+                  hasLastFrame: hasLastFrame
+                });
+                const isTrialVeo = await isTrialUser(userId);
+                await monitoringLoggers.logUsageEvent({
+                  userId, modelKey: 'veo', success: true,
+                  options: { duration, generateAudio }, isTrial: isTrialVeo, isFree: isTrialVeo
+                });
+                await bot.telegram.sendMessage(
+                  chatId,
+                  `✅ <b>Google Veo 3.1 готово!</b>\n\n` +
+                  `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
+                  `📐 Пропорції: ${generationData.aspectRatio}\n` +
+                  `⏱️ Тривалість: ${duration} сек\n` +
+                  `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
+                  `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
+                  `💾 <b>Як зберегти:</b>\n` +
+                  `1️⃣ Натисніть на відео нижче\n` +
+                  `2️⃣ Натисніть ⋮ → "Зберегти"\n\n` +
+                  `💰 Витрачено: ${veoCost}⚡`,
+                  { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+                );
+                await safeSendVideo(chatId, videoUrl, {
+                  caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${veoCost}⚡`,
+                  ...keyboard.createBackButton('video_menu')
+                });
+                return;
+              }
+              if (jobState === 'fail' || jobState === 'failed' || jobState === 'error') {
+                const errMsg = job.failMsg || job.failCode || 'Unknown error';
+                console.error(`❌ Veo recovery: task ${recoveryTaskId} failed: ${errMsg}`);
+                await bot.telegram.sendMessage(chatId, `❌ Veo 3.1: генерація не вдалась.\n${errMsg}`);
+                return;
+              }
+            } catch (e) {
+              console.error(`⚠️ Veo recovery poll error (${recoveryAttempts}):`, e.message);
+            }
+          }
+          // Вичерпали всі спроби
+          console.error(`❌ Veo recovery: task ${recoveryTaskId} never completed after extended wait`);
+          await bot.telegram.sendMessage(chatId,
+            `❌ <b>Google Veo 3.1: Генерація не завершилась</b>\n\n` +
+            `Ваші токени НЕ були списані.\n` +
+            `TaskId: <code>${recoveryTaskId}</code>\n\n` +
+            `Зверніться до підтримки якщо відео існує на kie.ai`,
+            { parse_mode: 'HTML' }
+          );
+          await adminNotifier.notifyAdmin(bot, new Error(`Veo recovery exhausted: ${recoveryTaskId}`), {
+            userId, username, action: 'veo_generation_recovery', taskId: recoveryTaskId
+          });
+        })();
+        return;
+      }
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {

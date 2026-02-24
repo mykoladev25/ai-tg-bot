@@ -99,7 +99,9 @@ async function pollJobStatus(taskId, maxAttempts = 400, interval = 3000, modelNa
     // ігноруємо
   }
 
-  throw new Error(`Timeout waiting for ${modelName} task completion (${taskId})`);
+  // Повертаємо sentinel замість throw — caller обробить як pending
+  console.warn(`⏱️ ${modelName} task ${taskId} timed out after polling. Returning pending state.`);
+  return { _timeout: true, taskId };
 }
 
 /**
@@ -1055,6 +1057,11 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
     // Відео: до ~50 хв (Kling Motion може генерувати довго)
     const result = await pollJobStatus(taskId, 600, 5000, 'Kling Motion (KIE.AI)');
 
+    if (result && result._timeout) {
+      console.warn(`⏱️ Kling Motion task ${taskId} still pending after timeout`);
+      return { success: false, pending: true, taskId, provider: 'kie-ai' };
+    }
+
     // Отримуємо URL відео
     const videoResultUrl = extractVideoUrl(result);
     if (!videoResultUrl) {
@@ -1270,6 +1277,11 @@ async function generateKling3VideoKieAI(options = {}) {
     // Відео: до ~50 хв
     const result = await pollJobStatus(taskId, 600, 5000, 'Kling 3.0 (KIE.AI)');
 
+    if (result && result._timeout) {
+      console.warn(`⏱️ Kling 3.0 task ${taskId} still pending after timeout`);
+      return { success: false, pending: true, taskId, provider: 'kie-ai', mode, multiShots };
+    }
+
     const videoUrl = extractVideoUrl(result);
     if (!videoUrl) {
       throw new Error('KIE.AI returned no video in output');
@@ -1436,6 +1448,11 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
     // Відео Kling v2.5/v2.6: до ~50 хв
     const result = await pollJobStatus(taskId, 600, 5000, `Kling ${version} (KIE.AI)`);
 
+    if (result && result._timeout) {
+      console.warn(`⏱️ Kling ${version} task ${taskId} still pending after timeout`);
+      return { success: false, pending: true, taskId, provider: 'kie-ai', version };
+    }
+
     const videoUrl = extractVideoUrl(result);
     if (!videoUrl) {
       throw new Error('KIE.AI returned no video in output');
@@ -1599,6 +1616,11 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
     // Runway відео: до ~50 хв
     const result = await pollRunwayStatus(taskId, 600, 5000, 'Runway (KIE.AI)');
 
+    if (result && result._timeout) {
+      console.warn(`⏱️ Runway task ${taskId} still pending after timeout`);
+      return { success: false, pending: true, taskId, provider: 'kie-ai', _runwayPending: true };
+    }
+
     // Отримуємо URL відео
     const videoUrl = result.videoInfo?.videoUrl;
     if (!videoUrl) {
@@ -1693,7 +1715,9 @@ async function pollRunwayStatus(taskId, maxAttempts = 600, interval = 5000, mode
     }
   } catch (e) { /* ігноруємо */ }
 
-  throw new Error(`Timeout waiting for ${modelName} task completion (${taskId})`);
+  // Повертаємо sentinel замість throw — caller обробить як pending
+  console.warn(`⏱️ ${modelName} task ${taskId} timed out. Returning pending state.`);
+  return { _timeout: true, taskId };
 }
 
 /**
@@ -1800,6 +1824,11 @@ async function generateSora2KieAI(prompt, options = {}) {
 
     // Sora 2 може займати 5-10 хвилин
     const result = await pollJobStatus(taskId, 120, 5000, 'Sora 2 (KIE.AI)');
+
+    if (result && result._timeout) {
+      console.warn(`⏱️ Sora 2 task ${taskId} still pending after timeout`);
+      return { success: false, pending: true, taskId, provider: 'kie-ai', duration: actualDuration };
+    }
 
     // Отримуємо URL відео
     const videoResultUrl = extractVideoUrl(result);
@@ -1981,6 +2010,18 @@ async function generateVeoKieAI(prompt, options = {}) {
     // Veo відео: до ~50 хв
     const result = await pollVeoStatus(taskId, 600, 5000, 'Veo 3.1 (KIE.AI)');
 
+    // Якщо polling завершився таймаутом — відео ще генерується, повертаємо pending
+    if (result && result._timeout) {
+      console.warn(`⏱️ Veo task ${taskId} still pending after timeout — returning pending state`);
+      return {
+        success: false,
+        pending: true,
+        taskId: taskId,
+        provider: 'kie-ai',
+        model: payload.model
+      };
+    }
+
     // Отримуємо URL відео
     const videoUrl = extractVideoUrl(result);
     if (!videoUrl) {
@@ -2069,7 +2110,9 @@ async function pollVeoStatus(taskId, maxAttempts = 600, interval = 5000, modelNa
     }
   } catch (e) { /* ігноруємо */ }
 
-  throw new Error(`Timeout waiting for ${modelName} task completion (${taskId})`);
+  // Повертаємо sentinel замість throw — caller обробить як pending
+  console.warn(`⏱️ ${modelName} task ${taskId} timed out after polling. Returning pending state.`);
+  return { _timeout: true, taskId };
 }
 
 
@@ -2145,6 +2188,15 @@ module.exports = {
 
   // Утиліти
   getModelInfo,
+  fetchTaskRecordInfoExported: fetchTaskRecordInfo,
+  extractVideoUrlExported: extractVideoUrl,
+  fetchRunwayTaskInfoExported: async (taskId) => {
+    const response = await axios.get(
+      `${KIE_API_BASE}/runway/record-detail?taskId=${taskId}`,
+      { headers: { 'Authorization': `Bearer ${KIE_API_KEY}` } }
+    );
+    return response.data?.data || null;
+  },
   // Інформація про провайдер
   KIE_API_BASE,
   KIE_API_KEY: !!KIE_API_KEY,
