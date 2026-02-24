@@ -7872,15 +7872,37 @@ async function generateVeoVideo(ctx, state) {
       const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
       console.log(`🎯 Veo using provider: ${providerName}`);
 
+      // Будуємо масив imageUrls та generationType для KIE.AI Veo
+      let veoImageUrls = [];
+      let veoGenerationType = null;
+      if (generationData.references && generationData.references.length > 0) {
+        // Reference mode: масив reference зображень (до 3)
+        veoImageUrls = generationData.references.slice(0, 3);
+        veoGenerationType = 'REFERENCE_2_VIDEO';
+      } else if (generationData.startImage && generationData.lastFrame) {
+        // First + last frame mode
+        veoImageUrls = [generationData.startImage, generationData.lastFrame];
+        veoGenerationType = 'FIRST_AND_LAST_FRAMES_2_VIDEO';
+      } else if (generationData.startImage) {
+        // Тільки стартовий кадр
+        veoImageUrls = [generationData.startImage];
+        veoGenerationType = 'FIRST_AND_LAST_FRAMES_2_VIDEO';
+      } else if (generationData.lastFrame) {
+        // Тільки останній кадр
+        veoImageUrls = [generationData.lastFrame];
+        veoGenerationType = 'FIRST_AND_LAST_FRAMES_2_VIDEO';
+      } else {
+        veoGenerationType = 'TEXT_2_VIDEO';
+      }
+
+      console.log(`🎥 Veo KIE.AI payload: generationType=${veoGenerationType}, imageUrls=${veoImageUrls.length}`);
+
       const result = useKieAI
         ? await kieAI.generateVeoKieAI(generationData.prompt, {
-            imageUrl: generationData.startImage || null,
-            lastFrame: generationData.lastFrame || null,
-            referenceImages: generationData.references || [],
+            imageUrls: veoImageUrls,
+            generationType: veoGenerationType,
             aspectRatio: generationData.aspectRatio,
-            duration: duration,
-            generateAudio: generateAudio,
-            resolution: '1080p'
+            generateAudio: generateAudio
           })
         : await replicate.generateVideoWithVeo(
             generationData.prompt,
