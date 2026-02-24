@@ -166,9 +166,52 @@ function extractImageUrl(result) {
 }
 
 /**
+ * Отримати статус Veo задачі через /veo/record-detail (окремий endpoint, як Runway).
+ * Fallback: /jobs/recordInfo
+ */
+async function fetchVeoTaskInfo(taskId) {
+  // Спочатку пробуємо /veo/record-detail (як у Runway: /runway/record-detail)
+  try {
+    const response = await axios.get(
+      `${KIE_API_BASE}/veo/record-detail?taskId=${taskId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${KIE_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+    if (response.data?.data) {
+      console.log(`📡 Veo status via /veo/record-detail: taskId=${taskId}`);
+      return response.data.data;
+    }
+  } catch (e) {
+    if (e.response?.status !== 404 && e.response?.status !== 400) {
+      console.warn(`⚠️ /veo/record-detail failed (${e.response?.status || e.message}), falling back to /jobs/recordInfo`);
+    }
+  }
+  // Fallback: /jobs/recordInfo
+  return await fetchTaskRecordInfo(taskId);
+}
+
+/**
  * Витягти URL відео з результату KIE.AI
+ * Підтримує формати: resultJson, info.resultUrls (Veo callback), output.resultUrls, output.video_url
  */
 function extractVideoUrl(result) {
+  if (!result) return null;
+
+  // Veo callback format: { info: { resultUrls: [...] } }
+  if (result.info?.resultUrls && result.info.resultUrls.length > 0) {
+    return result.info.resultUrls[0];
+  }
+  // Veo record-detail format: { videoInfo: { videoUrl: '...' } }
+  if (result.videoInfo?.videoUrl) {
+    return result.videoInfo.videoUrl;
+  }
+
+  // Standard /jobs/recordInfo format: { resultJson: '{"resultUrls":[...]}' }
   if (result.resultJson) {
     try {
       const parsed = JSON.parse(result.resultJson);
@@ -2007,8 +2050,8 @@ async function generateVeoKieAI(prompt, options = {}) {
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Veo task created: ${taskId}`);
 
-    // Veo відео: до ~50 хв
-    const result = await pollVeoStatus(taskId, 600, 5000, 'Veo 3.1 (KIE.AI)');
+    // Veo відео: до ~60 хв (720 * 5s)
+    const result = await pollVeoStatus(taskId, 720, 5000, 'Veo 3.1 (KIE.AI)');
 
     // Якщо polling завершився таймаутом — відео ще генерується, повертаємо pending
     if (result && result._timeout) {
@@ -2060,12 +2103,12 @@ async function generateVeoKieAI(prompt, options = {}) {
 /**
  * Polling для Veo (може мати інший endpoint для статусу)
  */
-async function pollVeoStatus(taskId, maxAttempts = 600, interval = 5000, modelName = 'Veo') {
+async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelName = 'Veo') {
   let attempts = 0;
 
   while (attempts < maxAttempts) {
     try {
-      const job = await fetchTaskRecordInfo(taskId);
+      const job = await fetchVeoTaskInfo(taskId);
       if (!job) {
         await new Promise(resolve => setTimeout(resolve, interval));
         attempts++;
@@ -2074,7 +2117,7 @@ async function pollVeoStatus(taskId, maxAttempts = 600, interval = 5000, modelNa
 
       const state = (job.state || job.status || '').toLowerCase();
 
-      console.log(`📊 ${modelName} status (attempt ${attempts + 1}): ${state}`);
+      console.log(`📊 ${modelName} status (attempt ${attempts + 1}/${maxAttempts}): ${state}`);
 
       if (state === 'success' || state === 'completed') {
         return job;
@@ -2102,7 +2145,7 @@ async function pollVeoStatus(taskId, maxAttempts = 600, interval = 5000, modelNa
 
   // Остання спроба перед таймаутом
   try {
-    const job = await fetchTaskRecordInfo(taskId);
+    const job = await fetchVeoTaskInfo(taskId);
     const state = (job?.state || job?.status || '').toLowerCase();
     if (state === 'success' || state === 'completed') {
       console.log(`📊 ${modelName} got result on final check`);
@@ -2111,7 +2154,7 @@ async function pollVeoStatus(taskId, maxAttempts = 600, interval = 5000, modelNa
   } catch (e) { /* ігноруємо */ }
 
   // Повертаємо sentinel замість throw — caller обробить як pending
-  console.warn(`⏱️ ${modelName} task ${taskId} timed out after polling. Returning pending state.`);
+  console.warn(`⏱️ ${modelName} task ${taskId} timed out after ${maxAttempts} attempts. Returning pending state.`);
   return { _timeout: true, taskId };
 }
 
@@ -2189,6 +2232,7 @@ module.exports = {
   // Утиліти
   getModelInfo,
   fetchTaskRecordInfoExported: fetchTaskRecordInfo,
+  fetchVeoTaskInfoExported: fetchVeoTaskInfo,
   extractVideoUrlExported: extractVideoUrl,
   fetchRunwayTaskInfoExported: async (taskId) => {
     const response = await axios.get(

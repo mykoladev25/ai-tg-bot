@@ -7930,17 +7930,20 @@ async function generateVeoVideo(ctx, state) {
         // Фоновий recovery polling
         const recoveryTaskId = result.taskId;
         (async () => {
-          const maxRecoveryAttempts = 720; // ще 60 хвилин (720 * 5s)
+          const maxRecoveryAttempts = 2160; // ще 3 години (2160 * 5s)
           const recoveryInterval = 5000;
           let recoveryAttempts = 0;
           while (recoveryAttempts < maxRecoveryAttempts) {
             try {
               await new Promise(r => setTimeout(r, recoveryInterval));
               recoveryAttempts++;
-              const job = await kieAI.fetchTaskRecordInfoExported(recoveryTaskId);
+              // Використовуємо Veo-специфічний endpoint
+              const job = await kieAI.fetchVeoTaskInfoExported(recoveryTaskId);
               if (!job) continue;
               const jobState = (job.state || job.status || '').toLowerCase();
-              console.log(`🔄 Veo recovery poll (${recoveryAttempts}): taskId=${recoveryTaskId} state=${jobState}`);
+              if (recoveryAttempts % 12 === 0) { // логуємо кожну хвилину
+                console.log(`🔄 Veo recovery poll (${recoveryAttempts}/${maxRecoveryAttempts}): taskId=${recoveryTaskId} state=${jobState}`);
+              }
               if (jobState === 'success' || jobState === 'completed') {
                 const videoUrl = kieAI.extractVideoUrlExported(job);
                 if (!videoUrl) {
