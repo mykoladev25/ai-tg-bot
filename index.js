@@ -8508,6 +8508,30 @@ bot.on('text', async (ctx) => {
 
   if (text.startsWith('/')) return;
 
+  // ✅ VEO: Якщо юзер надіслав текст замість зображення — одразу запускаємо TEXT_2_VIDEO
+  if (state?.action === 'veo_generation' && (state?.step === 'waiting_start_image' || state?.step === 'ask_start_image' || state?.step === 'ask_last_frame' || state?.step === 'waiting_last_frame')) {
+    if (!text || text.length < 5) {
+      await ctx.reply(
+        '⚠️ Промпт занадто короткий!\n\n' +
+        'Напишіть детальніше що хочете бачити у відео (мінімум 5 символів).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+    console.log(`📝 Veo: user sent text instead of image at step=${state.step}, treating as TEXT_2_VIDEO prompt`);
+    const textState = {
+      ...state,
+      startImage: null,
+      lastFrame: null,
+      prompt: text,
+      step: 'ready_to_generate'
+    };
+    userState.set(userId, textState);
+    await ctx.reply('🚀 Промпт збережено! Починаємо генерацію без зображення (TEXT_2_VIDEO)...');
+    runBackgroundTask(() => generateVeoVideo(ctx, textState), 'veo_generate_text_fallback');
+    return;
+  }
+
   // ✅ VEO: Обробка промпту (останній крок)
   if (state?.action === 'veo_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
