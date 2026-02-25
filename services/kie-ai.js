@@ -2211,6 +2211,16 @@ async function generateVeoKieAI(prompt, options = {}) {
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Veo task created: ${taskId}`);
 
+    // 🔔 Викликаємо callback щоб caller міг зареєструвати taskId в kieCallbackMap
+    // ДО початку polling — щоб не пропустити webhook від KIE.AI
+    if (options.onTaskCreated) {
+      try {
+        options.onTaskCreated(taskId);
+      } catch (e) {
+        console.warn(`⚠️ onTaskCreated callback error: ${e.message}`);
+      }
+    }
+
     // Veo відео: до ~60 хв (720 * 5s)
     const result = await pollVeoStatus(taskId, 720, 5000, 'Veo 3.1 (KIE.AI)');
 
@@ -2303,7 +2313,10 @@ async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelNa
 
       const state = (job.state || job.status || '').toLowerCase();
 
-      console.log(`📊 ${modelName} status (attempt ${attempts + 1}/${maxAttempts}): ${state}`);
+      // Логуємо кожну хвилину (кожні 12 спроб по 5с), не кожні 5 секунд
+      if (attempts % 12 === 0 || state === 'success' || state === 'completed' || state === 'fail' || state === 'failed') {
+        console.log(`📊 ${modelName} status (attempt ${attempts + 1}/${maxAttempts}): ${state}`);
+      }
 
       if (state === 'success' || state === 'completed') {
         console.log(`✅ ${modelName} task ${taskId} completed! Extracting video URL...`);

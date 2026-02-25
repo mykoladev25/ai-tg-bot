@@ -312,11 +312,51 @@ async function startText2ImageTask(options = {}) {
       console.log(`📥 A2E Text2Image full response data:`, JSON.stringify(response.data, null, 2));
 
       // Спробувати різні можливі поля для taskId
-      const taskId = respData?._id || respData?.taskId || respData?.id || respData?.task_id ||
+      let taskId = respData?._id || respData?.taskId || respData?.id || respData?.task_id ||
         (typeof respData === 'string' ? respData : null);
 
+      // Якщо API повернув зображення одразу (без taskId) — повертаємо його напряму
+      const inlineImageUrl = respData?.image_url || respData?.result_url || respData?.output_url ||
+        respData?.images?.[0]?.url || respData?.images?.[0] ||
+        respData?.result?.image_url || respData?.result?.url;
+      if (!taskId && inlineImageUrl) {
+        console.log(`✅ A2E Text2Image: Got inline image result: ${inlineImageUrl.substring(0, 100)}`);
+        return {
+          success: true,
+          taskId: '__inline__',
+          imageUrl: inlineImageUrl
+        };
+      }
+
+      // Якщо немає taskId — спробувати знайти через records list
       if (!taskId) {
-        console.error(`❌ A2E Text2Image: taskId not found in response. data keys: ${respData ? Object.keys(respData).join(',') : 'null'}`);
+        console.warn(`⚠️ A2E Text2Image: taskId not found in response. data keys: ${respData ? Object.keys(respData).join(',') : 'null'}. Trying records list...`);
+        try {
+          await new Promise(r => setTimeout(r, 2000)); // Чекаємо 2с щоб A2E встигло зареєструвати
+          const recordsResp = await axios.get(
+            `${A2E_API_BASE}/userText2Image/records`,
+            {
+              headers: {
+                'Authorization': `Bearer ${A2E_API_TOKEN}`,
+                'Content-Type': 'application/json'
+              },
+              timeout: 10000
+            }
+          );
+          const records = recordsResp.data?.data;
+          if (Array.isArray(records) && records.length > 0) {
+            // Беремо найновіший запис (перший у списку або з найбільшим created)
+            const latest = records[0];
+            taskId = latest?._id || latest?.id || latest?.taskId;
+            console.log(`📋 A2E Text2Image: Found task via records list: ${taskId}`);
+          }
+        } catch (recordsErr) {
+          console.warn(`⚠️ A2E Text2Image: Failed to get records: ${recordsErr.message}`);
+        }
+      }
+
+      if (!taskId) {
+        console.error(`❌ A2E Text2Image: taskId not found after all attempts.`);
         throw new Error('A2E API did not return a task ID');
       }
 

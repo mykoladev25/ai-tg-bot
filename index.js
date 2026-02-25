@@ -354,6 +354,8 @@ const PROVIDER_CHOICE_FILE = path.join(__dirname, 'config', 'provider-choice.jso
 // KIE.AI callback map: taskId -> { chatId, userId, username, model, prompt, cost, apiCost, options }
 // Зберігає дані для відправки результату через webhook callback
 const kieCallbackMap = new Map();
+// Відстежує taskId які вже були доставлені через webhook callback (щоб уникнути подвійної доставки)
+const kieCallbackDelivered = new Set();
 
 function loadProviderChoice() {
   try {
@@ -7253,57 +7255,63 @@ async function generateA2EImage(ctx, state) {
       const taskId = startResult.taskId;
       console.log(`🖼️ Зображення без омежень: Task created: ${taskId}, polling for result...`);
 
-      // Polling статусу задачі
-      let attempts = 0;
-      const maxAttempts = 60; // 5 хвилин (60 × 5 сек)
-      const pollInterval = 5000;
-
       let finalResult = null;
-      while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-        attempts++;
 
-        const detailsResult = await a2eService.getText2ImageTaskDetails(taskId);
-        if (!detailsResult.success) {
-          console.error(`Зображення без омежень: Failed to get task details: ${detailsResult.error}`);
-          continue;
+      // Якщо A2E повернув зображення одразу (inline) — пропускаємо polling
+      if (startResult.imageUrl) {
+        console.log(`🖼️ Зображення без омежень: Got inline result, skipping polling`);
+        finalResult = { success: true, imageUrl: startResult.imageUrl };
+      } else {
+        // Polling статусу задачі
+        let attempts = 0;
+        const maxAttempts = 60; // 5 хвилин (60 × 5 сек)
+        const pollInterval = 5000;
+        while (attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          attempts++;
+
+          const detailsResult = await a2eService.getText2ImageTaskDetails(taskId);
+          if (!detailsResult.success) {
+            console.error(`Зображення без омежень: Failed to get task details: ${detailsResult.error}`);
+            continue;
+          }
+
+          const taskData = detailsResult.data;
+          const status = taskData?.status || taskData?.state;
+
+          // Перевіряємо наявність URL зображення
+          const imageUrl = taskData?.image_url || taskData?.result_url || taskData?.output_url ||
+            taskData?.images?.[0]?.url || taskData?.images?.[0] ||
+            taskData?.result?.image_url || taskData?.result?.url;
+
+          if (status === 'completed' || status === 'success' || imageUrl) {
+            finalResult = {
+              success: true,
+              imageUrl: imageUrl
+            };
+            break;
+          }
+
+          if (status === 'failed' || status === 'error') {
+            finalResult = {
+              success: false,
+              error: taskData.error_message || taskData.message || 'Task failed'
+            };
+            break;
+          }
+
+          if (attempts % 12 === 0) {
+            console.log(`🖼️ Зображення без омежень: Task ${taskId} still processing... (attempt ${attempts}/${maxAttempts})`);
+          }
         }
 
-        const taskData = detailsResult.data;
-        const status = taskData?.status || taskData?.state;
-
-        // Перевіряємо наявність URL зображення
-        const imageUrl = taskData?.image_url || taskData?.result_url || taskData?.output_url ||
-          taskData?.images?.[0]?.url || taskData?.images?.[0] ||
-          taskData?.result?.image_url || taskData?.result?.url;
-
-        if (status === 'completed' || status === 'success' || imageUrl) {
-          finalResult = {
-            success: true,
-            imageUrl: imageUrl
-          };
-          break;
-        }
-
-        if (status === 'failed' || status === 'error') {
+        if (!finalResult) {
           finalResult = {
             success: false,
-            error: taskData.error_message || taskData.message || 'Task failed'
+            error: 'Timeout waiting for A2E text2image task completion'
           };
-          break;
         }
-
-        if (attempts % 12 === 0) {
-          console.log(`🖼️ Зображення без омежень: Task ${taskId} still processing... (attempt ${attempts}/${maxAttempts})`);
-        }
-      }
-
-      if (!finalResult) {
-        finalResult = {
-          success: false,
-          error: 'Timeout waiting for A2E text2image task completion'
-        };
-      }
+      } // end of else (polling path)
 
       if (finalResult.success && finalResult.imageUrl) {
         // Списуємо токени
@@ -8429,7 +8437,24 @@ async function generateVeoVideo(ctx, state) {
             generationType: veoGenerationType,
             aspectRatio: generationData.aspectRatio,
             model: generationData.veoModel || 'veo3_fast',
-            generateAudio: generateAudio
+            generateAudio: generateAudio,
+            // 🔔 Реєструємо taskId в kieCallbackMap ОДРАЗУ після створення задачі,
+            // ДО початку polling — щоб webhook від KIE.AI не був пропущений
+            onTaskCreated: (taskId) => {
+              console.log(`📋 Veo: registering taskId=${taskId} in kieCallbackMap BEFORE polling`);
+              kieCallbackMap.set(taskId, {
+                chatId, userId, username,
+                model: 'veo', modelName: model.name,
+                prompt: generationData.prompt,
+                aspectRatio: generationData.aspectRatio,
+                duration, generateAudio,
+                veoCost, apiCost,
+                hasStartImage, hasLastFrame,
+                references: generationData.references?.length || 0,
+                statusMsgId: statusMsg.message_id,
+                createdAt: Date.now()
+              });
+            }
           })
         : await replicate.generateVideoWithVeo(
             generationData.prompt,
@@ -8567,6 +8592,8 @@ async function generateVeoVideo(ctx, state) {
       }
 
       if (!result.success) {
+        // ✅ Видаляємо з callbackMap — помилка, не чекаємо callback
+        if (result.taskId) kieCallbackMap.delete(result.taskId);
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
           userId, username, action: 'veo_generation', model: model.name,
           prompt: generationData.prompt, aspectRatio: generationData.aspectRatio
@@ -8588,6 +8615,15 @@ async function generateVeoVideo(ctx, state) {
           errorCode: result.error?.substring(0, 100)
         });
 
+        return;
+      }
+
+      // ✅ Перевіряємо чи відео вже доставлено через webhook callback
+      if (result.taskId && kieCallbackDelivered.has(result.taskId)) {
+        console.log(`📋 Veo task ${result.taskId} already delivered via webhook callback — skipping polling delivery`);
+        kieCallbackDelivered.delete(result.taskId);
+        kieCallbackMap.delete(result.taskId);
+        try { await bot.telegram.deleteMessage(chatId, statusMsg.message_id); } catch (e) { /* ігноруємо */ }
         return;
       }
 
@@ -12791,6 +12827,7 @@ async function startBot() {
           });
 
           console.log(`✅ KIE.AI webhook: Veo video delivered to user ${userId} via callback`);
+          kieCallbackDelivered.add(taskId); // Mark as delivered to prevent double delivery from polling
         } catch (sendErr) {
           console.error(`❌ KIE.AI webhook: failed to send video: ${sendErr.message}`);
           // Все одно спробуємо надіслати URL
