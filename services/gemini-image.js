@@ -101,6 +101,7 @@ async function generateImage(prompt, imageInput = null, aspectRatio = '1:1', ima
     // ====== REST API payload ======
     const payload = {
       contents: [{
+        role: 'user',
         parts: parts
       }],
       generationConfig: {
@@ -113,6 +114,7 @@ async function generateImage(prompt, imageInput = null, aspectRatio = '1:1', ima
     };
 
     console.log(`📤 Gemini REST: POST ${GEMINI_MODEL}, parts=${parts.length}, timeout=${REQUEST_TIMEOUT_MS / 1000}s`);
+    console.log(`📤 Gemini FREE payload: model=${GEMINI_MODEL}, parts=${parts.length}, modalities=[TEXT,IMAGE], aspect=${mappedAspectRatio}, size=${mappedSize}, role=user`);
 
     // Динамічний timeout: більший якщо є reference images
     const hasImages = refCount > 0;
@@ -192,6 +194,10 @@ async function generateImage(prompt, imageInput = null, aspectRatio = '1:1', ima
 
     if (!hasParts) {
       console.error(`❌ Gemini FREE: No parts. finishReason=${finishReason}, content=${JSON.stringify(data?.candidates?.[0]?.content)}`);
+      console.error(`❌ Gemini FREE: Full response: candidates=${data?.candidates?.length}, usageMetadata=${JSON.stringify(data?.usageMetadata)?.substring(0, 300)}`);
+      if (data?.candidates?.[0]) {
+        console.error(`❌ Gemini FREE: candidate[0] keys: ${Object.keys(data.candidates[0]).join(',')}`);
+      }
 
       if (finishReason === 'NO_IMAGE') {
         return { success: false, error: 'Gemini не зміг згенерувати зображення за цим промптом. Спробуйте більш детальний опис англійською.' };

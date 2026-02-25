@@ -63,6 +63,11 @@ function getDesignModelsWithEffectiveCost(userId) {
       if (m.key === 'nano_banana_free') {
         return geminiImage.isConfigured;
       }
+      // A2E Image доступна тільки якщо A2E API налаштований
+      if (m.a2eOnly) {
+        const a2eService = require('./services/a2e');
+        return a2eService.isA2EEnabled;
+      }
       return true;
     })
     .map(m => ({
@@ -630,6 +635,7 @@ const IMAGE_MODELS = [
   'seedream_4k',
   'ideogram',
   'z_image',
+  'a2e_image',
   'clarity',
   'recraft_upscale'
 ];
@@ -831,6 +837,11 @@ bot.on('callback_query', async (ctx, next) => {
 
   // ✅ Дозволяємо a2e_motion state
   if (state?.action === 'a2e_motion_generation') {
+    return next();
+  }
+
+  // ✅ Дозволяємо a2e_image state
+  if (state?.action === 'a2e_image_generation') {
     return next();
   }
 
@@ -3829,7 +3840,7 @@ bot.action(/^mj_vary_(.+)_(\d+)$/, async (ctx) => {
 });
 
 // Design Models
-bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram|z_image)$/, async (ctx) => {
+bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram|z_image|a2e_image)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
 
@@ -3903,6 +3914,58 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
       { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
     );
     return;
+  }
+
+  // 🔥 A2E Image — окремий флоу з вибором якості
+  if (modelKey === 'a2e_image') {
+    try {
+      const a2eService = require('./services/a2e');
+      if (!a2eService.isA2EEnabled) {
+        await ctx.reply(
+          '❌ A2E API тимчасово вимкнена. Додайте A2E_API_TOKEN в .env.',
+          keyboard.createBackButton('design_menu')
+        );
+        return;
+      }
+
+      const cost1080p = model.cost || 10;
+      const cost2k = model.cost2k || 23;
+
+      userState.set(ctx.from.id, {
+        action: 'a2e_image_generation',
+        step: 'select_quality',
+        modelKey: 'a2e_image'
+      });
+
+      await ctx.reply(
+        `🔥 <b>A2E Image</b>\n\n` +
+        `Генерація зображень з тексту з можливістю додавання до 2 референсних зображень.\n\n` +
+        `Дозволено генерувати контент, що не порушує <a href="https://a2e.ai/a2e-terms-of-use/">правила провайдера</a>.\n` +
+        `⚠️ Порушення призведе до блокування без повернення коштів.\n\n` +
+        `🎯 <b>Крок 1: Оберіть якість</b>\n\n` +
+        `• <b>1080p</b> — стандартна якість (${cost1080p}⚡)\n` +
+        `• <b>2K</b> — висока якість (${cost2k}⚡)`,
+        {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback(`📺 1080p (${cost1080p}⚡)`, 'a2e_img_quality_1080p'),
+              Markup.button.callback(`🖼️ 2K (${cost2k}⚡)`, 'a2e_img_quality_2k')
+            ],
+            [Markup.button.callback('← Назад', 'design_menu')]
+          ])
+        }
+      );
+      return;
+    } catch (error) {
+      console.error('A2E Image init error:', error);
+      await ctx.reply(
+        '❌ Помилка ініціалізації A2E Image. Перевірте налаштування.',
+        keyboard.createBackButton('design_menu')
+      );
+      return;
+    }
   }
 
   const maxPhotos = model.maxImages || 1;
@@ -4276,17 +4339,13 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
         `Анімація зображення з природним рухом та плавними переходами.\n\n` +
         `⏱️ Тривалість: ${durations.join(', ')} секунд\n` +
         `💰 Вартість: ${minCost}—${maxCost}⚡\n\n` +
-        `🚫 <b>Заборонено надсилати:</b>\n` +
-        `• зображення неповнолітніх у будь-якому сексуальному контексті\n` +
-        `• насильницький або незаконний контент\n` +
-        `• матеріали, що порушують права третіх осіб\n\n` +
-        `Користуючись сервісом, ви погоджуєтесь з правилами провайдера:\n` +
-        `🔗 https://a2e.ai/a2e-terms-of-use/\n\n` +
+        `Дозволено генерувати контент, що не порушує <a href="https://a2e.ai/a2e-terms-of-use/">правила провайдера</a>.\n` +
         `⚠️ Порушення призведе до блокування без повернення коштів.\n\n` +
         `🖼️ <b>Крок 1: Надішліть зображення</b>\n` +
         `📤 <b>Надішліть одне зображення:</b>`,
         {
           parse_mode: 'HTML',
+          disable_web_page_preview: true,
           ...Markup.inlineKeyboard([
             [Markup.button.callback('← Назад', 'video_menu')]
           ])
@@ -7002,6 +7061,362 @@ async function generateKlingO1EditVideo(ctx, state) {
   })();
 }
 
+// ==================== A2E IMAGE CALLBACKS ====================
+
+// Крок 1: Вибір якості
+bot.action(/^a2e_img_quality_(1080p|2k)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const quality = ctx.match[1]; // '1080p' або '2k'
+  const state = userState.get(userId);
+  const model = models.design.models.find(m => m.key === 'a2e_image');
+
+  if (!state || state.action !== 'a2e_image_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново: Зображення → A2E Image');
+    return;
+  }
+
+  const cost = quality === '2k' ? (model?.cost2k || 23) : (model?.cost || 10);
+  const dims = quality === '2k'
+    ? { width: 2048, height: 2048 }
+    : { width: 1024, height: 1024 };
+
+  if (cost > 0 && !(await userBalance.hasTokens(userId, cost))) {
+    await showInsufficientTokens(ctx, cost);
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_photos',
+    quality: quality,
+    cost: cost,
+    width: dims.width,
+    height: dims.height,
+    inputImages: []
+  });
+
+  await ctx.reply(
+    `🔥 <b>A2E Image (${quality.toUpperCase()})</b>\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `📸 <b>Крок 2: Референсні зображення (опціонально)</b>\n\n` +
+    `Можна надіслати до 2 референсних зображень.\n` +
+    `Або натисніть <b>"Далі до промпту"</b> щоб пропустити.\n\n` +
+    `📤 <b>Надішліть фото або натисніть кнопку:</b>`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('⏭️ Далі до промпту (без референсів)', 'a2e_img_skip_refs')],
+        [Markup.button.callback('← Назад', 'design_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 2b: Пропустити референси
+bot.action('a2e_img_skip_refs', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'a2e_image_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново: Зображення → A2E Image');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_prompt',
+    inputImages: state.inputImages || []
+  });
+
+  const refsCount = (state.inputImages || []).length;
+  await ctx.reply(
+    `🔥 <b>A2E Image (${(state.quality || '1080p').toUpperCase()})</b>\n` +
+    `💰 Вартість: <b>${state.cost}⚡</b>\n` +
+    (refsCount > 0 ? `📸 Референсів: <b>${refsCount}</b>\n` : '') +
+    `\n✍️ <b>Крок 3: Введіть промпт</b>\n\n` +
+    `Опишіть детально що хочете згенерувати.\n\n` +
+    `💡 Приклад: "A futuristic cityscape at sunset, cinematic, 8k quality"`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('← Назад', 'design_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 2a: Додати ще одне фото або продовжити
+bot.action('a2e_img_add_more', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'a2e_image_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново: Зображення → A2E Image');
+    return;
+  }
+
+  await ctx.reply(
+    `📸 Надішліть ще одне зображення (${(state.inputImages || []).length}/2):`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('⏭️ Далі до промпту', 'a2e_img_skip_refs')],
+        [Markup.button.callback('← Назад', 'design_menu')]
+      ])
+    }
+  );
+});
+
+// ==================== A2E IMAGE GENERATION FUNCTION ====================
+
+async function generateA2EImage(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
+  const a2eService = require('./services/a2e');
+  const model = models.design.models.find(m => m.key === 'a2e_image');
+
+  if (!model) {
+    await ctx.reply('❌ Модель A2E Image не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  if (!state.prompt) {
+    await ctx.reply('❌ Помилка: відсутній промпт');
+    userState.delete(userId);
+    return;
+  }
+
+  const cost = state.cost || model.cost;
+  const apiCost = state.quality === '2k' ? (model.apiCost2k || 0.139) : (model.apiCost || 0.0556);
+
+  if (cost > 0 && !(await userBalance.hasTokens(userId, cost))) {
+    await showInsufficientTokens(ctx, cost);
+    userState.delete(userId);
+    return;
+  }
+
+  const refsCount = (state.inputImages || []).length;
+  const statusMsg = await ctx.reply(
+    `🔥 <b>A2E Image — Генерація</b>\n\n` +
+    `🎯 Якість: <b>${(state.quality || '1080p').toUpperCase()}</b>\n` +
+    (refsCount > 0 ? `📸 Референсів: <b>${refsCount}</b>\n` : '') +
+    `📝 Промпт: "${state.prompt.substring(0, 100)}${state.prompt.length > 100 ? '...' : ''}"\n\n` +
+    `⏱️ Це може зайняти 1-3 хвилини...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  const generationData = { ...state };
+
+  (async () => {
+    try {
+      // Створюємо задачу в A2E API
+      const startResult = await a2eService.startText2ImageTask({
+        prompt: generationData.prompt,
+        width: generationData.width || 1024,
+        height: generationData.height || 1024,
+        modelType: 'a2e',
+        inputImages: generationData.inputImages || []
+      });
+
+      if (!startResult.success || !startResult.taskId) {
+        await adminNotifier.notifyAdmin(bot, new Error(startResult.error || 'Failed to start A2E text2image task'), {
+          userId, username, action: 'a2e_image_generation', model: model.name
+        });
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації A2E Image.\n\n${startResult.error || 'Не вдалося створити задачу'}\n\nСпробуйте ще раз.`
+        );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'a2e_image',
+          success: false,
+          isTrial,
+          isFree: isTrial,
+          errorCode: (startResult.error || '').substring(0, 100)
+        });
+
+        gracefulShutdown.completeGeneration(statusMsg.message_id, false);
+        return;
+      }
+
+      const taskId = startResult.taskId;
+      console.log(`🖼️ A2E Image: Task created: ${taskId}, polling for result...`);
+
+      // Polling статусу задачі
+      let attempts = 0;
+      const maxAttempts = 60; // 5 хвилин (60 × 5 сек)
+      const pollInterval = 5000;
+
+      let finalResult = null;
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        attempts++;
+
+        const detailsResult = await a2eService.getText2ImageTaskDetails(taskId);
+        if (!detailsResult.success) {
+          console.error(`A2E Image: Failed to get task details: ${detailsResult.error}`);
+          continue;
+        }
+
+        const taskData = detailsResult.data;
+        const status = taskData?.status || taskData?.state;
+
+        // Перевіряємо наявність URL зображення
+        const imageUrl = taskData?.image_url || taskData?.result_url || taskData?.output_url ||
+          taskData?.images?.[0]?.url || taskData?.images?.[0] ||
+          taskData?.result?.image_url || taskData?.result?.url;
+
+        if (status === 'completed' || status === 'success' || imageUrl) {
+          finalResult = {
+            success: true,
+            imageUrl: imageUrl
+          };
+          break;
+        }
+
+        if (status === 'failed' || status === 'error') {
+          finalResult = {
+            success: false,
+            error: taskData.error_message || taskData.message || 'Task failed'
+          };
+          break;
+        }
+
+        if (attempts % 12 === 0) {
+          console.log(`🖼️ A2E Image: Task ${taskId} still processing... (attempt ${attempts}/${maxAttempts})`);
+        }
+      }
+
+      if (!finalResult) {
+        finalResult = {
+          success: false,
+          error: 'Timeout waiting for A2E text2image task completion'
+        };
+      }
+
+      if (finalResult.success && finalResult.imageUrl) {
+        // Списуємо токени
+        await userBalance.deductTokens(userId, cost, {
+          type: 'generation',
+          model: 'a2e_image',
+          quality: generationData.quality,
+          apiCost: apiCost,
+          taskId: taskId
+        });
+
+        // Зберігаємо результат в БД
+        try {
+          await GenerationResult.create({
+            userId,
+            model: 'a2e_image',
+            prompt: generationData.prompt,
+            resultType: 'image',
+            resultUrl: finalResult.imageUrl,
+            cost: cost,
+            apiCost: apiCost,
+            provider: 'a2e',
+            taskId: taskId,
+            metadata: {
+              quality: generationData.quality,
+              width: generationData.width,
+              height: generationData.height,
+              refsCount: refsCount
+            }
+          });
+        } catch (dbErr) {
+          console.warn('Failed to save A2E Image generation result:', dbErr.message);
+        }
+
+        // Надсилаємо зображення
+        try {
+          await bot.telegram.sendPhoto(chatId, finalResult.imageUrl, {
+            caption:
+              `🔥 <b>A2E Image (${(generationData.quality || '1080p').toUpperCase()})</b>\n\n` +
+              `📝 ${generationData.prompt.substring(0, 200)}${generationData.prompt.length > 200 ? '...' : ''}\n\n` +
+              `💰 Списано: ${cost}⚡`,
+            parse_mode: 'HTML'
+          });
+        } catch (sendErr) {
+          console.error('A2E Image: Failed to send photo, trying URL:', sendErr.message);
+          await bot.telegram.sendMessage(chatId,
+            `🔥 <b>A2E Image готово!</b>\n\n` +
+            `🔗 <a href="${finalResult.imageUrl}">Завантажити зображення</a>\n\n` +
+            `💰 Списано: ${cost}⚡`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        // Видаляємо статусне повідомлення
+        try {
+          await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+        } catch (e) { /* ignore */ }
+
+        // Логування
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'a2e_image',
+          success: true,
+          isTrial,
+          isFree: isTrial,
+          tokensCost: cost,
+          apiCostUSD: apiCost
+        });
+
+        console.log(`✅ A2E Image: Sent image to user ${userId}, cost=${cost}⚡`);
+        gracefulShutdown.completeGeneration(statusMsg.message_id, true);
+      } else {
+        // Помилка генерації
+        await adminNotifier.notifyAdmin(bot, new Error(finalResult.error || 'A2E Image generation failed'), {
+          userId, username, action: 'a2e_image_generation', model: model.name, taskId
+        });
+
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації A2E Image.\n\n${finalResult.error || 'Невідома помилка'}\n\nВаші токени НЕ були списані. Спробуйте ще раз.`
+        );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'a2e_image',
+          success: false,
+          isTrial,
+          isFree: isTrial,
+          errorCode: (finalResult.error || '').substring(0, 100)
+        });
+
+        gracefulShutdown.completeGeneration(statusMsg.message_id, false);
+      }
+    } catch (error) {
+      console.error('A2E Image generation error:', error);
+      await adminNotifier.notifyAdmin(bot, error, {
+        userId, username, action: 'a2e_image_generation', model: model.name
+      });
+      try {
+        await bot.telegram.editMessageText(
+          chatId, statusMsg.message_id, null,
+          `❌ Помилка генерації A2E Image.\n\n${error.message}\n\nСпробуйте ще раз.`
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації A2E Image. Спробуйте ще раз.', keyboard.createBackButton('design_menu'));
+      }
+      gracefulShutdown.completeGeneration(statusMsg.message_id, false);
+    }
+  })();
+}
+
 // ==================== A2E MOTION CALLBACKS ====================
 
 // Крок 2: Вибір тривалості після завантаження зображення
@@ -8846,6 +9261,39 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  // ✅ A2E Image: Обробка промпту для генерації зображення
+  if (state?.action === 'a2e_image_generation' && state?.step === 'waiting_prompt') {
+    if (!text || text.length < 3) {
+      await ctx.reply(
+        '⚠️ Промпт занадто короткий!\n\n' +
+        'Напишіть детальніше що хочете згенерувати (мінімум 3 символи).',
+        keyboard.createBackButton('design_menu')
+      );
+      return;
+    }
+
+    const updatedState = {
+      ...state,
+      prompt: text,
+      step: 'ready_to_generate'
+    };
+    userState.set(userId, updatedState);
+
+    const refsCount = (updatedState.inputImages || []).length;
+    await ctx.reply(
+      `🔥 <b>A2E Image (${(updatedState.quality || '1080p').toUpperCase()})</b>\n\n` +
+      `🎯 Якість: <b>${(updatedState.quality || '1080p').toUpperCase()}</b>\n` +
+      (refsCount > 0 ? `📸 Референсів: <b>${refsCount}</b>\n` : '') +
+      `📝 Промпт: <b>${text.substring(0, 100)}${text.length > 100 ? '...' : ''}</b>\n` +
+      `💰 Вартість: <b>${updatedState.cost}⚡</b>\n\n` +
+      `🚀 Починаємо генерацію...`,
+      { parse_mode: 'HTML' }
+    );
+
+    runBackgroundTask(() => generateA2EImage(ctx, updatedState), 'a2e_image_generate');
+    return;
+  }
+
   // ✅ A2E Motion: Обробка prompt та перехід до negative prompt
   if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
@@ -9520,6 +9968,59 @@ bot.on('photo', async (ctx) => {
         ])
       }
     );
+    return;
+  }
+
+  // ✅ A2E Image: Обробка референсних фото (другий handler)
+  if (state?.action === 'a2e_image_generation' && state?.step === 'waiting_photos') {
+    console.log('🖼️ A2E Image: Processing reference photo (2nd handler) for user', userId);
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('design_menu'));
+      return;
+    }
+
+    const currentImages = state.inputImages || [];
+    currentImages.push(imageUrl);
+
+    if (currentImages.length >= 2) {
+      userState.set(userId, {
+        ...state,
+        inputImages: currentImages,
+        step: 'waiting_prompt'
+      });
+
+      await ctx.reply(
+        `🔥 <b>A2E Image (${(state.quality || '1080p').toUpperCase()})</b>\n` +
+        `📸 Референсів: <b>${currentImages.length}/2</b> (максимум)\n` +
+        `💰 Вартість: <b>${state.cost}⚡</b>\n\n` +
+        `✍️ <b>Крок 3: Введіть промпт</b>\n\n` +
+        `Опишіть детально що хочете згенерувати.`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('← Назад', 'design_menu')]
+          ])
+        }
+      );
+    } else {
+      userState.set(userId, {
+        ...state,
+        inputImages: currentImages
+      });
+
+      await ctx.reply(
+        `✅ Фото додано! (${currentImages.length}/2)\n\n` +
+        `📸 Надішліть ще одне фото або натисніть "Далі до промпту":`,
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('⏭️ Далі до промпту', 'a2e_img_skip_refs')],
+            [Markup.button.callback('← Назад', 'design_menu')]
+          ])
+        }
+      );
+    }
     return;
   }
 

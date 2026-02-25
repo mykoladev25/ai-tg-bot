@@ -235,9 +235,146 @@ async function deleteTask(taskId) {
   }
 }
 
+// ==================== TEXT-TO-IMAGE ====================
+
+/**
+ * Створює задачу генерації зображення з тексту через A2E API
+ *
+ * @param {Object} options - Параметри генерації
+ * @param {string} options.prompt - Текстовий промпт
+ * @param {number} [options.width=1024] - Ширина зображення
+ * @param {number} [options.height=1024] - Висота зображення
+ * @param {string} [options.modelType='a2e'] - Тип моделі (a2e, seedream)
+ * @param {string[]} [options.inputImages] - URL референсних зображень (макс. 2)
+ * @param {string} [options.aspectRatio] - Aspect ratio (для seedream)
+ * @param {number} [options.maxImages=1] - Кількість зображень
+ * @returns {Promise<{success: boolean, taskId?: string, error?: string}>}
+ */
+async function startText2ImageTask(options = {}) {
+  try {
+    const {
+      prompt,
+      width = 1024,
+      height = 1024,
+      modelType = 'a2e',
+      inputImages = [],
+      aspectRatio,
+      maxImages = 1
+    } = options;
+
+    if (!prompt) {
+      throw new Error('prompt є обов\'язковим параметром');
+    }
+
+    if (!A2E_API_TOKEN) {
+      throw new Error('A2E_API_TOKEN не налаштовано');
+    }
+
+    const requestBody = {
+      name: `A2E_IMG_${Date.now()}`,
+      prompt: prompt,
+      width: width,
+      height: height,
+      model_type: modelType,
+      max_images: maxImages
+    };
+
+    if (inputImages && inputImages.length > 0) {
+      requestBody.input_images = inputImages.slice(0, 2);
+    }
+
+    if (aspectRatio) {
+      requestBody.aspect_ratio = aspectRatio;
+    }
+
+    console.log(`🖼️ A2E Text2Image: Starting task:`, {
+      modelType,
+      width,
+      height,
+      hasRefs: inputImages.length,
+      prompt: prompt.substring(0, 50)
+    });
+
+    const response = await axios.post(
+      `${A2E_API_BASE}/userText2Image/start`,
+      requestBody,
+      {
+        headers: {
+          'Authorization': `Bearer ${A2E_API_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    if (response.data && response.data.code === 0) {
+      const taskId = response.data.data?._id || response.data.data?.taskId || response.data.data?.id;
+      console.log(`✅ A2E Text2Image task created: ${taskId}`);
+      return {
+        success: true,
+        taskId: taskId
+      };
+    } else {
+      const errorMsg = response.data?.message || 'Unknown error';
+      throw new Error(errorMsg);
+    }
+
+  } catch (error) {
+    console.error('A2E Text2Image API Error:', error.response?.data || error.message);
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message || 'A2E API error'
+    };
+  }
+}
+
+/**
+ * Отримує інформацію про задачу text2image
+ *
+ * @param {string} taskId - ID задачі
+ * @returns {Promise<{success: boolean, data?: Object, error?: string}>}
+ */
+async function getText2ImageTaskDetails(taskId) {
+  try {
+    if (!A2E_API_TOKEN) {
+      throw new Error('A2E_API_TOKEN не налаштовано');
+    }
+
+    const response = await axios.get(
+      `${A2E_API_BASE}/userText2Image/${taskId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${A2E_API_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      }
+    );
+
+    if (response.data && response.data.code === 0) {
+      return {
+        success: true,
+        data: response.data.data
+      };
+    } else {
+      const errorMsg = response.data?.message || 'Unknown error';
+      throw new Error(errorMsg);
+    }
+
+  } catch (error) {
+    console.error('A2E Text2Image Get Task Error:', error.response?.data || error.message);
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message || 'A2E API error'
+    };
+  }
+}
+
 module.exports = {
   startImageToVideoTask,
+  startText2ImageTask,
   getTaskDetails,
+  getText2ImageTaskDetails,
   getAllRecords,
   deleteTask,
   isA2EEnabled: !!A2E_API_TOKEN

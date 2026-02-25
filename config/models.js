@@ -22,7 +22,7 @@ const WAYFORPAY_OVERHEAD = 0.07;
 const NET_REVENUE_FACTOR = 1 - WAYFORPAY_OVERHEAD; // 0.93
 
 const TRIAL_RESTRICTIONS = {
-  blockedModels: ['veo', 'kling_motion', 'kling_3', 'runway_gen4'],
+  blockedModels: ['veo', 'kling_motion', 'kling_3', 'runway_gen4', 'a2e_image'],
   blockedModes: { kling: { durations: [10] }, kling_v2_6: { durations: [10] } },
   messages: {
     blocked:
@@ -356,6 +356,25 @@ module.exports = {
 
       // ideogram $0.03 -> 5
       { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 5, apiCost: 0.03, maxImages: 1, available: true },
+
+      /**
+       * A2E Image — text2image через A2E API
+       * Два рівні якості:
+       * - 1080p: 10 A2E credits × $0.00556 = $0.0556 → ceil($0.0556 × 1.65 / $0.01) = 10 токенів
+       * - 2K: 25 A2E credits × $0.00556 = $0.139 → ceil($0.139 × 1.65 / $0.01) = 23 токенів
+       * Підтримує до 2 референсних зображень
+       */
+      {
+        name: '🔥 A2E Image',
+        key: 'a2e_image',
+        cost: 10,           // 1080p (мінімальна ціна)
+        cost2k: 23,          // 2K
+        apiCost: 0.0556,     // Собівартість 1080p
+        apiCost2k: 0.139,    // Собівартість 2K
+        maxImages: 2,        // Макс. 2 референсних зображення
+        available: true,
+        a2eOnly: true        // Тільки через A2E API
+      },
 
       /**
        * Z-Image - KIE.AI ONLY 💎

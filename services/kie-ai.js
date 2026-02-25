@@ -351,6 +351,16 @@ function extractVideoUrl(result) {
     return result.result_url;
   }
 
+  // Brute-force: шукаємо будь-який .mp4 URL в серіалізованому результаті
+  try {
+    const resultStr = JSON.stringify(result);
+    const urlMatch = resultStr.match(/https?:\/\/[^\s"\\,\]]+\.mp4/);
+    if (urlMatch) {
+      console.log(`📹 Video URL from brute-force regex: ${urlMatch[0]}`);
+      return urlMatch[0];
+    }
+  } catch (e) { /* ігноруємо */ }
+
   console.warn(`⚠️ extractVideoUrl: no video URL found in result. Full result keys: ${Object.keys(result).join(',')}, info keys: ${result.info ? Object.keys(result.info).join(',') : 'N/A'}, response keys: ${result.response ? Object.keys(result.response).join(',') : 'N/A'}`);
   return null;
 }
