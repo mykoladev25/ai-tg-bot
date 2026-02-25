@@ -22,14 +22,33 @@ const GEMINI_MODEL = 'gemini-3-pro-image-preview';
 const MAX_REFERENCE_IMAGES = 14;
 const MAX_RETRIES = 2;          // до 2 retry на fetch failed
 const RETRY_DELAY_MS = 3000;    // 3 секунди між retry
+const REQUEST_TIMEOUT_MS = 120000; // 120 секунд timeout (thinking модель може бути повільною)
 
 let ai = null;
 
 function getClient() {
   if (!ai && GEMINI_API_KEY) {
-    ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    ai = new GoogleGenAI({
+      apiKey: GEMINI_API_KEY,
+      httpOptions: { timeout: REQUEST_TIMEOUT_MS }
+    });
   }
   return ai;
+}
+
+/**
+ * Обгортка для Promise з таймаутом
+ */
+function withTimeout(promise, ms, label = 'operation') {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timeout: ${label} не відповів за ${ms / 1000}s`));
+    }, ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
 }
 
 /**
@@ -105,6 +124,7 @@ async function generateImage(prompt, imageInput = null, aspectRatio = '1:1', ima
 
     const refCount = contents.length - 1;
     console.log(`🍌 Gemini FREE: ${GEMINI_MODEL}, aspect=${mappedAspectRatio}, size=${mappedSize}, refs=${refCount}`);
+    console.log(`📤 Gemini FREE payload: model=${GEMINI_MODEL}, parts=${contents.length}, modalities=[TEXT,IMAGE], aspect=${mappedAspectRatio}, size=${mappedSize}`);
 
     // ====== Виклик API з retry на fetch failed ======
     let response;
@@ -118,17 +138,22 @@ async function generateImage(prompt, imageInput = null, aspectRatio = '1:1', ima
         }
 
         const startTime = Date.now();
-        response = await client.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: contents,
-          config: {
-            responseModalities: ['TEXT', 'IMAGE'],
-            imageConfig: {
-              aspectRatio: mappedAspectRatio,
-              imageSize: mappedSize
+        console.log(`🍌 Gemini FREE: Sending request to API (timeout ${REQUEST_TIMEOUT_MS / 1000}s)...`);
+        response = await withTimeout(
+          client.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: contents,
+            config: {
+              responseModalities: ['TEXT', 'IMAGE'],
+              imageConfig: {
+                aspectRatio: mappedAspectRatio,
+                imageSize: mappedSize
+              }
             }
-          }
-        });
+          }),
+          REQUEST_TIMEOUT_MS,
+          'Gemini API'
+        );
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         console.log(`🍌 Gemini FREE: Response in ${elapsed}s (attempt ${attempt})`);
@@ -233,6 +258,9 @@ async function generateImage(prompt, imageInput = null, aspectRatio = '1:1', ima
     }
     if (errMsg.includes('fetch failed') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ETIMEDOUT') || errMsg.includes('ENOTFOUND')) {
       return { success: false, error: 'Не вдалось з\'єднатися з Google API. Спробуйте через 30 секунд.' };
+    }
+    if (errMsg.includes('Timeout')) {
+      return { success: false, error: 'Google Gemini API не відповів вчасно (>120с). Спробуйте ще раз — іноді thinking модель потребує більше часу.' };
     }
 
     return { success: false, error: 'Помилка генерації. Спробуйте ще раз або оберіть іншу модель.' };

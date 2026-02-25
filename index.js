@@ -344,6 +344,10 @@ const imageGenState = new Map();
 const userProviderChoice = new Map();
 const PROVIDER_CHOICE_FILE = path.join(__dirname, 'config', 'provider-choice.json');
 
+// KIE.AI callback map: taskId -> { chatId, userId, username, model, prompt, cost, apiCost, options }
+// Зберігає дані для відправки результату через webhook callback
+const kieCallbackMap = new Map();
+
 function loadProviderChoice() {
   try {
     if (fs.existsSync(PROVIDER_CHOICE_FILE)) {
@@ -8024,6 +8028,19 @@ async function generateVeoVideo(ctx, state) {
       // ⏱️ PENDING: відео ще генерується після таймауту polling — продовжуємо у фоні
       if (!result.success && result.pending && result.taskId) {
         console.log(`⏱️ Veo task ${result.taskId} pending — starting background recovery for user ${userId}`);
+
+        // Зберігаємо дані для callback webhook (якщо KIE.AI надішле callback раніше за polling)
+        kieCallbackMap.set(result.taskId, {
+          chatId, userId, username,
+          model: 'veo', modelName: model.name,
+          prompt: generationData.prompt,
+          aspectRatio: generationData.aspectRatio,
+          duration, generateAudio,
+          veoCost, apiCost,
+          hasStartImage, hasLastFrame,
+          references: generationData.references?.length || 0,
+          createdAt: Date.now()
+        });
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
           `⏳ <b>Google Veo 3.1 ще генерується...</b>\n\n` +
@@ -8092,12 +8109,14 @@ async function generateVeoVideo(ctx, state) {
                   caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${veoCost}⚡`,
                   ...keyboard.createBackButton('video_menu')
                 });
+                kieCallbackMap.delete(recoveryTaskId);
                 return;
               }
               if (jobState === 'fail' || jobState === 'failed' || jobState === 'error') {
                 const errMsg = job.failMsg || job.failCode || 'Unknown error';
                 console.error(`❌ Veo recovery: task ${recoveryTaskId} failed: ${errMsg}`);
                 await bot.telegram.sendMessage(chatId, `❌ Veo 3.1: генерація не вдалась.\n${errMsg}`);
+                kieCallbackMap.delete(recoveryTaskId);
                 return;
               }
             } catch (e) {
@@ -12170,6 +12189,102 @@ async function startBot() {
     const createWayForPayRouter = require('./webhooks/wayforpay');
     const wayforpayWebhook = createWayForPayRouter(bot);
     app.use('/webhook', wayforpayWebhook);
+
+    // ==================== KIE.AI WEBHOOK (Veo 3.1 callback) ====================
+    app.post('/webhook/kie-ai', express.json(), async (req, res) => {
+      try {
+        const body = req.body;
+        const taskId = body?.data?.taskId;
+        const code = body?.code;
+        const msg = body?.msg;
+
+        console.log(`📥 KIE.AI webhook: taskId=${taskId}, code=${code}, msg=${msg}`);
+
+        if (!taskId) {
+          console.warn('⚠️ KIE.AI webhook: no taskId in body');
+          return res.status(200).json({ ok: true });
+        }
+
+        // Шукаємо дані для цього taskId
+        const callbackData = kieCallbackMap.get(taskId);
+        if (!callbackData) {
+          // Не знайшли — можливо вже доставлено через polling
+          console.log(`📥 KIE.AI webhook: taskId=${taskId} not in callbackMap (already delivered via polling)`);
+          return res.status(200).json({ ok: true });
+        }
+
+        // Перевіряємо статус
+        if (code !== 200) {
+          console.error(`❌ KIE.AI webhook: task ${taskId} failed: code=${code}, msg=${msg}`);
+          const errorMsg = body?.data?.info?.resultUrls || msg || 'Unknown error';
+          await bot.telegram.sendMessage(callbackData.chatId,
+            `❌ Veo 3.1: генерація не вдалась.\n${errorMsg}`
+          );
+          kieCallbackMap.delete(taskId);
+          return res.status(200).json({ ok: true });
+        }
+
+        // Витягуємо URL відео
+        const videoUrl = kieAI.extractVideoUrlExported(body?.data);
+        console.log(`📹 KIE.AI webhook: extracted videoUrl=${videoUrl ? videoUrl.substring(0, 100) : 'NULL'}`);
+
+        if (!videoUrl) {
+          console.error(`❌ KIE.AI webhook: no video URL. data keys: ${Object.keys(body?.data || {}).join(',')}`);
+          if (body?.data?.info) console.error(`  info: ${JSON.stringify(body.data.info).substring(0, 500)}`);
+          return res.status(200).json({ ok: true });
+        }
+
+        // ✅ Відео готове — списуємо токени та відправляємо
+        const { chatId, userId, veoCost, apiCost, duration, generateAudio, prompt, aspectRatio, hasStartImage, hasLastFrame, references } = callbackData;
+
+        try {
+          await userBalance.deductTokens(userId, veoCost, `${callbackData.modelName} generation (callback)`, {
+            modelKey: 'veo', modelName: callbackData.modelName, apiCost,
+            prompt, aspectRatio, duration, generateAudio,
+            hasStartImage, hasLastFrame, references
+          });
+
+          const isTrialVeo = await isTrialUser(userId);
+          await monitoringLoggers.logUsageEvent({
+            userId, modelKey: 'veo', success: true,
+            options: { duration, generateAudio }, isTrial: isTrialVeo, isFree: isTrialVeo
+          });
+
+          await bot.telegram.sendMessage(chatId,
+            `✅ <b>Google Veo 3.1 готово!</b> (callback)\n\n` +
+            `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
+            `📐 Пропорції: ${aspectRatio}\n` +
+            `⏱️ Тривалість: ${duration} сек\n` +
+            `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
+            `📝 Промпт: ${prompt?.substring(0, 100)}...\n\n` +
+            `💰 Витрачено: ${veoCost}⚡`,
+            { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+          );
+
+          await safeSendVideo(chatId, videoUrl, {
+            caption: `🌟 Google Veo 3.1\n\n📐 ${aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${veoCost}⚡`,
+            ...keyboard.createBackButton('video_menu')
+          });
+
+          console.log(`✅ KIE.AI webhook: Veo video delivered to user ${userId} via callback`);
+        } catch (sendErr) {
+          console.error(`❌ KIE.AI webhook: failed to send video: ${sendErr.message}`);
+          // Все одно спробуємо надіслати URL
+          try {
+            await bot.telegram.sendMessage(chatId, `🎥 Відео готове: ${videoUrl}\n\n💰 Витрачено: ${veoCost}⚡`);
+          } catch (e2) {
+            console.error(`❌ KIE.AI webhook: fallback send also failed: ${e2.message}`);
+          }
+        }
+
+        kieCallbackMap.delete(taskId);
+        return res.status(200).json({ ok: true });
+
+      } catch (error) {
+        console.error('❌ KIE.AI webhook error:', error.message);
+        return res.status(200).json({ ok: true }); // Завжди 200 щоб KIE.AI не ретраїв
+      }
+    });
 
     // ✅ Admin routes (protected by ADMIN_TOKEN)
     app.use('/admin', adminRoutes);
