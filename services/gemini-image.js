@@ -156,7 +156,10 @@ async function generateImage(prompt, imageInput = null, aspectRatio = '1:1', ima
         );
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        console.log(`🍌 Gemini FREE: Response in ${elapsed}s (attempt ${attempt})`);
+        const candidateCount = response?.candidates?.length || 0;
+        const firstFinish = response?.candidates?.[0]?.finishReason || 'N/A';
+        const partsCount = response?.candidates?.[0]?.content?.parts?.length || 0;
+        console.log(`🍌 Gemini FREE: Response in ${elapsed}s (attempt ${attempt}), candidates=${candidateCount}, finishReason=${firstFinish}, parts=${partsCount}`);
         break; // success
 
       } catch (err) {
