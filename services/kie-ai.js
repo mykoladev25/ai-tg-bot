@@ -170,7 +170,46 @@ function extractImageUrl(result) {
  * Fallback: /jobs/recordInfo
  */
 async function fetchVeoTaskInfo(taskId) {
-  // Спочатку пробуємо /veo/record-detail (як у Runway: /runway/record-detail)
+  // ===== METHOD 1: /veo/record-info (згідно з документацією KIE.AI) =====
+  try {
+    const recordInfoResp = await axios.get(
+      `${KIE_API_BASE}/veo/record-info?taskId=${taskId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${KIE_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+    if (recordInfoResp.data?.code === 200 && recordInfoResp.data?.data) {
+      const data = recordInfoResp.data.data;
+      // Veo record-info повертає successFlag: 1/0
+      let state = (data.state || data.status || '').toLowerCase();
+      if (!state && data.successFlag === 1) state = 'success';
+      if (!state && data.successFlag === 0 && data.errorMessage) state = 'fail';
+      if (!state && data.completeTime && data.response) state = 'success';
+      if (!data.state && state) data.state = state;
+
+      console.log(`📡 Veo /veo/record-info: taskId=${taskId}, state=${state}, successFlag=${data.successFlag}, keys=${Object.keys(data).join(',')}`);
+
+      if (state === 'success' || state === 'completed') {
+        console.log(`📡 Veo record-info SUCCESS FULL DATA: ${JSON.stringify(data).substring(0, 1000)}`);
+        if (data.response) console.log(`📡 Veo response: ${JSON.stringify(data.response).substring(0, 500)}`);
+        if (data.info) console.log(`📡 Veo info: ${JSON.stringify(data.info).substring(0, 500)}`);
+        if (data.resultJson) console.log(`📡 Veo resultJson: ${String(data.resultJson).substring(0, 500)}`);
+      }
+      return data;
+    } else {
+      console.log(`📡 Veo /veo/record-info: code=${recordInfoResp.data?.code}, msg=${recordInfoResp.data?.msg}`);
+    }
+  } catch (e) {
+    if (e.response?.status !== 404 && e.response?.status !== 400) {
+      console.warn(`⚠️ /veo/record-info failed (${e.response?.status || e.message}), trying record-detail...`);
+    }
+  }
+
+  // ===== METHOD 2: /veo/record-detail =====
   try {
     const response = await axios.get(
       `${KIE_API_BASE}/veo/record-detail?taskId=${taskId}`,
@@ -184,19 +223,19 @@ async function fetchVeoTaskInfo(taskId) {
     );
     if (response.data?.data) {
       const data = response.data.data;
-      // Veo record-detail може повертати successFlag замість state
       let state = (data.state || data.status || '').toLowerCase();
       if (!state && data.successFlag === 1) state = 'success';
       if (!state && data.successFlag === 0 && data.errorMessage) state = 'fail';
-      // Зберігаємо state в data для polling
+      if (!state && data.completeTime && data.response) state = 'success';
       if (!data.state && state) data.state = state;
 
-      // Логуємо структуру тільки при success щоб зрозуміти формат
+      console.log(`📡 Veo /veo/record-detail: taskId=${taskId}, state=${state}, successFlag=${data.successFlag}, keys=${Object.keys(data).join(',')}`);
+
       if (state === 'success' || state === 'completed') {
-        console.log(`📡 Veo record-detail SUCCESS: taskId=${taskId}, keys=${Object.keys(data).join(',')}`);
-        if (data.response) console.log(`📡 Veo response keys: ${Object.keys(data.response).join(',')}, resultUrls type: ${typeof data.response.resultUrls}`);
-        if (data.info) console.log(`📡 Veo info keys: ${Object.keys(data.info).join(',')}, resultUrls type: ${typeof data.info.resultUrls}`);
-        if (data.resultJson) console.log(`📡 Veo resultJson type: ${typeof data.resultJson}, preview: ${String(data.resultJson).substring(0, 200)}`);
+        console.log(`📡 Veo record-detail SUCCESS FULL DATA: ${JSON.stringify(data).substring(0, 1000)}`);
+        if (data.response) console.log(`📡 Veo response: ${JSON.stringify(data.response).substring(0, 500)}`);
+        if (data.info) console.log(`📡 Veo info: ${JSON.stringify(data.info).substring(0, 500)}`);
+        if (data.resultJson) console.log(`📡 Veo resultJson: ${String(data.resultJson).substring(0, 500)}`);
       }
       return data;
     }
@@ -205,14 +244,17 @@ async function fetchVeoTaskInfo(taskId) {
       console.warn(`⚠️ /veo/record-detail failed (${e.response?.status || e.message}), falling back to /jobs/recordInfo`);
     }
   }
-  // Fallback: /jobs/recordInfo
+
+  // ===== METHOD 3: Fallback /jobs/recordInfo =====
   const fallbackResult = await fetchTaskRecordInfo(taskId);
   if (fallbackResult) {
     const state = (fallbackResult.state || fallbackResult.status || '').toLowerCase();
+    console.log(`📡 Veo /jobs/recordInfo: taskId=${taskId}, state=${state}, keys=${Object.keys(fallbackResult).join(',')}`);
     if (state === 'success' || state === 'completed') {
-      console.log(`📡 Veo /jobs/recordInfo SUCCESS: taskId=${taskId}, keys=${Object.keys(fallbackResult).join(',')}`);
-      if (fallbackResult.resultJson) console.log(`📡 Veo resultJson type: ${typeof fallbackResult.resultJson}, preview: ${String(fallbackResult.resultJson).substring(0, 200)}`);
+      console.log(`📡 Veo /jobs/recordInfo SUCCESS: ${JSON.stringify(fallbackResult).substring(0, 1000)}`);
     }
+  } else {
+    console.warn(`⚠️ Veo /jobs/recordInfo returned null for taskId=${taskId}`);
   }
   return fallbackResult;
 }
@@ -382,6 +424,7 @@ async function fetchVeo1080pUrl(taskId) {
         timeout: 15000
       }
     );
+    console.log(`📥 Veo get-1080p-video response: code=${resp.data?.code}, msg=${resp.data?.msg}, data=${JSON.stringify(resp.data?.data || {}).substring(0, 300)}`);
     if (resp.data?.code === 200 && resp.data?.data?.resultUrl) {
       console.log(`✅ Veo 1080p URL: ${resp.data.data.resultUrl.substring(0, 100)}`);
       return resp.data.data.resultUrl;
@@ -391,10 +434,10 @@ async function fetchVeo1080pUrl(taskId) {
       console.log(`⏳ Veo 1080p still processing: ${resp.data?.msg}`);
       return null;
     }
-    console.warn(`⚠️ Veo get-1080p-video unexpected: code=${resp.data?.code}, msg=${resp.data?.msg}`);
+    console.warn(`⚠️ Veo get-1080p-video unexpected: code=${resp.data?.code}, msg=${resp.data?.msg}, full=${JSON.stringify(resp.data).substring(0, 500)}`);
     return null;
   } catch (e) {
-    console.warn(`⚠️ Veo get-1080p-video failed: ${e.response?.status || e.message}`);
+    console.warn(`⚠️ Veo get-1080p-video failed: status=${e.response?.status}, data=${JSON.stringify(e.response?.data || {}).substring(0, 300)}, msg=${e.message}`);
     return null;
   }
 }
@@ -2224,6 +2267,8 @@ async function generateVeoKieAI(prompt, options = {}) {
     // Veo відео: до ~60 хв (720 * 5s)
     const result = await pollVeoStatus(taskId, 720, 5000, 'Veo 3.1 (KIE.AI)');
 
+    console.log(`📋 Veo pollVeoStatus returned: _timeout=${!!result?._timeout}, type=${typeof result}, keys=${result ? Object.keys(result).join(',') : 'null'}`);
+
     // Якщо polling завершився таймаутом — відео ще генерується, повертаємо pending
     if (result && result._timeout) {
       console.warn(`⏱️ Veo task ${taskId} still pending after timeout — returning pending state`);
@@ -2242,25 +2287,32 @@ async function generateVeoKieAI(prompt, options = {}) {
 
     // ✅ Fallback: спробувати /veo/get-1080p-video endpoint
     if (!videoUrl) {
-      console.log(`🔄 Veo: extractVideoUrl returned null, trying get-1080p-video fallback...`);
+      console.log(`🔄 Veo: extractVideoUrl returned null, trying get-1080p-video fallback... taskId=${taskId}`);
       // Перша спроба
       videoUrl = await fetchVeo1080pUrl(taskId);
       // Якщо ще processing — чекаємо 90с і пробуємо ще раз
       if (!videoUrl) {
-        console.log(`⏳ Veo: 1080p not ready, waiting 90s...`);
+        console.log(`⏳ Veo: 1080p not ready yet, waiting 90s before retry... taskId=${taskId}`);
         await new Promise(r => setTimeout(r, 90000));
         videoUrl = await fetchVeo1080pUrl(taskId);
       }
       // Ще раз
       if (!videoUrl) {
-        console.log(`⏳ Veo: 1080p still not ready, waiting 60s more...`);
+        console.log(`⏳ Veo: 1080p still not ready, waiting 60s more... taskId=${taskId}`);
+        await new Promise(r => setTimeout(r, 60000));
+        videoUrl = await fetchVeo1080pUrl(taskId);
+      }
+      // Ще одна спроба через 60с
+      if (!videoUrl) {
+        console.log(`⏳ Veo: 1080p STILL not ready, last try in 60s... taskId=${taskId}`);
         await new Promise(r => setTimeout(r, 60000));
         videoUrl = await fetchVeo1080pUrl(taskId);
       }
     }
 
     if (!videoUrl) {
-      console.error(`❌ Veo: no video URL after all methods. Result keys: ${Object.keys(result).join(',')}`);
+      console.error(`❌ Veo: no video URL after all methods for taskId=${taskId}. Result keys: ${Object.keys(result).join(',')}`);
+      console.error(`❌ Veo FULL result dump: ${JSON.stringify(result).substring(0, 2000)}`);
       if (result.info) console.error(`❌ Veo info: ${JSON.stringify(result.info).substring(0, 500)}`);
       if (result.response) console.error(`❌ Veo response: ${JSON.stringify(result.response).substring(0, 500)}`);
       if (result.resultJson) console.error(`❌ Veo resultJson: ${String(result.resultJson).substring(0, 500)}`);
@@ -2301,11 +2353,15 @@ async function generateVeoKieAI(prompt, options = {}) {
  */
 async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelName = 'Veo') {
   let attempts = 0;
+  console.log(`🔁 ${modelName}: Starting polling for taskId=${taskId}, maxAttempts=${maxAttempts}, interval=${interval}ms`);
 
   while (attempts < maxAttempts) {
     try {
       const job = await fetchVeoTaskInfo(taskId);
       if (!job) {
+        if (attempts < 5 || attempts % 12 === 0) {
+          console.log(`📊 ${modelName} poll (${attempts + 1}/${maxAttempts}): fetchVeoTaskInfo returned null`);
+        }
         await new Promise(resolve => setTimeout(resolve, interval));
         attempts++;
         continue;
@@ -2313,9 +2369,9 @@ async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelNa
 
       const state = (job.state || job.status || '').toLowerCase();
 
-      // Логуємо кожну хвилину (кожні 12 спроб по 5с), не кожні 5 секунд
-      if (attempts % 12 === 0 || state === 'success' || state === 'completed' || state === 'fail' || state === 'failed') {
-        console.log(`📊 ${modelName} status (attempt ${attempts + 1}/${maxAttempts}): ${state}`);
+      // Логуємо перші 5 спроб, потім кожну хвилину, або при фінальних статусах
+      if (attempts < 5 || attempts % 12 === 0 || state === 'success' || state === 'completed' || state === 'fail' || state === 'failed') {
+        console.log(`📊 ${modelName} poll (${attempts + 1}/${maxAttempts}): state=${state}, successFlag=${job.successFlag}, hasResponse=${!!job.response}, hasInfo=${!!job.info}, hasResultJson=${!!job.resultJson}`);
       }
 
       if (state === 'success' || state === 'completed') {

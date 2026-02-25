@@ -8467,6 +8467,8 @@ async function generateVeoVideo(ctx, state) {
             generateAudio
           );
 
+      console.log(`🎯 Veo result: success=${result.success}, pending=${!!result.pending}, taskId=${result.taskId}, videoUrl=${result.videoUrl ? result.videoUrl.substring(0, 100) : 'NULL'}, error=${result.error || 'none'}, provider=${result.provider}`);
+
       // ⏱️ PENDING: відео ще генерується після таймауту polling — продовжуємо у фоні
       if (!result.success && result.pending && result.taskId) {
         console.log(`⏱️ Veo task ${result.taskId} pending — starting background recovery for user ${userId}`);
@@ -12747,6 +12749,12 @@ async function startBot() {
         const msg = body?.msg;
 
         console.log(`📥 KIE.AI webhook: taskId=${taskId}, code=${code}, msg=${msg}`);
+        console.log(`📥 KIE.AI webhook FULL body: ${JSON.stringify(body).substring(0, 2000)}`);
+        if (body?.data) {
+          console.log(`📥 KIE.AI webhook data keys: ${Object.keys(body.data).join(',')}`);
+          if (body.data.info) console.log(`📥 KIE.AI webhook data.info: ${JSON.stringify(body.data.info).substring(0, 500)}`);
+          if (body.data.response) console.log(`📥 KIE.AI webhook data.response: ${JSON.stringify(body.data.response).substring(0, 500)}`);
+        }
 
         if (!taskId) {
           console.warn('⚠️ KIE.AI webhook: no taskId in body');
