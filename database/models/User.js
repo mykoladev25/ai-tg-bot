@@ -25,6 +25,11 @@ const userSchema = new mongoose.Schema({
     kling_motion: { type: Number, default: 0 }
   },
 
+  // Free generation usage (безкоштовні генерації для всіх користувачів)
+  freeUsage: {
+    nano_banana_free: { type: Number, default: 0 }
+  },
+
   subscription: {
     type: { type: String, enum: ['TRIAL', 'STARTER', 'BASIC', 'PRO', 'PREMIUM', null] },
     startedAt: Date,

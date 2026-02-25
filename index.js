@@ -12,6 +12,7 @@ const claude = require('./services/claude');
 const midjourney = require('./services/midjourney');
 const replicate = require('./services/replicate');
 const kieAI = require('./services/kie-ai');
+const geminiImage = require('./services/gemini-image');
 const kiePricingSync = require('./services/kie-pricing-sync');
 const payment = require('./services/payment');
 const exchangeRate = require('./services/exchangeRate');
@@ -55,6 +56,10 @@ function getDesignModelsWithEffectiveCost(userId) {
       // Midjourney та Z-Image доступні тільки якщо KIE.AI налаштований
       if (m.key === 'midjourney' || m.key === 'z_image') {
         return kieAI.isKieAIEnabled;
+      }
+      // Nano Banana FREE доступна тільки якщо Google Gemini API налаштований
+      if (m.key === 'nano_banana_free') {
+        return geminiImage.isConfigured;
       }
       return true;
     })
@@ -586,6 +591,7 @@ async function checkTrialRestrictions(userId, modelKey, options = {}) {
 const IMAGE_MODELS = [
   'stable_diffusion',
   'nano_banana',
+  'nano_banana_free',
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_4k',
@@ -598,6 +604,7 @@ const IMAGE_MODELS = [
 // ✅ МОДЕЛІ КОТРІ ПІДТРИМУЮТЬ ВИБІР ASPECT RATIO
 const MODELS_WITH_ASPECT_RATIO = [
   'nano_banana',
+  'nano_banana_free',
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_4k',
@@ -620,6 +627,7 @@ const MODELS_WITH_STATE = [
 const ASPECT_RATIO_OPTIONS = {
   seedream_4k: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
   nano_banana: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+  nano_banana_free: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   nano_banana_2k: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   nano_banana_4k: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   stable_diffusion: ['1:1', '16:9', '21:9', '2:3', '3:2', '4:5', '5:4', '9:16', '9:21'],
@@ -656,6 +664,7 @@ const RATIO_NOTES = {
 
 const TEXT_ASPECT_RATIO_MODELS = new Set([
   'nano_banana',
+  'nano_banana_free',
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_4k',
@@ -3787,7 +3796,7 @@ bot.action(/^mj_vary_(.+)_(\d+)$/, async (ctx) => {
 });
 
 // Design Models
-bot.action(/^(flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram|z_image)$/, async (ctx) => {
+bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram|z_image)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
 
@@ -3817,6 +3826,30 @@ bot.action(/^(flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|se
   }
 
   await ctx.answerCbQuery();
+
+  // 🎁 FREE MODEL CHECK: Nano Banana FREE — перевірка ліміту безкоштовних генерацій
+  if (modelKey === 'nano_banana_free') {
+    if (!geminiImage.isConfigured) {
+      await ctx.reply('❌ Модель тимчасово недоступна (Google API not configured).');
+      return;
+    }
+    const user = await User.findById(ctx.from.id);
+    const freeUsed = user?.freeUsage?.nano_banana_free || 0;
+    const freeLimit = geminiImage.FREE_GENERATIONS_LIMIT;
+    if (freeUsed >= freeLimit) {
+      await ctx.reply(
+        `🎁 <b>Nano Banana FREE</b>\n\n` +
+        `❌ Ви вже використали всі ${freeLimit} безкоштовних генерацій!\n\n` +
+        `💡 Спробуйте платні моделі з більшими можливостями:\n` +
+        `• 🍌 Nano Banana — 4⚡ за генерацію\n` +
+        `• 🍌 Nano Banana PRO 2K — 15⚡\n` +
+        `• 🍌 Nano Banana PRO 4K — 20⚡\n\n` +
+        `Або поповніть баланс для доступу до всіх моделей! 🚀`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+      );
+      return;
+    }
+  }
 
   const effectiveCost = getEffectiveImageCost(ctx.from.id, model, modelKey);
   if (model.cost > 0 && !(await userBalance.hasTokens(ctx.from.id, effectiveCost))) {
@@ -3889,6 +3922,16 @@ bot.action(/^(flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|se
       `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~20-30 секунд`,
 
+    nano_banana_free: `🍌🎁 <b>Nano Banana FREE</b>\n\n` +
+      `🆓 Безкоштовна генерація зображень!\n` +
+      `📊 Ліміт: ${geminiImage.FREE_GENERATIONS_LIMIT} генерацій на користувача\n` +
+      `🤖 Модель: Gemini 3 Pro Image (Nano Banana Pro)\n\n` +
+      refsStep +
+      `Опишіть детально що хочете згенерувати.\n` +
+      `💡 До ${geminiImage.MAX_REFERENCE_IMAGES} референс-зображень!\n\n` +
+      `💰 Вартість: БЕЗКОШТОВНО 🎁\n` +
+      `⏱️ Час: ~15-40 секунд`,
+
     seedream: `🌊 <b>${model.name}</b>\n\n` +
       refsStep +
       `Опишіть детально що хочете згенерувати.\n` +
@@ -3904,7 +3947,8 @@ bot.action(/^(flux|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|se
 
   // Для nano_banana та seedream моделей використовуємо спільний шаблон
   let messageKey = modelKey;
-  if (modelKey.startsWith('nano_banana')) messageKey = 'nano_banana';
+  if (modelKey === 'nano_banana_free') messageKey = 'nano_banana_free';
+  else if (modelKey.startsWith('nano_banana')) messageKey = 'nano_banana';
   if (modelKey.startsWith('seedream')) messageKey = 'seedream';
 
   const defaultMessage = `🎨 <b>${model.name}</b>\n\n` +
@@ -7946,7 +7990,11 @@ async function generateVeoVideo(ctx, state) {
               }
               if (jobState === 'success' || jobState === 'completed') {
                 const videoUrl = kieAI.extractVideoUrlExported(job);
+                console.log(`📹 Veo recovery extracted URL: ${videoUrl ? videoUrl.substring(0, 100) : 'NULL'}`);
                 if (!videoUrl) {
+                  console.error(`❌ Veo recovery: no URL. Job keys: ${Object.keys(job).join(',')}`);
+                  if (job.info) console.error(`❌ Veo recovery info: ${JSON.stringify(job.info).substring(0, 500)}`);
+                  if (job.resultJson) console.error(`❌ Veo recovery resultJson: ${String(job.resultJson).substring(0, 500)}`);
                   await bot.telegram.sendMessage(chatId, `❌ Veo 3.1: відео згенеровано, але URL не знайдено. Зверніться до підтримки. TaskId: ${recoveryTaskId}`);
                   return;
                 }
@@ -10338,6 +10386,136 @@ async function safeSendVideo(chatId, url, options) {
   return bot.telegram.sendVideo(chatId, { url: mediaUrl }, options);
 }
 
+/**
+ * 🎁 Nano Banana FREE — генерація через Google Gemini API (безкоштовно)
+ * Окремий хендлер, бо не використовує провайдер-фолбек систему
+ */
+async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
+
+  // Перевірка ліміту
+  const user = await User.findById(userId);
+  const freeUsed = user?.freeUsage?.nano_banana_free || 0;
+  const freeLimit = geminiImage.FREE_GENERATIONS_LIMIT;
+
+  if (freeUsed >= freeLimit) {
+    await ctx.reply(
+      `🎁 <b>Nano Banana FREE</b>\n\n` +
+      `❌ Ви вже використали всі ${freeLimit} безкоштовних генерацій!\n\n` +
+      `💡 Спробуйте платні моделі для більших можливостей:\n` +
+      `• 🍌 Nano Banana — 4⚡ за генерацію\n` +
+      `• 🍌 Nano Banana PRO 2K — 15⚡\n` +
+      `• 🍌 Nano Banana PRO 4K — 20⚡`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
+
+  const isAlbum = Array.isArray(imageInput) && imageInput.length > 1;
+  const refCount = Array.isArray(imageInput) ? imageInput.length : (imageInput ? 1 : 0);
+  const mode = imageInput ? (isAlbum ? `album (${refCount} refs)` : 'img2img') : 'text2img';
+  const remaining = freeLimit - freeUsed - 1;
+
+  const statusMsg = await ctx.reply(
+    `🍌🎁 Nano Banana FREE генерація (${mode})...\n\n` +
+    `🤖 Модель: Gemini 3 Pro Image\n` +
+    `📝 Промпт: "${prompt.substring(0, 150)}${prompt.length > 150 ? '...' : ''}"\n` +
+    (refCount > 0 ? `📸 Референсів: ${refCount}\n` : '') +
+    `📐 Пропорції: ${aspectRatio}\n\n` +
+    `📊 Залишиться безкоштовних: ${remaining} з ${freeLimit}`
+  );
+
+  try {
+    console.log(`🍌🎁 Nano Banana FREE: userId=${userId}, used=${freeUsed}/${freeLimit}, mode=${mode}, refs=${refCount}, aspect=${aspectRatio}`);
+
+    const result = await geminiImage.generateImage(prompt, imageInput, aspectRatio);
+
+    if (!result.success) {
+      console.error(`❌ Nano Banana FREE error: ${result.error}`);
+      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+        userId, username, action: 'nano_banana_free_generation',
+        model: model.name, prompt, refs: refCount, aspectRatio
+      });
+
+      await bot.telegram.editMessageText(chatId, statusMsg.message_id, null,
+        `❌ Помилка генерації Nano Banana FREE.\n\n${result.error}\n\nСпробуйте інший промпт або модель.`
+      );
+      return;
+    }
+
+    // ✅ Інкрементуємо лічильник безкоштовних генерацій
+    await User.findByIdAndUpdate(userId, {
+      $inc: { 'freeUsage.nano_banana_free': 1 }
+    });
+
+    // Видаляємо статусне повідомлення
+    try {
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+    } catch (e) {
+      console.warn('Could not delete status message:', e.message);
+    }
+
+    const caption = `🍌🎁 Nano Banana FREE (${mode})\n\n` +
+      `📝 Промпт: ${prompt.substring(0, 800)}${prompt.length > 800 ? '...' : ''}\n\n` +
+      `💰 Вартість: БЕЗКОШТОВНО 🎁\n` +
+      `📊 Залишилось: ${remaining} з ${freeLimit}`;
+
+    // Перевіряємо розмір — якщо >10MB, Telegram не прийме як фото
+    const maxPhotoSize = 10 * 1024 * 1024;
+    if (result.imageBuffer.length > maxPhotoSize) {
+      const fileSizeMB = (result.imageBuffer.length / (1024 * 1024)).toFixed(2);
+      await bot.telegram.sendDocument(chatId,
+        { source: result.imageBuffer, filename: 'nano_banana_free.png' },
+        {
+          caption: caption + `\n\n📊 Розмір: ${fileSizeMB} MB (відправлено як файл)`,
+          parse_mode: 'HTML',
+          ...keyboard.createBackButton('design_menu')
+        }
+      );
+    } else {
+      await bot.telegram.sendPhoto(chatId,
+        { source: result.imageBuffer, filename: 'nano_banana_free.png' },
+        { caption, parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+      );
+    }
+
+    // Логування
+    const isTrial = await isTrialUser(userId);
+    await monitoringLoggers.logUsageEvent({
+      userId,
+      modelKey: 'nano_banana_free',
+      success: true,
+      isTrial,
+      isFree: true,
+      provider: 'google-gemini',
+      metadata: { freeUsed: freeUsed + 1, freeLimit, refCount, aspectRatio, model: geminiImage.GEMINI_MODEL }
+    });
+
+    console.log(`✅ Nano Banana FREE: userId=${userId}, used=${freeUsed + 1}/${freeLimit}, model=${geminiImage.GEMINI_MODEL}`);
+
+  } catch (error) {
+    console.error('❌ Nano Banana FREE generation failed:', error);
+    await adminNotifier.notifyAdmin(bot, error, {
+      userId, username, action: 'nano_banana_free_generation',
+      model: model.name, prompt
+    });
+
+    try {
+      await bot.telegram.editMessageText(chatId, statusMsg.message_id, null,
+        '❌ Помилка генерації. Спробуйте ще раз або оберіть іншу модель.'
+      );
+    } catch (e) {
+      try {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації.', keyboard.createBackButton('design_menu'));
+      } catch (sendErr) {
+        console.error('Could not notify user:', sendErr.message);
+      }
+    }
+  }
+}
+
 async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, aspectRatio = '1:1') {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
@@ -10351,6 +10529,11 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   }
 
   imageInput = normalizeReferenceOrder(imageInput);
+
+  // 🎁 NANO BANANA FREE — окремий шлях генерації через Google Gemini API
+  if (modelKey === 'nano_banana_free') {
+    return handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio);
+  }
 
   const effectiveImageCost = getEffectiveImageCost(userId, model, modelKey);
   if (!(await userBalance.hasTokens(userId, effectiveImageCost))) {
@@ -12702,7 +12885,7 @@ async function startBot() {
             }
 
             const result = {
-              name: m.name.replace(/[🌀🍌🌊🔮🎯🖼️]/g, '').trim(),
+              name: m.name.replace(/[🌀🍌🌊🔮🎯🖼️🎁]/g, '').trim(),
               key: m.key,
               cost: effectiveCost,
               priceUSD: +(effectiveCost * tokenPriceUSD).toFixed(4),
@@ -12710,13 +12893,20 @@ async function startBot() {
               maxImages: m.maxImages || 1
             };
 
+            // Free model marker
+            if (m.freeLimit) {
+              result.freeLimit = m.freeLimit;
+              result.isFree = true;
+              result.provider = 'google-gemini';
+            }
+
             // Debug fields (optional)
             if (effectiveApiCost !== undefined) {
               const usedKie = kieAI.isKieAIImplemented(m.key) && (effectiveCost !== m.cost || m.kieAIOnly);
               result._debug = {
                 apiCost: effectiveApiCost,
                 grossMarginPct: calcGrossMargin(effectiveCost, effectiveApiCost),
-                priceSource: usedKie ? 'kie-ai' : 'replicate'
+                priceSource: m.googleDirect ? 'google-gemini' : (usedKie ? 'kie-ai' : 'replicate')
               };
             }
 
@@ -12864,6 +13054,16 @@ async function startBot() {
         models.design.models
           .filter(m => m.available)
           .forEach((m) => {
+            // Nano Banana FREE — показуємо окремо з freeLimit
+            if (m.key === 'nano_banana_free') {
+              trialUsage[m.key] = {
+                count: m.freeLimit || geminiImage.FREE_GENERATIONS_LIMIT,
+                cost: 0,
+                isFree: true,
+                freeLimit: m.freeLimit || geminiImage.FREE_GENERATIONS_LIMIT
+              };
+              return;
+            }
             const blocked = isBlockedModel(m.key);
             // КIE пріоритет: якщо модель підтримується на KIE — використати KIE ціну
             let cost = m.cost || 0;

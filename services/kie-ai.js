@@ -183,8 +183,15 @@ async function fetchVeoTaskInfo(taskId) {
       }
     );
     if (response.data?.data) {
-      console.log(`📡 Veo status via /veo/record-detail: taskId=${taskId}`);
-      return response.data.data;
+      const data = response.data.data;
+      const state = (data.state || data.status || '').toLowerCase();
+      // Логуємо структуру тільки при success щоб зрозуміти формат
+      if (state === 'success' || state === 'completed') {
+        console.log(`📡 Veo record-detail SUCCESS: taskId=${taskId}, keys=${Object.keys(data).join(',')}`);
+        if (data.info) console.log(`📡 Veo info keys: ${Object.keys(data.info).join(',')}, resultUrls type: ${typeof data.info.resultUrls}`);
+        if (data.resultJson) console.log(`📡 Veo resultJson type: ${typeof data.resultJson}, preview: ${String(data.resultJson).substring(0, 200)}`);
+      }
+      return data;
     }
   } catch (e) {
     if (e.response?.status !== 404 && e.response?.status !== 400) {
@@ -192,31 +199,90 @@ async function fetchVeoTaskInfo(taskId) {
     }
   }
   // Fallback: /jobs/recordInfo
-  return await fetchTaskRecordInfo(taskId);
+  const fallbackResult = await fetchTaskRecordInfo(taskId);
+  if (fallbackResult) {
+    const state = (fallbackResult.state || fallbackResult.status || '').toLowerCase();
+    if (state === 'success' || state === 'completed') {
+      console.log(`📡 Veo /jobs/recordInfo SUCCESS: taskId=${taskId}, keys=${Object.keys(fallbackResult).join(',')}`);
+      if (fallbackResult.resultJson) console.log(`📡 Veo resultJson type: ${typeof fallbackResult.resultJson}, preview: ${String(fallbackResult.resultJson).substring(0, 200)}`);
+    }
+  }
+  return fallbackResult;
 }
 
 /**
  * Витягти URL відео з результату KIE.AI
  * Підтримує формати: resultJson, info.resultUrls (Veo callback), output.resultUrls, output.video_url
+ *
+ * ⚠️ ВАЖЛИВО: Veo API повертає info.resultUrls як JSON STRING (не масив!)
+ * Приклад: info.resultUrls = "[\"https://tempfile.aiquickdraw.com/v/xxx.mp4\"]"
  */
 function extractVideoUrl(result) {
   if (!result) return null;
 
-  // Veo callback format: { info: { resultUrls: [...] } }
-  if (result.info?.resultUrls && result.info.resultUrls.length > 0) {
-    return result.info.resultUrls[0];
+  console.log(`🔍 extractVideoUrl: keys=${Object.keys(result).join(',')}, info=${!!result.info}, resultJson=${!!result.resultJson}`);
+
+  // Veo callback/record-detail format: { info: { resultUrls: '["url"]' } }
+  if (result.info?.resultUrls) {
+    let urls = result.info.resultUrls;
+    // ⚠️ Veo API повертає resultUrls як JSON string — треба парсити!
+    if (typeof urls === 'string') {
+      try {
+        urls = JSON.parse(urls);
+        console.log(`📹 Veo info.resultUrls parsed from string: ${JSON.stringify(urls)}`);
+      } catch (e) {
+        // Можливо це просто URL без JSON обгортки
+        if (urls.startsWith('http')) {
+          console.log(`📹 Veo info.resultUrls is plain URL: ${urls}`);
+          return urls;
+        }
+        console.warn(`⚠️ Failed to parse info.resultUrls: ${e.message}, raw: ${urls.substring(0, 200)}`);
+      }
+    }
+    if (Array.isArray(urls) && urls.length > 0) {
+      console.log(`📹 Veo video URL from info.resultUrls: ${urls[0]}`);
+      return urls[0];
+    }
   }
+
+  // Veo callback: info.originUrls (original video when aspect_ratio != 16:9)
+  if (result.info?.originUrls) {
+    let originUrls = result.info.originUrls;
+    if (typeof originUrls === 'string') {
+      try {
+        originUrls = JSON.parse(originUrls);
+      } catch (e) {
+        if (originUrls.startsWith('http')) return originUrls;
+      }
+    }
+    if (Array.isArray(originUrls) && originUrls.length > 0) {
+      console.log(`📹 Veo video URL from info.originUrls: ${originUrls[0]}`);
+      return originUrls[0];
+    }
+  }
+
   // Veo record-detail format: { videoInfo: { videoUrl: '...' } }
   if (result.videoInfo?.videoUrl) {
+    console.log(`📹 Veo video URL from videoInfo.videoUrl: ${result.videoInfo.videoUrl}`);
     return result.videoInfo.videoUrl;
   }
 
   // Standard /jobs/recordInfo format: { resultJson: '{"resultUrls":[...]}' }
   if (result.resultJson) {
     try {
-      const parsed = JSON.parse(result.resultJson);
-      if (parsed.resultUrls && parsed.resultUrls.length > 0) {
-        return parsed.resultUrls[0];
+      const parsed = typeof result.resultJson === 'string' ? JSON.parse(result.resultJson) : result.resultJson;
+      if (parsed.resultUrls) {
+        let rUrls = parsed.resultUrls;
+        // resultUrls також може бути string
+        if (typeof rUrls === 'string') {
+          try { rUrls = JSON.parse(rUrls); } catch (e) {
+            if (rUrls.startsWith('http')) return rUrls;
+          }
+        }
+        if (Array.isArray(rUrls) && rUrls.length > 0) {
+          console.log(`📹 Video URL from resultJson.resultUrls: ${rUrls[0]}`);
+          return rUrls[0];
+        }
       }
     } catch (e) {
       console.warn('Failed to parse resultJson:', e.message);
@@ -224,17 +290,29 @@ function extractVideoUrl(result) {
   }
 
   if (result.output?.video_url) {
+    console.log(`📹 Video URL from output.video_url: ${result.output.video_url}`);
     return result.output.video_url;
   }
 
-  if (result.output?.resultUrls && result.output.resultUrls.length > 0) {
-    return result.output.resultUrls[0];
+  if (result.output?.resultUrls) {
+    let oUrls = result.output.resultUrls;
+    if (typeof oUrls === 'string') {
+      try { oUrls = JSON.parse(oUrls); } catch (e) {
+        if (oUrls.startsWith('http')) return oUrls;
+      }
+    }
+    if (Array.isArray(oUrls) && oUrls.length > 0) {
+      console.log(`📹 Video URL from output.resultUrls: ${oUrls[0]}`);
+      return oUrls[0];
+    }
   }
 
   if (result.result_url) {
+    console.log(`📹 Video URL from result_url: ${result.result_url}`);
     return result.result_url;
   }
 
+  console.warn(`⚠️ extractVideoUrl: no video URL found in result. Full result keys: ${Object.keys(result).join(',')}, info keys: ${result.info ? Object.keys(result.info).join(',') : 'N/A'}`);
   return null;
 }
 
@@ -2067,7 +2145,11 @@ async function generateVeoKieAI(prompt, options = {}) {
 
     // Отримуємо URL відео
     const videoUrl = extractVideoUrl(result);
+    console.log(`📹 Veo extractVideoUrl result: ${videoUrl ? videoUrl.substring(0, 150) : 'NULL'}`);
     if (!videoUrl) {
+      console.error(`❌ Veo: no video URL in result. Result keys: ${Object.keys(result).join(',')}`);
+      if (result.info) console.error(`❌ Veo info: ${JSON.stringify(result.info).substring(0, 500)}`);
+      if (result.resultJson) console.error(`❌ Veo resultJson: ${String(result.resultJson).substring(0, 500)}`);
       throw new Error('KIE.AI returned no video in output');
     }
 
@@ -2120,6 +2202,10 @@ async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelNa
       console.log(`📊 ${modelName} status (attempt ${attempts + 1}/${maxAttempts}): ${state}`);
 
       if (state === 'success' || state === 'completed') {
+        console.log(`✅ ${modelName} task ${taskId} completed! Extracting video URL...`);
+        // Пробуємо витягти URL для перевірки
+        const testUrl = extractVideoUrl(job);
+        console.log(`📹 ${modelName} extracted video URL: ${testUrl ? testUrl.substring(0, 100) : 'NULL'}`);
         return job;
       }
       if (state === 'fail' || state === 'failed' || state === 'error') {
@@ -2149,6 +2235,8 @@ async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelNa
     const state = (job?.state || job?.status || '').toLowerCase();
     if (state === 'success' || state === 'completed') {
       console.log(`📊 ${modelName} got result on final check`);
+      const testUrl = extractVideoUrl(job);
+      console.log(`📹 ${modelName} final check extracted URL: ${testUrl ? testUrl.substring(0, 100) : 'NULL'}`);
       return job;
     }
   } catch (e) { /* ігноруємо */ }
