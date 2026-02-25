@@ -358,14 +358,14 @@ module.exports = {
       { name: '🎯 Ideogram v3.0', key: 'ideogram', cost: 5, apiCost: 0.03, maxImages: 1, available: true },
 
       /**
-       * A2E Image — text2image через A2E API
+       * Зображення без омежень — text2image через A2E API
        * Два рівні якості:
        * - 1080p: 10 A2E credits × $0.00556 = $0.0556 → ceil($0.0556 × 1.65 / $0.01) = 10 токенів
        * - 2K: 25 A2E credits × $0.00556 = $0.139 → ceil($0.139 × 1.65 / $0.01) = 23 токенів
        * Підтримує до 2 референсних зображень
        */
       {
-        name: '🔥 A2E Image',
+        name: '🔥 Зображення без омежень',
         key: 'a2e_image',
         cost: 10,           // 1080p (мінімальна ціна)
         cost2k: 23,          // 2K

@@ -63,7 +63,7 @@ function getDesignModelsWithEffectiveCost(userId) {
       if (m.key === 'nano_banana_free') {
         return geminiImage.isConfigured;
       }
-      // A2E Image доступна тільки якщо A2E API налаштований
+      // Зображення без омежень доступна тільки якщо A2E API налаштований
       if (m.a2eOnly) {
         const a2eService = require('./services/a2e');
         return a2eService.isA2EEnabled;
@@ -2979,40 +2979,40 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
       if (creativeType === 'hearts') {
         // Hearts використовує Seedream 4K з aspect ratio 9:16
         result = useKieAI
-          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '9:16', 0.5)
+          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '9:16', 'high')
           : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
       } else if (creativeType === 'porcelain_figure') {
         // Porcelain figure використовує Seedream 4K з aspect ratio 1:1
         result = useKieAI
-          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '1:1', 0.5)
+          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '1:1', 'high')
           : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '1:1');
       } else if (creativeType === 'kittens') {
         // Kittens використовує Seedream 4K з aspect ratio 1:1
         result = useKieAI
-          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '1:1', 0.5)
+          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '1:1', 'high')
           : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '1:1');
       } else if (creativeType === 'underwater_macro') {
         // Underwater macro використовує Seedream 4K з aspect ratio 16:9
         result = useKieAI
-          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '16:9', 0.5)
+          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '16:9', 'high')
           : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '16:9');
       } else if (creativeType === 'bridgerton') {
         // Bridgerton використовує Seedream 4K з aspect ratio 9:16
         result = useKieAI
-          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '9:16', 0.5)
+          ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '9:16', 'high')
           : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
       } else if (creativeType === 'love_is') {
         // Love is... використовує NanoBanana 2K з aspect ratio 9:16
         result = useKieAI
-          ? await kieAI.generateWithNanoBananaKieAI(prompt, imageUrl, '2K', '9:16', 0.5)
+          ? await kieAI.generateWithNanoBananaKieAI(prompt, imageUrl, '2K', '9:16')
           : await replicate.generateWithNanoBanana(prompt, imageUrl, '2K', '9:16');
       } else {
         // Fallback для інших креативів - теж 9:16
         const resolution = modelKey === 'nano_banana_2k' ? '2K' : '4K';
         result = useKieAI
           ? (resolution === '2K'
-              ? await kieAI.generateWithNanoBananaKieAI(prompt, imageUrl, '2K', '9:16', 0.5)
-              : await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '4K', '9:16', 0.5))
+              ? await kieAI.generateWithNanoBananaKieAI(prompt, imageUrl, '2K', '9:16')
+              : await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '9:16', 'high'))
           : await replicate.generateWithNanoBanana(prompt, imageUrl, resolution, '9:16');
       }
 
@@ -3916,7 +3916,7 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
     return;
   }
 
-  // 🔥 A2E Image — окремий флоу з вибором якості
+  // 🔥 Зображення без омежень — окремий флоу з вибором якості
   if (modelKey === 'a2e_image') {
     try {
       const a2eService = require('./services/a2e');
@@ -3938,7 +3938,7 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
       });
 
       await ctx.reply(
-        `🔥 <b>A2E Image</b>\n\n` +
+        `🔥 <b>Зображення без омежень</b>\n\n` +
         `Генерація зображень з тексту з можливістю додавання до 2 референсних зображень.\n\n` +
         `Дозволено генерувати контент, що не порушує <a href="https://a2e.ai/a2e-terms-of-use/">правила провайдера</a>.\n` +
         `⚠️ Порушення призведе до блокування без повернення коштів.\n\n` +
@@ -3959,9 +3959,9 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
       );
       return;
     } catch (error) {
-      console.error('A2E Image init error:', error);
+      console.error('Зображення без омежень init error:', error);
       await ctx.reply(
-        '❌ Помилка ініціалізації A2E Image. Перевірте налаштування.',
+        '❌ Помилка ініціалізації Зображення без омежень. Перевірте налаштування.',
         keyboard.createBackButton('design_menu')
       );
       return;
@@ -7061,7 +7061,7 @@ async function generateKlingO1EditVideo(ctx, state) {
   })();
 }
 
-// ==================== A2E IMAGE CALLBACKS ====================
+// ==================== Зображення без омежень CALLBACKS ====================
 
 // Крок 1: Вибір якості
 bot.action(/^a2e_img_quality_(1080p|2k)$/, async (ctx) => {
@@ -7072,7 +7072,7 @@ bot.action(/^a2e_img_quality_(1080p|2k)$/, async (ctx) => {
   const model = models.design.models.find(m => m.key === 'a2e_image');
 
   if (!state || state.action !== 'a2e_image_generation') {
-    await ctx.reply('❌ Помилка. Почніть заново: Зображення → A2E Image');
+    await ctx.reply('❌ Помилка. Почніть заново: Зображення → Зображення без омежень');
     return;
   }
 
@@ -7097,7 +7097,7 @@ bot.action(/^a2e_img_quality_(1080p|2k)$/, async (ctx) => {
   });
 
   await ctx.reply(
-    `🔥 <b>A2E Image (${quality.toUpperCase()})</b>\n` +
+    `🔥 <b>Зображення без омежень (${quality.toUpperCase()})</b>\n` +
     `💰 Вартість: <b>${cost}⚡</b>\n\n` +
     `📸 <b>Крок 2: Референсні зображення (опціонально)</b>\n\n` +
     `Можна надіслати до 2 референсних зображень.\n` +
@@ -7120,7 +7120,7 @@ bot.action('a2e_img_skip_refs', async (ctx) => {
   const state = userState.get(userId);
 
   if (!state || state.action !== 'a2e_image_generation') {
-    await ctx.reply('❌ Помилка. Почніть заново: Зображення → A2E Image');
+    await ctx.reply('❌ Помилка. Почніть заново: Зображення → Зображення без омежень');
     return;
   }
 
@@ -7132,7 +7132,7 @@ bot.action('a2e_img_skip_refs', async (ctx) => {
 
   const refsCount = (state.inputImages || []).length;
   await ctx.reply(
-    `🔥 <b>A2E Image (${(state.quality || '1080p').toUpperCase()})</b>\n` +
+    `🔥 <b>Зображення без омежень (${(state.quality || '1080p').toUpperCase()})</b>\n` +
     `💰 Вартість: <b>${state.cost}⚡</b>\n` +
     (refsCount > 0 ? `📸 Референсів: <b>${refsCount}</b>\n` : '') +
     `\n✍️ <b>Крок 3: Введіть промпт</b>\n\n` +
@@ -7154,7 +7154,7 @@ bot.action('a2e_img_add_more', async (ctx) => {
   const state = userState.get(userId);
 
   if (!state || state.action !== 'a2e_image_generation') {
-    await ctx.reply('❌ Помилка. Почніть заново: Зображення → A2E Image');
+    await ctx.reply('❌ Помилка. Почніть заново: Зображення → Зображення без омежень');
     return;
   }
 
@@ -7170,7 +7170,7 @@ bot.action('a2e_img_add_more', async (ctx) => {
   );
 });
 
-// ==================== A2E IMAGE GENERATION FUNCTION ====================
+// ==================== Зображення без омежень GENERATION FUNCTION ====================
 
 async function generateA2EImage(ctx, state) {
   const userId = ctx.from.id;
@@ -7180,7 +7180,7 @@ async function generateA2EImage(ctx, state) {
   const model = models.design.models.find(m => m.key === 'a2e_image');
 
   if (!model) {
-    await ctx.reply('❌ Модель A2E Image не знайдена');
+    await ctx.reply('❌ Модель Зображення без омежень не знайдена');
     userState.delete(userId);
     return;
   }
@@ -7202,7 +7202,7 @@ async function generateA2EImage(ctx, state) {
 
   const refsCount = (state.inputImages || []).length;
   const statusMsg = await ctx.reply(
-    `🔥 <b>A2E Image — Генерація</b>\n\n` +
+    `🔥 <b>Зображення без омежень — Генерація</b>\n\n` +
     `🎯 Якість: <b>${(state.quality || '1080p').toUpperCase()}</b>\n` +
     (refsCount > 0 ? `📸 Референсів: <b>${refsCount}</b>\n` : '') +
     `📝 Промпт: "${state.prompt.substring(0, 100)}${state.prompt.length > 100 ? '...' : ''}"\n\n` +
@@ -7233,7 +7233,7 @@ async function generateA2EImage(ctx, state) {
         });
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
-          `❌ Помилка генерації A2E Image.\n\n${startResult.error || 'Не вдалося створити задачу'}\n\nСпробуйте ще раз.`
+          `❌ Помилка генерації Зображення без омежень.\n\n${startResult.error || 'Не вдалося створити задачу'}\n\nСпробуйте ще раз.`
         );
 
         const isTrial = await isTrialUser(userId);
@@ -7251,7 +7251,7 @@ async function generateA2EImage(ctx, state) {
       }
 
       const taskId = startResult.taskId;
-      console.log(`🖼️ A2E Image: Task created: ${taskId}, polling for result...`);
+      console.log(`🖼️ Зображення без омежень: Task created: ${taskId}, polling for result...`);
 
       // Polling статусу задачі
       let attempts = 0;
@@ -7265,7 +7265,7 @@ async function generateA2EImage(ctx, state) {
 
         const detailsResult = await a2eService.getText2ImageTaskDetails(taskId);
         if (!detailsResult.success) {
-          console.error(`A2E Image: Failed to get task details: ${detailsResult.error}`);
+          console.error(`Зображення без омежень: Failed to get task details: ${detailsResult.error}`);
           continue;
         }
 
@@ -7294,7 +7294,7 @@ async function generateA2EImage(ctx, state) {
         }
 
         if (attempts % 12 === 0) {
-          console.log(`🖼️ A2E Image: Task ${taskId} still processing... (attempt ${attempts}/${maxAttempts})`);
+          console.log(`🖼️ Зображення без омежень: Task ${taskId} still processing... (attempt ${attempts}/${maxAttempts})`);
         }
       }
 
@@ -7335,22 +7335,22 @@ async function generateA2EImage(ctx, state) {
             }
           });
         } catch (dbErr) {
-          console.warn('Failed to save A2E Image generation result:', dbErr.message);
+          console.warn('Failed to save Зображення без омежень generation result:', dbErr.message);
         }
 
         // Надсилаємо зображення
         try {
           await bot.telegram.sendPhoto(chatId, finalResult.imageUrl, {
             caption:
-              `🔥 <b>A2E Image (${(generationData.quality || '1080p').toUpperCase()})</b>\n\n` +
+              `🔥 <b>Зображення без омежень (${(generationData.quality || '1080p').toUpperCase()})</b>\n\n` +
               `📝 ${generationData.prompt.substring(0, 200)}${generationData.prompt.length > 200 ? '...' : ''}\n\n` +
               `💰 Списано: ${cost}⚡`,
             parse_mode: 'HTML'
           });
         } catch (sendErr) {
-          console.error('A2E Image: Failed to send photo, trying URL:', sendErr.message);
+          console.error('Зображення без омежень: Failed to send photo, trying URL:', sendErr.message);
           await bot.telegram.sendMessage(chatId,
-            `🔥 <b>A2E Image готово!</b>\n\n` +
+            `🔥 <b>Зображення без омежень готово!</b>\n\n` +
             `🔗 <a href="${finalResult.imageUrl}">Завантажити зображення</a>\n\n` +
             `💰 Списано: ${cost}⚡`,
             { parse_mode: 'HTML' }
@@ -7374,17 +7374,17 @@ async function generateA2EImage(ctx, state) {
           apiCostUSD: apiCost
         });
 
-        console.log(`✅ A2E Image: Sent image to user ${userId}, cost=${cost}⚡`);
+        console.log(`✅ Зображення без омежень: Sent image to user ${userId}, cost=${cost}⚡`);
         gracefulShutdown.completeGeneration(statusMsg.message_id, true);
       } else {
         // Помилка генерації
-        await adminNotifier.notifyAdmin(bot, new Error(finalResult.error || 'A2E Image generation failed'), {
+        await adminNotifier.notifyAdmin(bot, new Error(finalResult.error || 'Зображення без омежень generation failed'), {
           userId, username, action: 'a2e_image_generation', model: model.name, taskId
         });
 
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
-          `❌ Помилка генерації A2E Image.\n\n${finalResult.error || 'Невідома помилка'}\n\nВаші токени НЕ були списані. Спробуйте ще раз.`
+          `❌ Помилка генерації Зображення без омежень.\n\n${finalResult.error || 'Невідома помилка'}\n\nВаші токени НЕ були списані. Спробуйте ще раз.`
         );
 
         const isTrial = await isTrialUser(userId);
@@ -7400,17 +7400,17 @@ async function generateA2EImage(ctx, state) {
         gracefulShutdown.completeGeneration(statusMsg.message_id, false);
       }
     } catch (error) {
-      console.error('A2E Image generation error:', error);
+      console.error('Зображення без омежень generation error:', error);
       await adminNotifier.notifyAdmin(bot, error, {
         userId, username, action: 'a2e_image_generation', model: model.name
       });
       try {
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
-          `❌ Помилка генерації A2E Image.\n\n${error.message}\n\nСпробуйте ще раз.`
+          `❌ Помилка генерації Зображення без омежень.\n\n${error.message}\n\nСпробуйте ще раз.`
         );
       } catch (e) {
-        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації A2E Image. Спробуйте ще раз.', keyboard.createBackButton('design_menu'));
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації Зображення без омежень. Спробуйте ще раз.', keyboard.createBackButton('design_menu'));
       }
       gracefulShutdown.completeGeneration(statusMsg.message_id, false);
     }
@@ -9261,7 +9261,7 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ A2E Image: Обробка промпту для генерації зображення
+  // ✅ Зображення без омежень: Обробка промпту для генерації зображення
   if (state?.action === 'a2e_image_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 3) {
       await ctx.reply(
@@ -9281,7 +9281,7 @@ bot.on('text', async (ctx) => {
 
     const refsCount = (updatedState.inputImages || []).length;
     await ctx.reply(
-      `🔥 <b>A2E Image (${(updatedState.quality || '1080p').toUpperCase()})</b>\n\n` +
+      `🔥 <b>Зображення без омежень (${(updatedState.quality || '1080p').toUpperCase()})</b>\n\n` +
       `🎯 Якість: <b>${(updatedState.quality || '1080p').toUpperCase()}</b>\n` +
       (refsCount > 0 ? `📸 Референсів: <b>${refsCount}</b>\n` : '') +
       `📝 Промпт: <b>${text.substring(0, 100)}${text.length > 100 ? '...' : ''}</b>\n` +
@@ -9971,9 +9971,9 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ A2E Image: Обробка референсних фото (другий handler)
+  // ✅ Зображення без омежень: Обробка референсних фото (другий handler)
   if (state?.action === 'a2e_image_generation' && state?.step === 'waiting_photos') {
-    console.log('🖼️ A2E Image: Processing reference photo (2nd handler) for user', userId);
+    console.log('🖼️ Зображення без омежень: Processing reference photo (2nd handler) for user', userId);
     const imageUrl = await getImageUrl(ctx);
     if (!imageUrl) {
       await ctx.reply('❌ Помилка: не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('design_menu'));
@@ -9991,7 +9991,7 @@ bot.on('photo', async (ctx) => {
       });
 
       await ctx.reply(
-        `🔥 <b>A2E Image (${(state.quality || '1080p').toUpperCase()})</b>\n` +
+        `🔥 <b>Зображення без омежень (${(state.quality || '1080p').toUpperCase()})</b>\n` +
         `📸 Референсів: <b>${currentImages.length}/2</b> (максимум)\n` +
         `💰 Вартість: <b>${state.cost}⚡</b>\n\n` +
         `✍️ <b>Крок 3: Введіть промпт</b>\n\n` +
@@ -11275,9 +11275,8 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
               return await kieAI.generateWithSeedreamKieAI(
                 generationData.prompt,
                 generationData.imageInput,
-                '4K',
-                generationData.aspectRatio,
-                0.5
+                generationData.aspectRatio || '1:1',
+                'high'
               );
 
             case 'z_image':

@@ -308,14 +308,26 @@ async function startText2ImageTask(options = {}) {
     );
 
     if (response.data && response.data.code === 0) {
-      const taskId = response.data.data?._id || response.data.data?.taskId || response.data.data?.id;
+      const respData = response.data.data;
+      console.log(`📥 A2E Text2Image full response data:`, JSON.stringify(response.data, null, 2));
+
+      // Спробувати різні можливі поля для taskId
+      const taskId = respData?._id || respData?.taskId || respData?.id || respData?.task_id ||
+        (typeof respData === 'string' ? respData : null);
+
+      if (!taskId) {
+        console.error(`❌ A2E Text2Image: taskId not found in response. data keys: ${respData ? Object.keys(respData).join(',') : 'null'}`);
+        throw new Error('A2E API did not return a task ID');
+      }
+
       console.log(`✅ A2E Text2Image task created: ${taskId}`);
       return {
         success: true,
         taskId: taskId
       };
     } else {
-      const errorMsg = response.data?.message || 'Unknown error';
+      console.error(`❌ A2E Text2Image unexpected response:`, JSON.stringify(response.data, null, 2));
+      const errorMsg = response.data?.message || response.data?.msg || 'Unknown error';
       throw new Error(errorMsg);
     }
 

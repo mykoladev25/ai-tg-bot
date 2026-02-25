@@ -861,7 +861,7 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
     const input = {
       prompt: prompt,
       aspect_ratio: aspectRatio || '1:1',
-      quality: quality  // "basic" або "hd"
+      quality: quality  // "basic" (2K) або "high" (4K)
     };
 
     // Для edit моделі додаємо image_urls
