@@ -31,7 +31,7 @@ jobs:
             git reset --hard origin/main
             
             echo "📋 Installing/updating dependencies..."
-            npm ci --production --prefer-offline --no-audit
+            npm install --production --no-audit
             
             echo "♻️  Restarting PM2 process..."
             pm2 restart neurolab-bot --update-env

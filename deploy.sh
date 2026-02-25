@@ -24,7 +24,7 @@ ssh "$SERVER" << 'ENDSSH'
   git reset --hard origin/main
 
   echo "📦 Installing dependencies..."
-  npm ci --production --prefer-offline --no-audit
+  npm install --production --no-audit
 
   echo "♻️  Restarting PM2 process..."
   pm2 restart neurolab-bot --update-env
