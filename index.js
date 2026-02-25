@@ -10519,28 +10519,43 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
       console.warn('Could not delete status message:', e.message);
     }
 
+    const safePrompt = prompt.replace(/[<>&]/g, c => c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;');
     const caption = `🍌🎁 Nano Banana FREE (${mode})\n\n` +
-      `📝 Промпт: ${prompt.substring(0, 800)}${prompt.length > 800 ? '...' : ''}\n\n` +
+      `📝 Промпт: ${safePrompt.substring(0, 800)}${safePrompt.length > 800 ? '...' : ''}\n\n` +
       `💰 Вартість: БЕЗКОШТОВНО 🎁\n` +
       `📊 Залишилось: ${remaining} з ${freeLimit}`;
 
     // Перевіряємо розмір — якщо >10MB, Telegram не прийме як фото
     const maxPhotoSize = 10 * 1024 * 1024;
-    if (result.imageBuffer.length > maxPhotoSize) {
-      const fileSizeMB = (result.imageBuffer.length / (1024 * 1024)).toFixed(2);
-      await bot.telegram.sendDocument(chatId,
-        { source: result.imageBuffer, filename: 'nano_banana_free.png' },
-        {
-          caption: caption + `\n\n📊 Розмір: ${fileSizeMB} MB (відправлено як файл)`,
-          parse_mode: 'HTML',
-          ...keyboard.createBackButton('design_menu')
-        }
-      );
-    } else {
-      await bot.telegram.sendPhoto(chatId,
-        { source: result.imageBuffer, filename: 'nano_banana_free.png' },
-        { caption, parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
-      );
+    try {
+      if (result.imageBuffer.length > maxPhotoSize) {
+        const fileSizeMB = (result.imageBuffer.length / (1024 * 1024)).toFixed(2);
+        await bot.telegram.sendDocument(chatId,
+          { source: result.imageBuffer, filename: 'nano_banana_free.png' },
+          {
+            caption: caption + `\n\n📊 Розмір: ${fileSizeMB} MB (відправлено як файл)`,
+            parse_mode: 'HTML',
+            ...keyboard.createBackButton('design_menu')
+          }
+        );
+      } else {
+        await bot.telegram.sendPhoto(chatId,
+          { source: result.imageBuffer, filename: 'nano_banana_free.png' },
+          { caption, parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+        );
+      }
+    } catch (sendErr) {
+      console.error('❌ Nano Banana FREE: Failed to send image to Telegram:', sendErr.message);
+      // Fallback: спробуємо без parse_mode
+      try {
+        await bot.telegram.sendPhoto(chatId,
+          { source: result.imageBuffer, filename: 'nano_banana_free.png' },
+          { caption: `🍌🎁 Nano Banana FREE\n\n📝 ${prompt.substring(0, 200)}\n\n💰 БЕЗКОШТОВНО 🎁` }
+        );
+      } catch (sendErr2) {
+        console.error('❌ Nano Banana FREE: Fallback send also failed:', sendErr2.message);
+        await ctx.reply('✅ Зображення згенеровано, але не вдалось відправити. Спробуйте ще раз.');
+      }
     }
 
     // Логування
