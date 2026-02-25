@@ -101,6 +101,8 @@ function getVideoModelsForUser(userId) {
     if (m.key === 'veo') {
       return {
         ...m,
+        costFast: getEffectiveVeoFlatCost(userId, 'veo3_fast'),
+        costQuality: getEffectiveVeoFlatCost(userId, 'veo3'),
         costPerSecondNoAudio: getEffectiveVeoCostPerSecond(userId, false),
         costPerSecondAudio: getEffectiveVeoCostPerSecond(userId, true)
       };
@@ -210,7 +212,32 @@ function getEffectiveKlingV2_6CostPerSecond(userId, model, withAudio) {
 }
 
 /**
- * Ціна Veo за обраним провайдером (токенів за секунду).
+ * Ціна Veo — flat per-video (токени за одне відео).
+ * @param {number} userId
+ * @param {string} veoModel - 'veo3_fast' або 'veo3'
+ * @returns {number} вартість у токенах
+ */
+function getEffectiveVeoFlatCost(userId, veoModel = 'veo3_fast') {
+  const model = models.video.models.find(m => m.key === 'veo');
+  const isQuality = veoModel === 'veo3';
+  const fallback = isQuality ? (model?.costQuality ?? 208) : (model?.costFast ?? 50);
+  if (!useKiePriceForDisplay(userId)) return fallback;
+  if (!kieAI.isKieAIImplemented('veo')) return fallback;
+  const k = kiePricingSync.getKieTokenCostSync('veo');
+  if (!k || typeof k !== 'object') return fallback;
+  return isQuality ? (k.costQuality ?? fallback) : (k.costFast ?? fallback);
+}
+
+/**
+ * API cost Veo (USD) — flat per-video.
+ */
+function getVeoApiCostUSD(veoModel = 'veo3_fast') {
+  const model = models.video.models.find(m => m.key === 'veo');
+  return veoModel === 'veo3' ? (model?.apiCostQuality ?? 1.25) : (model?.apiCostFast ?? 0.30);
+}
+
+/**
+ * Legacy: Ціна Veo per-second (для /api/plans backward compat).
  */
 function getEffectiveVeoCostPerSecond(userId, withAudio) {
   const model = models.video.models.find(m => m.key === 'veo');
@@ -4132,8 +4159,7 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     requiredCost = getEffectiveSora2Cost(ctx.from.id, model, minDuration);
   }
   if (modelKey === 'veo') {
-    const minDuration = model.minSeconds || (model.durations?.length ? Math.min(...model.durations) : 4);
-    requiredCost = minDuration * getEffectiveVeoCostPerSecond(ctx.from.id, false);
+    requiredCost = getEffectiveVeoFlatCost(ctx.from.id, 'veo3_fast'); // мінімальна ціна = Fast
   }
   if (modelKey === 'kling_o1_edit') {
     const durations = model.durations || [3, 5, 7, 10];
@@ -4396,27 +4422,28 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // Для Veo показуємо спеціальне меню з вибором aspect ratio
+  // Для Veo показуємо спеціальне меню з вибором якості моделі (Крок 1)
   if (modelKey === 'veo') {
-    const aspectMenu = Markup.inlineKeyboard([
-      [Markup.button.callback('🎬 16:9 (Горизонтальне)', 'veo_aspect_16:9')],
-      [Markup.button.callback('📱 9:16 (Вертикальне)', 'veo_aspect_9:16')],
-      [Markup.button.callback('← Назад', 'video_menu')]
-    ]);
-
-    const minCost = 4 * getEffectiveVeoCostPerSecond(ctx.from.id, false);
-    const maxCost = 8 * getEffectiveVeoCostPerSecond(ctx.from.id, true);
+    const costFast = getEffectiveVeoFlatCost(ctx.from.id, 'veo3_fast');
+    const costQuality = getEffectiveVeoFlatCost(ctx.from.id, 'veo3');
 
     await ctx.reply(
       `🌟 <b>Google Veo 3.1 💎</b>\n\n` +
-      `📐 <b>Крок 1: Оберіть пропорції відео</b>\n\n` +
-      `<b>🎬 16:9</b> — YouTube, кіно, горизонтальне\n` +
-      `<b>📱 9:16</b> — TikTok, Reels, Stories\n\n` +
-      `⏱️ Тривалість: 4, 6 або 8 секунд\n` +
-      `🔊 Аудіо: опціонально\n` +
-      `📊 Якість: 1080p\n` +
-      `💰 Вартість: ${minCost}—${maxCost}⚡`,
-      { parse_mode: 'HTML', ...aspectMenu }
+      `🎯 <b>Крок 1: Оберіть якість моделі</b>\n\n` +
+      `<b>⚡ Fast</b> — швидка генерація, хороша якість\n` +
+      `💰 ${costFast}⚡ за відео\n\n` +
+      `<b>💎 Quality</b> — найвища якість, довше генерує\n` +
+      `💰 ${costQuality}⚡ за відео\n\n` +
+      `🔊 Аудіо включено за замовчуванням\n` +
+      `⏱️ Тривалість: 4, 6 або 8 секунд`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`⚡ Fast (${costFast}⚡)`, 'veo_model_fast')],
+          [Markup.button.callback(`💎 Quality (${costQuality}⚡)`, 'veo_model_quality')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
     );
     return;
   }
@@ -4920,36 +4947,69 @@ bot.action('kling_3_generate_multi', async (ctx) => {
 
 // ==================== VEO 3.1 CALLBACKS ====================
 
-// Крок 1: Вибір aspect ratio
-bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
+// Крок 1: Вибір якості моделі (Fast / Quality)
+bot.action(/^veo_model_(fast|quality)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  const aspectRatio = ctx.match[1]; // "16:9" або "9:16"
+  const veoModel = ctx.match[1] === 'quality' ? 'veo3' : 'veo3_fast';
+  const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
+  const veoCost = getEffectiveVeoFlatCost(userId, veoModel);
 
-  // Зберігаємо стан
   userState.set(userId, {
     action: 'veo_generation',
-    step: 'select_duration',
-    aspectRatio: aspectRatio,
+    step: 'select_aspect',
+    veoModel: veoModel,
     duration: 8,
     generateAudio: true,
     lastFrame: null
   });
 
-  const calcVeoCost = (dur, audio) => {
-    const costPerSec = getEffectiveVeoCostPerSecond(userId, audio);
-    return dur * costPerSec;
-  };
-
-  // Меню вибору тривалості з цінами
   await ctx.reply(
-    `🌟 <b>Google Veo 3.1 💎</b>\n\n` +
-    `📐 Пропорції: <b>${aspectRatio === '16:9' ? '🎬 Горизонтальне' : '📱 Вертикальне'}</b>\n\n` +
-    `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
-    `💰 Ціни (з аудіо / без аудіо):\n` +
-    `• 4 сек: ${calcVeoCost(4, true)}⚡ / ${calcVeoCost(4, false)}⚡\n` +
-    `• 6 сек: ${calcVeoCost(6, true)}⚡ / ${calcVeoCost(6, false)}⚡\n` +
-    `• 8 сек: ${calcVeoCost(8, true)}⚡ / ${calcVeoCost(8, false)}⚡`,
+    `🌟 <b>Google Veo 3.1 💎</b>\n` +
+    `🎯 Модель: <b>${veoModelLabel}</b> | 💰 ${veoCost}⚡\n\n` +
+    `📐 <b>Крок 2: Оберіть пропорції відео</b>\n\n` +
+    `<b>🎬 16:9</b> — YouTube, кіно, горизонтальне\n` +
+    `<b>📱 9:16</b> — TikTok, Reels, Stories`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🎬 16:9 (Горизонтальне)', 'veo_aspect_16:9')],
+        [Markup.button.callback('📱 9:16 (Вертикальне)', 'veo_aspect_9:16')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+// Крок 2: Вибір aspect ratio
+bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const aspectRatio = ctx.match[1]; // "16:9" або "9:16"
+  const state = userState.get(userId);
+
+  // Якщо немає стейту від Крок 1 — створюємо з default (fast)
+  const veoModel = state?.veoModel || 'veo3_fast';
+  const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
+  const veoCost = getEffectiveVeoFlatCost(userId, veoModel);
+
+  userState.set(userId, {
+    ...(state || {}),
+    action: 'veo_generation',
+    step: 'select_duration',
+    aspectRatio: aspectRatio,
+    veoModel: veoModel,
+    duration: 8,
+    generateAudio: true,
+    lastFrame: null
+  });
+
+  await ctx.reply(
+    `🌟 <b>Google Veo 3.1 💎</b>\n` +
+    `🎯 Модель: <b>${veoModelLabel}</b> | 📐 ${aspectRatio === '16:9' ? '🎬 Горизонтальне' : '📱 Вертикальне'}\n` +
+    `💰 Вартість: <b>${veoCost}⚡</b>\n\n` +
+    `⏱️ <b>Крок 3: Оберіть тривалість відео</b>\n\n` +
+    `💡 Ціна однакова незалежно від тривалості`,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
@@ -4964,7 +5024,7 @@ bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
   );
 });
 
-// Крок 2: Вибір тривалості
+// Крок 3: Вибір тривалості
 bot.action(/^veo_duration_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -4976,34 +5036,35 @@ bot.action(/^veo_duration_(\d+)$/, async (ctx) => {
     return;
   }
 
+  const veoModel = state.veoModel || 'veo3_fast';
+  const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
+  const veoCost = getEffectiveVeoFlatCost(userId, veoModel);
+
   userState.set(userId, {
     ...state,
     duration: duration,
     step: 'select_audio'
   });
 
-  const costWithAudio = duration * getEffectiveVeoCostPerSecond(ctx.from.id, true);
-  const costNoAudio = duration * getEffectiveVeoCostPerSecond(ctx.from.id, false);
-
-  // Меню вибору аудіо з цінами
   await ctx.reply(
-    `🌟 <b>Google Veo 3.1 💎</b>\n\n` +
-    `📐 Пропорції: <b>${state.aspectRatio === '16:9' ? '🎬 Горизонтальне' : '📱 Вертикальне'}</b>\n` +
-    `⏱️ Тривалість: <b>${duration} секунд</b>\n\n` +
-    `🔊 <b>Крок 3: Аудіо</b>\n\n` +
-    `Veo 3.1 може генерувати звук для відео.`,
+    `🌟 <b>Google Veo 3.1 💎</b>\n` +
+    `🎯 ${veoModelLabel} | ${state.aspectRatio === '16:9' ? '🎬' : '📱'} ${state.aspectRatio} | ⏱️ ${duration}сек\n` +
+    `💰 Вартість: <b>${veoCost}⚡</b>\n\n` +
+    `🔊 <b>Крок 4: Аудіо</b>\n\n` +
+    `Veo 3.1 генерує звук за замовчуванням.\n` +
+    `Можете вимкнути якщо не потрібно.`,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback(`🔊 З аудіо (${costWithAudio}⚡)`, 'veo_audio_on')],
-        [Markup.button.callback(`🔇 Без аудіо (${costNoAudio}⚡)`, 'veo_audio_off')],
+        [Markup.button.callback(`🔊 З аудіо (${veoCost}⚡)`, 'veo_audio_on')],
+        [Markup.button.callback(`🔇 Без аудіо (${veoCost}⚡)`, 'veo_audio_off')],
         [Markup.button.callback('← Назад', 'video_menu')]
       ])
     }
   );
 });
 
-// Крок 3: Вибір аудіо
+// Крок 4: Вибір аудіо
 bot.action(/^veo_audio_(on|off)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5015,23 +5076,22 @@ bot.action(/^veo_audio_(on|off)$/, async (ctx) => {
     return;
   }
 
-  const costPerSec = getEffectiveVeoCostPerSecond(ctx.from.id, generateAudio);
-  const finalCost = state.duration * costPerSec;
+  const veoModel = state.veoModel || 'veo3_fast';
+  const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
+  const veoCost = getEffectiveVeoFlatCost(userId, veoModel);
 
   userState.set(userId, {
     ...state,
     generateAudio: generateAudio,
-    veoCost: finalCost,
+    veoCost: veoCost,
     step: 'ask_start_image'
   });
 
   await ctx.reply(
-    `🌟 <b>Google Veo 3.1 💎</b>\n\n` +
-    `📐 Пропорції: <b>${state.aspectRatio === '16:9' ? '🎬 Горизонтальне' : '📱 Вертикальне'}</b>\n` +
-    `⏱️ Тривалість: <b>${state.duration} секунд</b>\n` +
-    `🔊 Аудіо: <b>${generateAudio ? 'Так' : 'Ні'}</b>\n` +
-    `💰 Вартість: <b>${finalCost}⚡</b>\n\n` +
-    `🖼️ <b>Крок 4: Стартове зображення (опціонально)</b>\n\n` +
+    `🌟 <b>Google Veo 3.1 💎</b>\n` +
+    `🎯 ${veoModelLabel} | ${state.aspectRatio === '16:9' ? '🎬' : '📱'} ${state.aspectRatio} | ⏱️ ${state.duration}сек | ${generateAudio ? '🔊' : '🔇'}\n` +
+    `💰 Вартість: <b>${veoCost}⚡</b>\n\n` +
+    `🖼️ <b>Крок 5: Стартове зображення (опціонально)</b>\n\n` +
     `Це перший кадр відео. AI анімує його.\n` +
     `Якщо не маєте — пропустіть.\n\n` +
     `📤 Оберіть дію:`,
@@ -7862,10 +7922,10 @@ async function generateVeoVideo(ctx, state) {
 
   const duration = state.duration || 8;
   const generateAudio = state.generateAudio !== false;
-  const costPerSec = getEffectiveVeoCostPerSecond(userId, generateAudio);
-  const veoCost = state.veoCost || (duration * costPerSec);
-  const apiCostPerSec = generateAudio ? model.apiCostPerSecondAudio : model.apiCostPerSecondNoAudio;
-  const apiCost = duration * apiCostPerSec;
+  const veoModel = state.veoModel || 'veo3_fast';
+  const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
+  const veoCost = state.veoCost || getEffectiveVeoFlatCost(userId, veoModel);
+  const apiCost = getVeoApiCostUSD(veoModel);
 
   if (!(await userBalance.hasTokens(userId, veoCost))) {
     await showInsufficientTokens(ctx, veoCost);
@@ -7877,14 +7937,15 @@ async function generateVeoVideo(ctx, state) {
   const hasLastFrame = !!state.lastFrame;
 
   const statusMsg = await ctx.reply(
-    `🌟 <b>Google Veo 3.1 - Генерація</b>\n\n` +
+    `🌟 <b>Google Veo 3.1 ${veoModelLabel} - Генерація</b>\n\n` +
+    `🎯 Модель: ${veoModelLabel}\n` +
     `📐 Пропорції: ${state.aspectRatio}\n` +
     `⏱️ Тривалість: ${duration} сек\n` +
     `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
     `🖼️ Стартове зображення: ${hasStartImage ? 'Так' : 'Ні'}\n` +
     `🎬 Останній кадр: ${hasLastFrame ? 'Так' : 'Ні'}\n\n` +
     `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
-    `⏱️ Це може зайняти 2-5 хвилин...\n` +
+    `⏱️ Це може зайняти ${veoModel === 'veo3' ? '3-8' : '2-5'} хвилин...\n` +
     `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
     { parse_mode: 'HTML' }
   );
@@ -7939,13 +8000,14 @@ async function generateVeoVideo(ctx, state) {
         veoGenerationType = 'TEXT_2_VIDEO';
       }
 
-      console.log(`🎥 Veo KIE.AI payload: generationType=${veoGenerationType}, imageUrls=${veoImageUrls.length}`);
+      console.log(`🎥 Veo KIE.AI payload: generationType=${veoGenerationType}, imageUrls=${veoImageUrls.length}, model=${generationData.veoModel || 'veo3_fast'}`);
 
       const result = useKieAI
         ? await kieAI.generateVeoKieAI(generationData.prompt, {
             imageUrls: veoImageUrls,
             generationType: veoGenerationType,
             aspectRatio: generationData.aspectRatio,
+            model: generationData.veoModel || 'veo3_fast',
             generateAudio: generateAudio
           })
         : await replicate.generateVideoWithVeo(
@@ -12958,7 +13020,30 @@ async function startBot() {
                 });
               }
             }
-            // Veo - ціна за секунду з/без аудіо
+            // Veo - flat per-video pricing (Fast / Quality)
+            else if (m.costFast !== undefined && m.costQuality !== undefined) {
+              result.costFast = m.costFast;
+              result.costQuality = m.costQuality;
+              result.priceFastUSD = +(m.costFast * tokenPriceUSD).toFixed(4);
+              result.priceQualityUSD = +(m.costQuality * tokenPriceUSD).toFixed(4);
+              // Legacy per-second (backward compat)
+              result.costPerSecondAudio = m.costPerSecondAudio;
+              result.costPerSecondNoAudio = m.costPerSecondNoAudio;
+              result.pricePerSecondAudioUSD = +(m.costPerSecondAudio * tokenPriceUSD).toFixed(4);
+              result.pricePerSecondNoAudioUSD = +(m.costPerSecondNoAudio * tokenPriceUSD).toFixed(4);
+              result.durations = m.durations || [4, 6, 8];
+              result.minSeconds = m.minSeconds || result.durations[0];
+              result.maxSeconds = result.durations[result.durations.length - 1];
+              result.supportsAudio = true;
+              result.pricingModel = 'flat_per_video';
+              result._debug = {
+                apiCostFast: m.apiCostFast,
+                apiCostQuality: m.apiCostQuality,
+                grossMarginFastPct: calcGrossMargin(m.costFast, m.apiCostFast / tokenPriceUSD),
+                grossMarginQualityPct: calcGrossMargin(m.costQuality, m.apiCostQuality / tokenPriceUSD)
+              };
+            }
+            // Veo legacy - ціна за секунду з/без аудіо
             else if (m.costPerSecondAudio) {
               result.costPerSecondAudio = m.costPerSecondAudio;
               result.costPerSecondNoAudio = m.costPerSecondNoAudio;
@@ -13353,7 +13438,35 @@ async function startBot() {
                   });
                 }
               }
-              // Veo - cost per second with/without audio
+              // Veo - flat per-video pricing (Fast / Quality)
+              else if (m.costFast !== undefined && m.costQuality !== undefined) {
+                const durations = m.durations || [4, 6, 8];
+                const minSeconds = m.minSeconds || durations[0];
+                result.costFast = m.costFast;
+                result.costQuality = m.costQuality;
+                result.priceFastUSD = +(m.costFast * tokenPriceUSD).toFixed(4);
+                result.priceQualityUSD = +(m.costQuality * tokenPriceUSD).toFixed(4);
+                result.costPerSecondAudio = m.costPerSecondAudio;
+                result.costPerSecondNoAudio = m.costPerSecondNoAudio;
+                result.pricePerSecondAudioUSD = +(m.costPerSecondAudio * tokenPriceUSD).toFixed(4);
+                result.pricePerSecondNoAudioUSD = +(m.costPerSecondNoAudio * tokenPriceUSD).toFixed(4);
+                result.durations = durations;
+                result.minSeconds = minSeconds;
+                result.maxSeconds = durations[durations.length - 1];
+                result.supportsAudio = true;
+                result.pricingModel = 'flat_per_video';
+                result.trial = {
+                  available: trialAvailable,
+                  minCostTokens: m.costFast
+                };
+                result._debug = {
+                  apiCostFast: m.apiCostFast,
+                  apiCostQuality: m.apiCostQuality,
+                  grossMarginFastPct: calcGrossMargin(m.costFast, m.apiCostFast / tokenPriceUSD),
+                  grossMarginQualityPct: calcGrossMargin(m.costQuality, m.apiCostQuality / tokenPriceUSD)
+                };
+              }
+              // Veo legacy - cost per second with/without audio
               else if (m.costPerSecondAudio) {
                 const durations = m.durations || [4, 6, 8];
                 const minSeconds = m.minSeconds || durations[0];

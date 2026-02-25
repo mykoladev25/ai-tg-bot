@@ -370,11 +370,11 @@ const KIE_IMAGE_MODELS = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'se
 const VEO_REF_DURATION_SEC = 4;
 
 /**
- * Veo: вартість у токенах за секунду з KIE-кешу.
- * В кеші ціни "per video" (Fast $0.30, Quality $1.25). Fast → без аудіо, Quality → з аудіо.
- * @returns {{ costPerSecondNoAudio: number, costPerSecondAudio: number } | null}
+ * Veo: flat вартість у токенах за відео з KIE-кешу.
+ * В кеші ціни "per video" (Fast $0.30, Quality $1.25).
+ * @returns {{ costFast: number, costQuality: number, apiCostFast: number, apiCostQuality: number, costPerSecondNoAudio: number, costPerSecondAudio: number } | null}
  */
-function getVeoTokenCostPerSecondSync() {
+function getVeoFlatCostSync() {
   try {
     const fs = require('fs');
     const cacheData = fs.readFileSync(CACHE_FILE, 'utf-8');
@@ -391,12 +391,14 @@ function getVeoTokenCostPerSecondSync() {
     const usdQuality = parseFloat(quality.usdPrice);
     if (Number.isNaN(usdFast) || Number.isNaN(usdQuality)) return null;
 
-    const usdPerSecNoAudio = usdFast / VEO_REF_DURATION_SEC;
-    const usdPerSecAudio = usdQuality / VEO_REF_DURATION_SEC;
-
     return {
-      costPerSecondNoAudio: kieAiModels.usdToTokens(usdPerSecNoAudio),
-      costPerSecondAudio: kieAiModels.usdToTokens(usdPerSecAudio)
+      costFast: kieAiModels.usdToTokens(usdFast),
+      costQuality: kieAiModels.usdToTokens(usdQuality),
+      apiCostFast: usdFast,
+      apiCostQuality: usdQuality,
+      // Legacy per-second (для сумісності з /api/plans)
+      costPerSecondNoAudio: kieAiModels.usdToTokens(usdFast / VEO_REF_DURATION_SEC),
+      costPerSecondAudio: kieAiModels.usdToTokens(usdQuality / VEO_REF_DURATION_SEC)
     };
   } catch (e) {
     return null;
@@ -505,10 +507,9 @@ function getKieTokenCostSync(modelKey, options = {}) {
       };
     }
 
-    // Veo: в кеші "per video" (Fast / Quality). Переводимо в токени/сек за опорною тривалістю 4 сек.
-    // Fast → без аудіо, Quality → з аудіо (конвенція, бо в KIE немає окремого audio/noAudio).
+    // Veo: flat per-video pricing (Fast $0.30 / Quality $1.25)
     if (modelKey === 'veo') {
-      const veoRates = getVeoTokenCostPerSecondSync();
+      const veoRates = getVeoFlatCostSync();
       return veoRates;
     }
 

@@ -193,13 +193,19 @@ module.exports = {
       {
         name: '🌟 Google Veo 3.1 💎',
         key: 'veo',
+        // Flat per-video pricing (KIE.AI)
+        costFast: 50,            // veo3_fast: 60 KIE credits = $0.30 → 50 tokens
+        costQuality: 208,        // veo3: 250 KIE credits = $1.25 → 208 tokens
+        apiCostFast: 0.30,       // $0.30 per video (Fast)
+        apiCostQuality: 1.25,    // $1.25 per video (Quality)
+        // Legacy per-second (Replicate fallback)
         costPerSecondAudio: 66,
         costPerSecondNoAudio: 33,
-        minSeconds: 4,
-        durations: [4, 8],
-        cost: 528, // default 8s audio = 66*8
         apiCostPerSecondAudio: 0.40,
         apiCostPerSecondNoAudio: 0.20,
+        minSeconds: 4,
+        durations: [4, 8],
+        cost: 208, // default Quality
         available: true,
         requiresImage: false,
         supportsReferences: true
