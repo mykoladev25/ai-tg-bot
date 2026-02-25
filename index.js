@@ -7277,31 +7277,32 @@ async function generateA2EImage(ctx, state) {
           }
 
           const taskData = detailsResult.data;
-          const status = taskData?.status || taskData?.state;
+          // A2E uses current_status: initialized | generating | completed | failed
+          const status = taskData?.current_status || taskData?.status || taskData?.state;
 
-          // Перевіряємо наявність URL зображення
-          const imageUrl = taskData?.image_url || taskData?.result_url || taskData?.output_url ||
-            taskData?.images?.[0]?.url || taskData?.images?.[0] ||
-            taskData?.result?.image_url || taskData?.result?.url;
+          // A2E повертає image_urls[] для готових зображень
+          const imageUrl = (taskData?.image_urls && taskData.image_urls.length > 0) ? taskData.image_urls[0] : null;
 
           if (status === 'completed' || status === 'success' || imageUrl) {
             finalResult = {
               success: true,
               imageUrl: imageUrl
             };
+            console.log(`✅ Зображення без омежень: Task ${taskId} completed! url=${imageUrl ? imageUrl.substring(0, 100) : 'NULL'}`);
             break;
           }
 
           if (status === 'failed' || status === 'error') {
             finalResult = {
               success: false,
-              error: taskData.error_message || taskData.message || 'Task failed'
+              error: taskData.failed_message || taskData.error_message || taskData.message || 'Task failed'
             };
+            console.error(`❌ Зображення без омежень: Task ${taskId} failed: ${finalResult.error}`);
             break;
           }
 
-          if (attempts % 12 === 0) {
-            console.log(`🖼️ Зображення без омежень: Task ${taskId} still processing... (attempt ${attempts}/${maxAttempts})`);
+          if (attempts % 6 === 0) {
+            console.log(`🖼️ Зображення без омежень: Task ${taskId} status=${status} (attempt ${attempts}/${maxAttempts})`);
           }
         }
 
