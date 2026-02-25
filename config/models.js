@@ -407,7 +407,7 @@ module.exports = {
           apiCost: 0
         },
         maxImages: 4,  // Генерує 4 варіанти одразу
-        available: true,
+        available: false, // ⚠️ Тимчасово вимкнено (KIE.AI access issue)
         kieAIOnly: true
       }
     ]

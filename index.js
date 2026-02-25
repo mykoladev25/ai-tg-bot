@@ -53,6 +53,8 @@ function getDesignModelsWithEffectiveCost(userId) {
 
   return models.design.models
     .filter(m => {
+      // Пропускаємо вимкнені моделі
+      if (m.available === false) return false;
       // Midjourney та Z-Image доступні тільки якщо KIE.AI налаштований
       if (m.key === 'midjourney' || m.key === 'z_image') {
         return kieAI.isKieAIEnabled;
