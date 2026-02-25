@@ -4244,7 +4244,7 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // A2E Motion без омеженнь 🔥
+  // A2E Motion без омежень 🔥
   if (modelKey === 'a2e_motion') {
     try {
       const a2eService = require('./services/a2e');
@@ -4272,7 +4272,7 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
       });
 
       await ctx.reply(
-        `🔥 <b>Motion без омеженнь</b>\n\n` +
+        `🔥 <b>Motion без омежень</b>\n\n` +
         `Анімація зображення з природним рухом та плавними переходами.\n\n` +
         `⏱️ Тривалість: ${durations.join(', ')} секунд\n` +
         `💰 Вартість: ${minCost}—${maxCost}⚡\n\n` +
@@ -6304,7 +6304,7 @@ bot.on('photo', async (ctx, next) => {
     );
 
     await ctx.reply(
-      `🔥 <b>Motion без омеженнь</b>\n\n` +
+      `🔥 <b>Motion без омежень</b>\n\n` +
       `✅ Зображення завантажено!\n\n` +
       `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
       `💰 Вартість залежить від тривалості:`,
@@ -7041,7 +7041,7 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
       wrongAction: state?.action !== 'a2e_motion_generation',
       actualAction: state?.action
     });
-    await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без омеженнь');
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без омежень');
     return;
   }
 
@@ -7066,7 +7066,7 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
   });
 
   await ctx.reply(
-    `🔥 <b>Motion без омеженнь</b>\n\n` +
+    `🔥 <b>Motion без омежень</b>\n\n` +
     `✅ Зображення: Завантажено\n` +
     `⏱️ Тривалість: <b>${duration} сек</b>\n` +
     `💰 Вартість: <b>${a2eCost}⚡</b>\n\n` +
@@ -7084,7 +7084,7 @@ bot.action('a2e_skip_negative', async (ctx) => {
   const state = userState.get(userId);
 
   if (!state || state.action !== 'a2e_motion_generation' || state.step !== 'waiting_negative_prompt') {
-    await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без омеженнь');
+    await ctx.reply('❌ Помилка. Почніть заново: Відео → Motion без омежень');
     return;
   }
 
@@ -7098,7 +7098,7 @@ bot.action('a2e_skip_negative', async (ctx) => {
   userState.set(userId, updatedState);
 
   await ctx.reply(
-    `🔥 <b>Motion без омеженнь</b>\n\n` +
+    `🔥 <b>Motion без омежень</b>\n\n` +
     `✅ Зображення: <b>Завантажено</b>\n` +
     `⏱️ Тривалість: <b>${updatedState.duration} секунд</b>\n` +
     `📝 Промпт: <b>${updatedState.prompt.substring(0, 100)}${updatedState.prompt.length > 100 ? '...' : ''}</b>\n` +
@@ -7149,7 +7149,7 @@ async function generateA2EMotionVideo(ctx, state) {
   }
 
   const statusMsg = await ctx.reply(
-    `🔥 <b>Motion без омеженнь - Генерація</b>\n\n` +
+    `🔥 <b>Motion без омежень - Генерація</b>\n\n` +
     `⏱️ Тривалість: ${duration} сек\n` +
     `📝 Промпт: "${state.prompt.substring(0, 100)}${state.prompt.length > 100 ? '...' : ''}"\n\n` +
     `⏱️ Це може зайняти 2-5 хвилин...\n` +
@@ -7325,7 +7325,7 @@ async function generateA2EMotionVideo(ctx, state) {
 
       await bot.telegram.sendMessage(
         chatId,
-        `✅ <b>Motion без омеженнь готово!</b>\n\n` +
+        `✅ <b>Motion без омежень готово!</b>\n\n` +
         `⏱️ Тривалість: ${duration} сек\n` +
         `📝 Промпт: ${generationData.prompt.substring(0, 100)}...\n\n` +
         `💰 Витрачено: ${cost}⚡`,
@@ -7333,7 +7333,7 @@ async function generateA2EMotionVideo(ctx, state) {
       );
 
       await safeSendVideo(chatId, finalResult.videoUrl, {
-        caption: `🔥 Motion без омеженнь\n\n⏱️ ${duration} сек\n📝 ${generationData.prompt.substring(0, 80)}...\n\n💰 Витрачено: ${cost}⚡`,
+        caption: `🔥 Motion без омежень\n\n⏱️ ${duration} сек\n📝 ${generationData.prompt.substring(0, 80)}...\n\n💰 Витрачено: ${cost}⚡`,
         ...keyboard.createBackButton('video_menu')
       });
 
@@ -8070,11 +8070,21 @@ async function generateVeoVideo(ctx, state) {
                 console.log(`🔄 Veo recovery poll (${recoveryAttempts}/${maxRecoveryAttempts}): taskId=${recoveryTaskId} state=${jobState}`);
               }
               if (jobState === 'success' || jobState === 'completed') {
-                const videoUrl = kieAI.extractVideoUrlExported(job);
+                let videoUrl = kieAI.extractVideoUrlExported(job);
                 console.log(`📹 Veo recovery extracted URL: ${videoUrl ? videoUrl.substring(0, 100) : 'NULL'}`);
+                // Fallback: /veo/get-1080p-video
                 if (!videoUrl) {
-                  console.error(`❌ Veo recovery: no URL. Job keys: ${Object.keys(job).join(',')}`);
+                  console.log(`🔄 Veo recovery: trying get-1080p-video fallback...`);
+                  videoUrl = await kieAI.fetchVeo1080pUrlExported(recoveryTaskId);
+                  if (!videoUrl) {
+                    await new Promise(r => setTimeout(r, 90000));
+                    videoUrl = await kieAI.fetchVeo1080pUrlExported(recoveryTaskId);
+                  }
+                }
+                if (!videoUrl) {
+                  console.error(`❌ Veo recovery: no URL after all methods. Job keys: ${Object.keys(job).join(',')}`);
                   if (job.info) console.error(`❌ Veo recovery info: ${JSON.stringify(job.info).substring(0, 500)}`);
+                  if (job.response) console.error(`❌ Veo recovery response: ${JSON.stringify(job.response).substring(0, 500)}`);
                   if (job.resultJson) console.error(`❌ Veo recovery resultJson: ${String(job.resultJson).substring(0, 500)}`);
                   await bot.telegram.sendMessage(chatId, `❌ Veo 3.1: відео згенеровано, але URL не знайдено. Зверніться до підтримки. TaskId: ${recoveryTaskId}`);
                   return;
@@ -8854,7 +8864,7 @@ bot.on('text', async (ctx) => {
     });
 
     await ctx.reply(
-      `🔥 <b>Motion без омеженнь</b>\n\n` +
+      `🔥 <b>Motion без омежень</b>\n\n` +
       `✅ Промпт: <b>${text.substring(0, 100)}${text.length > 100 ? '...' : ''}</b>\n\n` +
       `🚫 <b>Крок 4: Negative Prompt</b> (опціонально, до 200 символів)\n\n` +
       `Опишіть що НЕ має бути у відео:\n` +
@@ -8898,7 +8908,7 @@ bot.on('text', async (ctx) => {
     userState.set(userId, updatedState);
 
     await ctx.reply(
-      `🔥 <b>Motion без омеженнь</b>\n\n` +
+      `🔥 <b>Motion без омежень</b>\n\n` +
       `✅ Зображення: <b>Завантажено</b>\n` +
       `⏱️ Тривалість: <b>${updatedState.duration} секунд</b>\n` +
       `📝 Промпт: <b>${updatedState.prompt.substring(0, 100)}${updatedState.prompt.length > 100 ? '...' : ''}</b>\n` +
@@ -8984,7 +8994,7 @@ bot.on('text', async (ctx) => {
     if (state.step === 'waiting_image') {
       await ctx.reply(
         '🖼️ <b>Очікується ЗОБРАЖЕННЯ, а не текст!</b>\n\n' +
-        '👉 Для Motion без омеженнь потрібно надіслати фото, яке буде анімоване.\n\n' +
+        '👉 Для Motion без омежень потрібно надіслати фото, яке буде анімоване.\n\n' +
         '📤 Надішліть зображення (JPG, PNG).',
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
@@ -8993,9 +9003,9 @@ bot.on('text', async (ctx) => {
     // Якщо інший step (крім prompt/negative_prompt які обробляються вище) - показуємо повідомлення
     if (state.step !== 'waiting_prompt' && state.step !== 'waiting_negative_prompt' && state.step !== 'select_duration') {
       await ctx.reply(
-        '🔥 <b>Motion без омеженнь</b>\n\n' +
+        '🔥 <b>Motion без омежень</b>\n\n' +
         '⚠️ Спочатку завершіть налаштування!\n\n' +
-        'Натисніть кнопку Motion без омеженнь в меню відео.',
+        'Натисніть кнопку Motion без омежень в меню відео.',
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
       return;
@@ -9229,7 +9239,7 @@ bot.on('text', async (ctx) => {
   // ✅ A2E Motion: якщо currentModel встановлено але це image-to-video модель
   if (currentModel === 'a2e_motion') {
     await ctx.reply(
-      '🖼️ <b>Motion без омеженнь потребує ЗОБРАЖЕННЯ!</b>\n\n' +
+      '🖼️ <b>Motion без омежень потребує ЗОБРАЖЕННЯ!</b>\n\n' +
       '👉 Для цієї моделі потрібно надіслати фото, яке буде анімоване.\n\n' +
       '📤 Надішліть зображення (JPG, PNG).',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
@@ -9498,7 +9508,7 @@ bot.on('photo', async (ctx) => {
     );
 
     await ctx.reply(
-      `🔥 <b>Motion без омеженнь</b>\n\n` +
+      `🔥 <b>Motion без омежень</b>\n\n` +
       `✅ Зображення завантажено!\n\n` +
       `⏱️ <b>Крок 2: Оберіть тривалість відео</b>\n\n` +
       `💰 Вартість залежить від тривалості:`,
@@ -12227,12 +12237,24 @@ async function startBot() {
         }
 
         // Витягуємо URL відео
-        const videoUrl = kieAI.extractVideoUrlExported(body?.data);
+        let videoUrl = kieAI.extractVideoUrlExported(body?.data);
         console.log(`📹 KIE.AI webhook: extracted videoUrl=${videoUrl ? videoUrl.substring(0, 100) : 'NULL'}`);
 
+        // Fallback: /veo/get-1080p-video
+        if (!videoUrl && taskId) {
+          console.log(`🔄 KIE.AI webhook: trying get-1080p-video fallback for ${taskId}...`);
+          videoUrl = await kieAI.fetchVeo1080pUrlExported(taskId);
+          if (!videoUrl) {
+            // 1080p може ще processing — чекаємо та пробуємо
+            await new Promise(r => setTimeout(r, 60000));
+            videoUrl = await kieAI.fetchVeo1080pUrlExported(taskId);
+          }
+        }
+
         if (!videoUrl) {
-          console.error(`❌ KIE.AI webhook: no video URL. data keys: ${Object.keys(body?.data || {}).join(',')}`);
+          console.error(`❌ KIE.AI webhook: no video URL after all methods. data keys: ${Object.keys(body?.data || {}).join(',')}`);
           if (body?.data?.info) console.error(`  info: ${JSON.stringify(body.data.info).substring(0, 500)}`);
+          if (body?.data?.response) console.error(`  response: ${JSON.stringify(body.data.response).substring(0, 500)}`);
           return res.status(200).json({ ok: true });
         }
 

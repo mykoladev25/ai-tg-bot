@@ -184,10 +184,17 @@ async function fetchVeoTaskInfo(taskId) {
     );
     if (response.data?.data) {
       const data = response.data.data;
-      const state = (data.state || data.status || '').toLowerCase();
+      // Veo record-detail може повертати successFlag замість state
+      let state = (data.state || data.status || '').toLowerCase();
+      if (!state && data.successFlag === 1) state = 'success';
+      if (!state && data.successFlag === 0 && data.errorMessage) state = 'fail';
+      // Зберігаємо state в data для polling
+      if (!data.state && state) data.state = state;
+
       // Логуємо структуру тільки при success щоб зрозуміти формат
       if (state === 'success' || state === 'completed') {
         console.log(`📡 Veo record-detail SUCCESS: taskId=${taskId}, keys=${Object.keys(data).join(',')}`);
+        if (data.response) console.log(`📡 Veo response keys: ${Object.keys(data.response).join(',')}, resultUrls type: ${typeof data.response.resultUrls}`);
         if (data.info) console.log(`📡 Veo info keys: ${Object.keys(data.info).join(',')}, resultUrls type: ${typeof data.info.resultUrls}`);
         if (data.resultJson) console.log(`📡 Veo resultJson type: ${typeof data.resultJson}, preview: ${String(data.resultJson).substring(0, 200)}`);
       }
@@ -220,7 +227,39 @@ async function fetchVeoTaskInfo(taskId) {
 function extractVideoUrl(result) {
   if (!result) return null;
 
-  console.log(`🔍 extractVideoUrl: keys=${Object.keys(result).join(',')}, info=${!!result.info}, resultJson=${!!result.resultJson}`);
+  console.log(`🔍 extractVideoUrl: keys=${Object.keys(result).join(',')}, info=${!!result.info}, resultJson=${!!result.resultJson}, response=${!!result.response}`);
+
+  // ✅ Veo record-detail format: { response: { resultUrls: ["url"], originUrls: ["url"] } }
+  // Згідно з документацією KIE.AI /veo/record-detail
+  if (result.response?.resultUrls) {
+    let urls = result.response.resultUrls;
+    if (typeof urls === 'string') {
+      try { urls = JSON.parse(urls); } catch (e) {
+        if (urls.startsWith('http')) {
+          console.log(`📹 Veo video URL from response.resultUrls (plain): ${urls}`);
+          return urls;
+        }
+      }
+    }
+    if (Array.isArray(urls) && urls.length > 0) {
+      console.log(`📹 Veo video URL from response.resultUrls: ${urls[0]}`);
+      return urls[0];
+    }
+  }
+
+  // ✅ Veo record-detail: response.originUrls (original when aspect_ratio != 16:9)
+  if (result.response?.originUrls) {
+    let originUrls = result.response.originUrls;
+    if (typeof originUrls === 'string') {
+      try { originUrls = JSON.parse(originUrls); } catch (e) {
+        if (originUrls.startsWith('http')) return originUrls;
+      }
+    }
+    if (Array.isArray(originUrls) && originUrls.length > 0) {
+      console.log(`📹 Veo video URL from response.originUrls: ${originUrls[0]}`);
+      return originUrls[0];
+    }
+  }
 
   // Veo callback/record-detail format: { info: { resultUrls: '["url"]' } }
   if (result.info?.resultUrls) {
@@ -312,8 +351,42 @@ function extractVideoUrl(result) {
     return result.result_url;
   }
 
-  console.warn(`⚠️ extractVideoUrl: no video URL found in result. Full result keys: ${Object.keys(result).join(',')}, info keys: ${result.info ? Object.keys(result.info).join(',') : 'N/A'}`);
+  console.warn(`⚠️ extractVideoUrl: no video URL found in result. Full result keys: ${Object.keys(result).join(',')}, info keys: ${result.info ? Object.keys(result.info).join(',') : 'N/A'}, response keys: ${result.response ? Object.keys(result.response).join(',') : 'N/A'}`);
   return null;
+}
+
+/**
+ * Fallback: отримати відео URL через /veo/get-1080p-video endpoint
+ * Використовується коли extractVideoUrl повертає null
+ */
+async function fetchVeo1080pUrl(taskId) {
+  try {
+    console.log(`🔄 Trying /veo/get-1080p-video for taskId=${taskId}...`);
+    const resp = await axios.get(
+      `${KIE_API_BASE}/veo/get-1080p-video?taskId=${taskId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${KIE_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+    if (resp.data?.code === 200 && resp.data?.data?.resultUrl) {
+      console.log(`✅ Veo 1080p URL: ${resp.data.data.resultUrl.substring(0, 100)}`);
+      return resp.data.data.resultUrl;
+    }
+    // code 400 = "1080P is processing. It should be ready in 1-2 minutes"
+    if (resp.data?.code === 400) {
+      console.log(`⏳ Veo 1080p still processing: ${resp.data?.msg}`);
+      return null;
+    }
+    console.warn(`⚠️ Veo get-1080p-video unexpected: code=${resp.data?.code}, msg=${resp.data?.msg}`);
+    return null;
+  } catch (e) {
+    console.warn(`⚠️ Veo get-1080p-video failed: ${e.response?.status || e.message}`);
+    return null;
+  }
 }
 
 // ==================== IMAGE GENERATION ====================
@@ -2144,11 +2217,32 @@ async function generateVeoKieAI(prompt, options = {}) {
     }
 
     // Отримуємо URL відео
-    const videoUrl = extractVideoUrl(result);
+    let videoUrl = extractVideoUrl(result);
     console.log(`📹 Veo extractVideoUrl result: ${videoUrl ? videoUrl.substring(0, 150) : 'NULL'}`);
+
+    // ✅ Fallback: спробувати /veo/get-1080p-video endpoint
     if (!videoUrl) {
-      console.error(`❌ Veo: no video URL in result. Result keys: ${Object.keys(result).join(',')}`);
+      console.log(`🔄 Veo: extractVideoUrl returned null, trying get-1080p-video fallback...`);
+      // Перша спроба
+      videoUrl = await fetchVeo1080pUrl(taskId);
+      // Якщо ще processing — чекаємо 90с і пробуємо ще раз
+      if (!videoUrl) {
+        console.log(`⏳ Veo: 1080p not ready, waiting 90s...`);
+        await new Promise(r => setTimeout(r, 90000));
+        videoUrl = await fetchVeo1080pUrl(taskId);
+      }
+      // Ще раз
+      if (!videoUrl) {
+        console.log(`⏳ Veo: 1080p still not ready, waiting 60s more...`);
+        await new Promise(r => setTimeout(r, 60000));
+        videoUrl = await fetchVeo1080pUrl(taskId);
+      }
+    }
+
+    if (!videoUrl) {
+      console.error(`❌ Veo: no video URL after all methods. Result keys: ${Object.keys(result).join(',')}`);
       if (result.info) console.error(`❌ Veo info: ${JSON.stringify(result.info).substring(0, 500)}`);
+      if (result.response) console.error(`❌ Veo response: ${JSON.stringify(result.response).substring(0, 500)}`);
       if (result.resultJson) console.error(`❌ Veo resultJson: ${String(result.resultJson).substring(0, 500)}`);
       throw new Error('KIE.AI returned no video in output');
     }
@@ -2321,6 +2415,7 @@ module.exports = {
   getModelInfo,
   fetchTaskRecordInfoExported: fetchTaskRecordInfo,
   fetchVeoTaskInfoExported: fetchVeoTaskInfo,
+  fetchVeo1080pUrlExported: fetchVeo1080pUrl,
   extractVideoUrlExported: extractVideoUrl,
   fetchRunwayTaskInfoExported: async (taskId) => {
     const response = await axios.get(
