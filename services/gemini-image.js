@@ -55,7 +55,25 @@ async function generateImage(prompt, imageInput = null, aspectRatio = '1:1', ima
         try {
           const response = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 30000 });
           const base64 = Buffer.from(response.data).toString('base64');
-          const mimeType = response.headers['content-type'] || 'image/jpeg';
+          let mimeType = response.headers['content-type'] || '';
+
+          // Telegram та деякі сервіси повертають application/octet-stream — визначаємо по URL або magic bytes
+          if (!mimeType || mimeType === 'application/octet-stream' || !mimeType.startsWith('image/')) {
+            const urlLower = imgUrl.toLowerCase();
+            if (urlLower.includes('.png')) mimeType = 'image/png';
+            else if (urlLower.includes('.webp')) mimeType = 'image/webp';
+            else if (urlLower.includes('.gif')) mimeType = 'image/gif';
+            else {
+              // Визначаємо по magic bytes
+              const bytes = Buffer.from(response.data).slice(0, 4);
+              if (bytes[0] === 0x89 && bytes[1] === 0x50) mimeType = 'image/png';
+              else if (bytes[0] === 0x52 && bytes[1] === 0x49) mimeType = 'image/webp';
+              else if (bytes[0] === 0x47 && bytes[1] === 0x49) mimeType = 'image/gif';
+              else mimeType = 'image/jpeg'; // default fallback
+            }
+            console.log(`🔍 Gemini: MIME detected as ${mimeType} for ${imgUrl.substring(imgUrl.length - 30)}`);
+          }
+
           return { inlineData: { mimeType, data: base64 } };
         } catch (imgErr) {
           console.warn(`⚠️ Gemini: Failed to download reference image: ${imgErr.message}`);
@@ -122,20 +140,28 @@ async function generateImage(prompt, imageInput = null, aspectRatio = '1:1', ima
     return { success: false, error: 'No image in Gemini response' };
 
   } catch (error) {
-    console.error('❌ Gemini Image Error:', error.message);
+    const errMsg = error.message || JSON.stringify(error);
+    console.error('❌ Gemini Image Error:', errMsg);
 
     // Обробка специфічних помилок
-    if (error.message?.includes('SAFETY') || error.message?.includes('blocked')) {
+    if (errMsg.includes('SAFETY') || errMsg.includes('blocked')) {
       return { success: false, error: 'Зображення заблоковано системою безпеки. Спробуйте інший промпт.' };
     }
-    if (error.message?.includes('quota') || error.message?.includes('429') || error.message?.includes('RESOURCE_EXHAUSTED')) {
+    if (errMsg.includes('MIME type') || errMsg.includes('INVALID_ARGUMENT')) {
+      return { success: false, error: 'Помилка формату зображення. Спробуйте надіслати фото як зображення (не файл), або генеруйте без референсу.' };
+    }
+    if (errMsg.includes('quota') || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
       return { success: false, error: 'Ліміт запитів до Gemini перевищено. Спробуйте через хвилину.' };
     }
-    if (error.message?.includes('permission') || error.message?.includes('403')) {
+    if (errMsg.includes('permission') || errMsg.includes('403')) {
       return { success: false, error: 'Немає доступу до Gemini API. Перевірте API ключ.' };
     }
+    if (errMsg.includes('Could not generate image') || errMsg.includes('RECITATION')) {
+      return { success: false, error: 'Не вдалось згенерувати зображення. Спробуйте переформулювати промпт.' };
+    }
 
-    return { success: false, error: error.message };
+    // Friendly fallback — не показуємо raw JSON клієнту
+    return { success: false, error: 'Помилка генерації. Спробуйте ще раз або оберіть іншу модель.' };
   }
 }
 
