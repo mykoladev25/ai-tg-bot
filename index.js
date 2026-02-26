@@ -59,7 +59,7 @@ function getDesignModelsWithEffectiveCost(userId) {
       if (m.key === 'midjourney' || m.key === 'z_image') {
         return kieAI.isKieAIEnabled;
       }
-      // Nano Banana FREE доступна тільки якщо Google Gemini API налаштований
+      // Nano Banana PRO FREE доступна тільки якщо Google Gemini API налаштований
       if (m.key === 'nano_banana_free') {
         return geminiImage.isConfigured;
       }
@@ -3873,7 +3873,7 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
 
   await ctx.answerCbQuery();
 
-  // 🎁 FREE MODEL CHECK: Nano Banana FREE — перевірка ліміту безкоштовних генерацій
+  // 🎁 FREE MODEL CHECK: Nano Banana PRO FREE — перевірка ліміту безкоштовних генерацій
   if (modelKey === 'nano_banana_free') {
     if (!geminiImage.isConfigured) {
       await ctx.reply('❌ Модель тимчасово недоступна (Google API not configured).');
@@ -3884,7 +3884,7 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
     const freeLimit = geminiImage.FREE_GENERATIONS_LIMIT;
     if (freeUsed >= freeLimit) {
       await ctx.reply(
-        `🎁 <b>Nano Banana FREE</b>\n\n` +
+        `🎁 <b>Nano Banana PRO FREE</b>\n\n` +
         `❌ Ви вже використали всі ${freeLimit} безкоштовних генерацій!\n\n` +
         `💡 Спробуйте платні моделі з більшими можливостями:\n` +
         `• 🍌 Nano Banana — 4⚡ за генерацію\n` +
@@ -4020,7 +4020,7 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
       `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~20-30 секунд`,
 
-    nano_banana_free: `🍌🎁 <b>Nano Banana FREE</b>\n\n` +
+    nano_banana_free: `🍌🎁 <b>Nano Banana PRO FREE</b>\n\n` +
       `🆓 Безкоштовна генерація зображень!\n` +
       `📊 Ліміт: ${geminiImage.FREE_GENERATIONS_LIMIT} генерацій на користувача\n` +
       `🤖 Модель: Gemini 3 Pro Image (Nano Banana Pro)\n\n` +
@@ -11021,7 +11021,7 @@ async function safeSendVideo(chatId, url, options) {
 }
 
 /**
- * 🎁 Nano Banana FREE — генерація через Google Gemini API (безкоштовно)
+ * 🎁 Nano Banana PRO FREE — генерація через Google Gemini API (безкоштовно)
  * Окремий хендлер, бо не використовує провайдер-фолбек систему
  */
 async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio) {
@@ -11036,7 +11036,7 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
 
   if (freeUsed >= freeLimit) {
     await ctx.reply(
-      `🎁 <b>Nano Banana FREE</b>\n\n` +
+      `🎁 <b>Nano Banana PRO FREE</b>\n\n` +
       `❌ Ви вже використали всі ${freeLimit} безкоштовних генерацій!\n\n` +
       `💡 Спробуйте платні моделі для більших можливостей:\n` +
       `• 🍌 Nano Banana — 4⚡ за генерацію\n` +
@@ -11053,7 +11053,7 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
   const remaining = freeLimit - freeUsed - 1;
 
   const statusMsg = await ctx.reply(
-    `🍌🎁 Nano Banana FREE генерація (${mode})...\n\n` +
+    `🍌🎁 Nano Banana PRO FREE генерація (${mode})...\n\n` +
     `🤖 Модель: Gemini 3 Pro Image\n` +
     `📝 Промпт: "${prompt.substring(0, 150)}${prompt.length > 150 ? '...' : ''}"\n` +
     (refCount > 0 ? `📸 Референсів: ${refCount}\n` : '') +
@@ -11062,19 +11062,19 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
   );
 
   try {
-    console.log(`🍌🎁 Nano Banana FREE: userId=${userId}, used=${freeUsed}/${freeLimit}, mode=${mode}, refs=${refCount}, aspect=${aspectRatio}`);
+    console.log(`🍌🎁 Nano Banana PRO FREE: userId=${userId}, used=${freeUsed}/${freeLimit}, mode=${mode}, refs=${refCount}, aspect=${aspectRatio}`);
 
     const result = await geminiImage.generateImage(prompt, imageInput, aspectRatio);
 
     if (!result.success) {
-      console.error(`❌ Nano Banana FREE error: ${result.error}`);
+      console.error(`❌ Nano Banana PRO FREE error: ${result.error}`);
       await adminNotifier.notifyAdmin(bot, new Error(result.error), {
         userId, username, action: 'nano_banana_free_generation',
         model: model.name, prompt, refs: refCount, aspectRatio
       });
 
       await bot.telegram.editMessageText(chatId, statusMsg.message_id, null,
-        `❌ Помилка генерації Nano Banana FREE.\n\n${result.error}\n\nСпробуйте інший промпт або модель.`
+        `❌ Помилка генерації Nano Banana PRO FREE.\n\n${result.error}\n\nСпробуйте інший промпт або модель.`
       );
       return;
     }
@@ -11092,7 +11092,7 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
     }
 
     const safePrompt = prompt.replace(/[<>&]/g, c => c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;');
-    const caption = `🍌🎁 Nano Banana FREE (${mode})\n\n` +
+    const caption = `🍌🎁 Nano Banana PRO FREE (${mode})\n\n` +
       `📝 Промпт: ${safePrompt.substring(0, 800)}${safePrompt.length > 800 ? '...' : ''}\n\n` +
       `💰 Вартість: БЕЗКОШТОВНО 🎁\n` +
       `📊 Залишилось: ${remaining} з ${freeLimit}`;
@@ -11117,15 +11117,15 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
         );
       }
     } catch (sendErr) {
-      console.error('❌ Nano Banana FREE: Failed to send image to Telegram:', sendErr.message);
+      console.error('❌ Nano Banana PRO FREE: Failed to send image to Telegram:', sendErr.message);
       // Fallback: спробуємо без parse_mode
       try {
         await bot.telegram.sendPhoto(chatId,
           { source: result.imageBuffer, filename: 'nano_banana_free.png' },
-          { caption: `🍌🎁 Nano Banana FREE\n\n📝 ${prompt.substring(0, 200)}\n\n💰 БЕЗКОШТОВНО 🎁` }
+          { caption: `🍌🎁 Nano Banana PRO FREE\n\n📝 ${prompt.substring(0, 200)}\n\n💰 БЕЗКОШТОВНО 🎁` }
         );
       } catch (sendErr2) {
-        console.error('❌ Nano Banana FREE: Fallback send also failed:', sendErr2.message);
+        console.error('❌ Nano Banana PRO FREE: Fallback send also failed:', sendErr2.message);
         await ctx.reply('✅ Зображення згенеровано, але не вдалось відправити. Спробуйте ще раз.');
       }
     }
@@ -11142,10 +11142,10 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
       metadata: { freeUsed: freeUsed + 1, freeLimit, refCount, aspectRatio, model: geminiImage.GEMINI_MODEL }
     });
 
-    console.log(`✅ Nano Banana FREE: userId=${userId}, used=${freeUsed + 1}/${freeLimit}, model=${geminiImage.GEMINI_MODEL}`);
+    console.log(`✅ Nano Banana PRO FREE: userId=${userId}, used=${freeUsed + 1}/${freeLimit}, model=${geminiImage.GEMINI_MODEL}`);
 
   } catch (error) {
-    console.error('❌ Nano Banana FREE generation failed:', error);
+    console.error('❌ Nano Banana PRO FREE generation failed:', error);
     await adminNotifier.notifyAdmin(bot, error, {
       userId, username, action: 'nano_banana_free_generation',
       model: model.name, prompt
@@ -11179,7 +11179,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
 
   imageInput = normalizeReferenceOrder(imageInput);
 
-  // 🎁 NANO BANANA FREE — окремий шлях генерації через Google Gemini API
+  // 🎁 Nano Banana PRO FREE — окремий шлях генерації через Google Gemini API
   if (modelKey === 'nano_banana_free') {
     return handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio);
   }
@@ -13840,7 +13840,7 @@ async function startBot() {
         models.design.models
           .filter(m => m.available)
           .forEach((m) => {
-            // Nano Banana FREE — показуємо окремо з freeLimit
+            // Nano Banana PRO FREE — показуємо окремо з freeLimit
             if (m.key === 'nano_banana_free') {
               trialUsage[m.key] = {
                 count: m.freeLimit || geminiImage.FREE_GENERATIONS_LIMIT,

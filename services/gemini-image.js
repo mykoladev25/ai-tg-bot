@@ -1,7 +1,7 @@
 /**
  * Gemini Image Service — генерація зображень через Google Gemini REST API
  *
- * Безкоштовна модель "Nano Banana FREE" для кожного користувача (5 генерацій).
+ * Безкоштовна модель "Nano Banana PRO FREE" для кожного користувача (5 генерацій).
  * Використовує прямий REST API (не SDK) для надійного timeout та error handling.
  *
  * gemini-3-pro-image-preview (Nano Banana Pro):
@@ -14,7 +14,7 @@
 const axios = require('axios');
 
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
-const FREE_GENERATIONS_LIMIT = 5;
+const FREE_GENERATIONS_LIMIT = 3;
 
 // Модель: gemini-3-pro-image-preview (Nano Banana Pro)
 const GEMINI_MODEL = 'gemini-3-pro-image-preview';

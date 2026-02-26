@@ -297,13 +297,13 @@ module.exports = {
       { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 12, apiCost: 0.07, available: true },
 
       /**
-       * Nano Banana FREE — безкоштовна модель через Google Gemini API
-       * gemini-3-pro-image-preview — 5 безкоштовних генерацій для кожного юзера
+       * Nano Banana PRO FREE — безкоштовна модель через Google Gemini API
+       * gemini-3-pro-image-preview — 3 безкоштовних генерацій для кожного юзера
        * Не використовує Replicate/KIE.AI — напряму Google API
        * Той самий функціонал що і Nano Banana PRO (до 14 референсів, aspect ratio)
        */
       {
-        name: '🍌 Nano Banana FREE 🎁',
+        name: '🍌 Nano Banana PRO FREE 🎁',
         key: 'nano_banana_free',
         cost: 0,
         apiCost: 0,
