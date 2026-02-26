@@ -189,19 +189,23 @@ async function fetchVeoTaskInfo(taskId) {
       if (!state && data.successFlag === 1) state = 'success';
       if (!state && data.successFlag === 0 && data.errorMessage) state = 'fail';
       if (!state && data.completeTime && data.response) state = 'success';
+      // ✅ Detect 'waiting' state: no state, no successFlag, no completeTime
+      if (!state && (data.successFlag === null || data.successFlag === undefined) && !data.completeTime) {
+        state = 'waiting';
+      }
       if (!data.state && state) data.state = state;
 
-      console.log(`📡 Veo /veo/record-info: taskId=${taskId}, state=${state}, successFlag=${data.successFlag}, keys=${Object.keys(data).join(',')}`);
+      console.log(`📡 Veo /veo/record-info: taskId=${taskId}, state=${state}, successFlag=${data.successFlag}, completeTime=${data.completeTime || 'null'}, keys=${Object.keys(data).join(',')}`);
 
       if (state === 'success' || state === 'completed') {
-        console.log(`📡 Veo record-info SUCCESS FULL DATA: ${JSON.stringify(data).substring(0, 1000)}`);
+        console.log(`📡 Veo record-info SUCCESS FULL DATA: ${JSON.stringify(data).substring(0, 2000)}`);
         if (data.response) console.log(`📡 Veo response: ${JSON.stringify(data.response).substring(0, 500)}`);
         if (data.info) console.log(`📡 Veo info: ${JSON.stringify(data.info).substring(0, 500)}`);
         if (data.resultJson) console.log(`📡 Veo resultJson: ${String(data.resultJson).substring(0, 500)}`);
       }
       return data;
     } else {
-      console.log(`📡 Veo /veo/record-info: code=${recordInfoResp.data?.code}, msg=${recordInfoResp.data?.msg}`);
+      console.log(`📡 Veo /veo/record-info: code=${recordInfoResp.data?.code}, msg=${recordInfoResp.data?.msg}, data=${JSON.stringify(recordInfoResp.data?.data || {}).substring(0, 300)}`);
     }
   } catch (e) {
     if (e.response?.status !== 404 && e.response?.status !== 400) {
@@ -227,12 +231,16 @@ async function fetchVeoTaskInfo(taskId) {
       if (!state && data.successFlag === 1) state = 'success';
       if (!state && data.successFlag === 0 && data.errorMessage) state = 'fail';
       if (!state && data.completeTime && data.response) state = 'success';
+      // ✅ Detect 'waiting' state: no state, no successFlag, no completeTime
+      if (!state && (data.successFlag === null || data.successFlag === undefined) && !data.completeTime) {
+        state = 'waiting';
+      }
       if (!data.state && state) data.state = state;
 
-      console.log(`📡 Veo /veo/record-detail: taskId=${taskId}, state=${state}, successFlag=${data.successFlag}, keys=${Object.keys(data).join(',')}`);
+      console.log(`📡 Veo /veo/record-detail: taskId=${taskId}, state=${state || 'EMPTY'}, successFlag=${data.successFlag}, completeTime=${data.completeTime || 'null'}, keys=${Object.keys(data).join(',')}`);
 
       if (state === 'success' || state === 'completed') {
-        console.log(`📡 Veo record-detail SUCCESS FULL DATA: ${JSON.stringify(data).substring(0, 1000)}`);
+        console.log(`📡 Veo record-detail SUCCESS FULL DATA: ${JSON.stringify(data).substring(0, 2000)}`);
         if (data.response) console.log(`📡 Veo response: ${JSON.stringify(data.response).substring(0, 500)}`);
         if (data.info) console.log(`📡 Veo info: ${JSON.stringify(data.info).substring(0, 500)}`);
         if (data.resultJson) console.log(`📡 Veo resultJson: ${String(data.resultJson).substring(0, 500)}`);
@@ -884,6 +892,40 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
 
     if (!prompt) {
       throw new Error('Prompt є обов\'язковим для Seedream');
+    }
+
+    // ✅ GUARD: Detect swapped parameters (aspectRatio got a resolution, quality got a ratio)
+    const validAspectRatios = ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '21:9'];
+    const resolutionValues = ['2K', '4K', '2k', '4k', 'basic', 'high'];
+    if (resolutionValues.includes(aspectRatio) || (!validAspectRatios.includes(aspectRatio) && validAspectRatios.includes(quality))) {
+      console.warn(`⚠️ Seedream: SWAPPED params detected! aspectRatio='${aspectRatio}', quality='${quality}' → auto-swapping`);
+      const tmp = aspectRatio;
+      // If aspectRatio has resolution value like '4K' → it should be quality
+      // If quality has ratio value like '1:1' → it should be aspectRatio
+      if (validAspectRatios.includes(quality)) {
+        aspectRatio = quality;
+      } else {
+        aspectRatio = '1:1'; // safe default
+      }
+      if (resolutionValues.includes(tmp)) {
+        // Map resolution to quality: '4K'→'high', '2K'→'basic'
+        quality = (tmp === '4K' || tmp === '4k' || tmp === 'high') ? 'high' : 'basic';
+      } else {
+        quality = 'basic';
+      }
+      console.log(`✅ Seedream: Corrected → aspectRatio='${aspectRatio}', quality='${quality}'`);
+    }
+
+    // ✅ Validate aspect_ratio is within allowed options
+    if (!validAspectRatios.includes(aspectRatio)) {
+      console.warn(`⚠️ Seedream: invalid aspectRatio '${aspectRatio}', falling back to '1:1'`);
+      aspectRatio = '1:1';
+    }
+
+    // ✅ Validate quality
+    if (quality !== 'basic' && quality !== 'high') {
+      console.warn(`⚠️ Seedream: invalid quality '${quality}', falling back to 'basic'`);
+      quality = 'basic';
     }
 
     // Нормалізуємо зображення
@@ -2215,8 +2257,11 @@ async function generateVeoKieAI(prompt, options = {}) {
       model: payload.model,
       generationType: payload.generationType,
       aspectRatio: payload.aspect_ratio,
-      images: payload.imageUrls?.length || 0
+      images: payload.imageUrls?.length || 0,
+      callBackUrl: payload.callBackUrl
     });
+
+    console.log(`📤 KIE.AI Veo FULL payload: ${JSON.stringify(payload).substring(0, 1500)}`);
 
     // ⚠️ УВАГА: Veo використовує ІНШИЙ endpoint!
     const createResponse = await axios.post(
@@ -2353,7 +2398,7 @@ async function generateVeoKieAI(prompt, options = {}) {
  */
 async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelName = 'Veo') {
   let attempts = 0;
-  console.log(`🔁 ${modelName}: Starting polling for taskId=${taskId}, maxAttempts=${maxAttempts}, interval=${interval}ms`);
+  console.log(`🔁 ${modelName}: Starting polling for taskId=${taskId}, maxAttempts=${maxAttempts}, interval=${interval}ms (max ~${Math.round(maxAttempts * interval / 60000)}min)`);
 
   while (attempts < maxAttempts) {
     try {
@@ -2369,20 +2414,23 @@ async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelNa
 
       const state = (job.state || job.status || '').toLowerCase();
 
-      // Логуємо перші 5 спроб, потім кожну хвилину, або при фінальних статусах
-      if (attempts < 5 || attempts % 12 === 0 || state === 'success' || state === 'completed' || state === 'fail' || state === 'failed') {
-        console.log(`📊 ${modelName} poll (${attempts + 1}/${maxAttempts}): state=${state}, successFlag=${job.successFlag}, hasResponse=${!!job.response}, hasInfo=${!!job.info}, hasResultJson=${!!job.resultJson}`);
+      // Логуємо перші 10 спроб, потім кожну хвилину, або при фінальних статусах
+      if (attempts < 10 || attempts % 12 === 0 || state === 'success' || state === 'completed' || state === 'fail' || state === 'failed') {
+        console.log(`📊 ${modelName} poll (${attempts + 1}/${maxAttempts}): state=${state || 'EMPTY'}, successFlag=${job.successFlag}, completeTime=${job.completeTime || 'null'}, hasResponse=${!!job.response}, hasInfo=${!!job.info}, hasResultJson=${!!job.resultJson}, errorMessage=${job.errorMessage || 'null'}`);
       }
 
       if (state === 'success' || state === 'completed') {
-        console.log(`✅ ${modelName} task ${taskId} completed! Extracting video URL...`);
+        console.log(`✅ ${modelName} task ${taskId} completed! Full result keys: ${Object.keys(job).join(',')}`);
+        console.log(`✅ ${modelName} task ${taskId} FULL DATA: ${JSON.stringify(job).substring(0, 2000)}`);
         // Пробуємо витягти URL для перевірки
         const testUrl = extractVideoUrl(job);
-        console.log(`📹 ${modelName} extracted video URL: ${testUrl ? testUrl.substring(0, 100) : 'NULL'}`);
+        console.log(`📹 ${modelName} extracted video URL: ${testUrl ? testUrl.substring(0, 150) : 'NULL'}`);
         return job;
       }
       if (state === 'fail' || state === 'failed' || state === 'error') {
-        const errorMsg = job.failMsg || job.failCode || job.error || 'Unknown error';
+        const errorMsg = job.failMsg || job.failCode || job.errorMessage || job.error || 'Unknown error';
+        console.error(`❌ ${modelName} task ${taskId} FAILED: ${errorMsg}`);
+        console.error(`❌ ${modelName} FULL fail data: ${JSON.stringify(job).substring(0, 1000)}`);
         throw new Error(`Task failed: ${errorMsg}`);
       }
 

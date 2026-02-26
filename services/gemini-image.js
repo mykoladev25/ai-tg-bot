@@ -67,16 +67,29 @@ async function generateImage(prompt, imageInput = null, aspectRatio = '1:1', ima
     if (imageInput) {
       const images = Array.isArray(imageInput) ? imageInput.slice(0, MAX_REFERENCE_IMAGES) : [imageInput];
       const downloadPromises = images.map(async (imgUrl) => {
-        try {
-          const resp = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 30000 });
-          const base64 = Buffer.from(resp.data).toString('base64');
-          const mimeType = detectMimeType(resp.headers, imgUrl, resp.data);
-          console.log(`🔍 Gemini: MIME=${mimeType} for ...${imgUrl.substring(imgUrl.length - 30)}`);
-          return { inline_data: { mime_type: mimeType, data: base64 } };
-        } catch (imgErr) {
-          console.warn(`⚠️ Gemini: Failed to download reference image: ${imgErr.message}`);
-          return null;
+        // Retry loop: 2 attempts with 3s delay
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            if (attempt > 0) {
+              console.log(`🔄 Gemini: retry download #${attempt} for ...${imgUrl.substring(imgUrl.length - 30)}`);
+              await new Promise(r => setTimeout(r, 3000));
+            }
+            const resp = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 45000 });
+            const base64 = Buffer.from(resp.data).toString('base64');
+            const mimeType = detectMimeType(resp.headers, imgUrl, resp.data);
+            console.log(`🔍 Gemini: MIME=${mimeType}, size=${(resp.data.length / 1024).toFixed(1)}KB for ...${imgUrl.substring(imgUrl.length - 30)}`);
+            return { inline_data: { mime_type: mimeType, data: base64 } };
+          } catch (imgErr) {
+            const errMsg = imgErr.message || '';
+            console.warn(`⚠️ Gemini: Failed to download ref image (attempt ${attempt + 1}/2): ${errMsg.substring(0, 100)}`);
+            // Retry on network errors
+            if (attempt === 0 && (errMsg.includes('fetch failed') || errMsg.includes('ECONNABORTED') || errMsg.includes('ETIMEDOUT') || errMsg.includes('socket hang up') || imgErr.code === 'ECONNRESET')) {
+              continue; // retry
+            }
+            return null;
+          }
         }
+        return null;
       });
 
       const downloadedImages = (await Promise.all(downloadPromises)).filter(Boolean);

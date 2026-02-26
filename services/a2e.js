@@ -314,9 +314,10 @@ async function startText2ImageTask(options = {}) {
     const rawData = response.data?.data;
     const isArray = Array.isArray(rawData);
     console.log(`📥 A2E Text2Image response: code=${response.data?.code}, dataIsArray=${isArray}, dataLength=${isArray ? rawData.length : 'N/A'}`);
+    console.log(`📥 A2E Text2Image response FULL: ${JSON.stringify(response.data).substring(0, 1000)}`);
 
     if (response.data && response.data.code === 0) {
-      // ===== A2E API повертає data як МАСИВ! Беремо перший елемент =====
+      // ===== A2E API повертає data як МАСИВ або об'єкт! =====
       const respData = isArray ? rawData[0] : rawData;
 
       if (!respData || (typeof respData === 'object' && Object.keys(respData).length === 0)) {
@@ -324,34 +325,36 @@ async function startText2ImageTask(options = {}) {
         throw new Error('A2E API returned empty data');
       }
 
-      console.log(`📥 A2E Text2Image parsed: _id=${respData._id}, status=${respData.current_status}, image_urls=${respData.image_urls?.length || 0}`);
-
       const taskId = respData._id || respData.taskId || respData.id;
+      const status = respData.current_status || 'unknown';
+      const imageUrls = respData.image_urls || [];
+      console.log(`📥 A2E Text2Image parsed: _id=${taskId}, status=${status}, image_urls=${imageUrls.length}, keys=${Object.keys(respData).join(',')}`);
 
       // Перевіряємо чи зображення вже готове (синхронна відповідь)
-      if (respData.image_urls && Array.isArray(respData.image_urls) && respData.image_urls.length > 0) {
-        const imageUrl = respData.image_urls[0];
-        console.log(`✅ A2E Text2Image: Got SYNC result! taskId=${taskId}, status=${respData.current_status}, urls=${respData.image_urls.length}, url=${imageUrl.substring(0, 100)}`);
+      if (imageUrls.length > 0 && imageUrls[0]) {
+        const imageUrl = imageUrls[0];
+        console.log(`✅ A2E Text2Image: Got SYNC result! taskId=${taskId}, status=${status}, urls=${imageUrls.length}, url=${imageUrl.substring(0, 100)}`);
         return {
           success: true,
           taskId: taskId || '__inline__',
           imageUrl: imageUrl,
-          allImageUrls: respData.image_urls
+          allImageUrls: imageUrls
         };
       }
 
-      // Статус 'initialized' або інший — задача створена, потрібен polling
+      // Статус 'initialized' або 'generating' — задача створена, потрібен polling
       if (taskId) {
-        console.log(`✅ A2E Text2Image task created: ${taskId}, status=${respData.current_status || 'unknown'} → needs polling`);
+        console.log(`✅ A2E Text2Image task created: ${taskId}, status=${status} → needs polling`);
         return {
           success: true,
-          taskId: taskId
+          taskId: taskId,
+          needsPolling: true
         };
       }
 
-      // Крайній випадок
-      console.error(`❌ A2E Text2Image: No taskId found. Full data: ${JSON.stringify(respData).substring(0, 500)}`);
-      throw new Error('A2E API did not return a task ID');
+      // Крайній випадок — немає ні taskId ні image_urls
+      console.error(`❌ A2E Text2Image: No taskId and no image_urls. Full data: ${JSON.stringify(respData).substring(0, 500)}`);
+      throw new Error('A2E API did not return a task ID or image URL');
 
     } else {
       console.error(`❌ A2E Text2Image unexpected response:`, JSON.stringify(response.data, null, 2));
@@ -380,31 +383,74 @@ async function getText2ImageTaskDetails(taskId) {
       throw new Error('A2E_API_TOKEN не налаштовано');
     }
 
-    // A2E API: GET /api/v1/userText2image/:taskId
-    const response = await axios.get(
-      `${A2E_API_BASE}/userText2image/${taskId}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${A2E_API_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 15000
-      }
-    );
+    // ===== METHOD 1: GET /api/v1/userText2image/:taskId =====
+    try {
+      const response = await axios.get(
+        `${A2E_API_BASE}/userText2image/${taskId}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${A2E_API_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 15000
+        }
+      );
 
-    if (response.data && response.data.code === 0) {
-      const rawData = response.data.data;
-      // A2E може повернути масив або об'єкт
-      const data = Array.isArray(rawData) ? rawData[0] : rawData;
-      console.log(`📥 A2E Text2Image details: taskId=${taskId}, status=${data?.current_status}, image_urls=${data?.image_urls?.length || 0}`);
-      return {
-        success: true,
-        data: data
-      };
-    } else {
-      const errorMsg = response.data?.message || 'Unknown error';
-      throw new Error(errorMsg);
+      if (response.data && response.data.code === 0) {
+        const rawData = response.data.data;
+        // A2E може повернути масив або об'єкт
+        const data = Array.isArray(rawData) ? rawData[0] : rawData;
+        console.log(`📥 A2E Text2Image details: taskId=${taskId}, status=${data?.current_status}, image_urls=${data?.image_urls?.length || 0}`);
+        return {
+          success: true,
+          data: data
+        };
+      }
+    } catch (e1) {
+      const status = e1.response?.status;
+      console.warn(`⚠️ A2E Text2Image GET /${taskId}: HTTP ${status || e1.message}`);
+      // If 400/404 — try allRecords fallback
+      if (status !== 400 && status !== 404 && status !== 405) {
+        throw e1; // re-throw non-400 errors
+      }
     }
+
+    // ===== METHOD 2 (FALLBACK): GET allRecords and filter by _id =====
+    try {
+      console.log(`🔄 A2E Text2Image: Trying allRecords fallback for taskId=${taskId}...`);
+      const response = await axios.get(
+        `${A2E_API_BASE}/userText2image/allRecords`,
+        {
+          headers: {
+            'Authorization': `Bearer ${A2E_API_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 15000
+        }
+      );
+
+      if (response.data && response.data.code === 0) {
+        const records = response.data.data || [];
+        const recordsList = Array.isArray(records) ? records : [records];
+        const task = recordsList.find(r => r._id === taskId || r.id === taskId || r.taskId === taskId);
+        if (task) {
+          console.log(`📥 A2E Text2Image allRecords: found taskId=${taskId}, status=${task.current_status}, image_urls=${task.image_urls?.length || 0}`);
+          return {
+            success: true,
+            data: task
+          };
+        } else {
+          console.warn(`⚠️ A2E Text2Image allRecords: taskId=${taskId} not found in ${recordsList.length} records`);
+        }
+      }
+    } catch (e2) {
+      console.warn(`⚠️ A2E Text2Image allRecords failed: ${e2.response?.status || e2.message}`);
+    }
+
+    return {
+      success: false,
+      error: `Task ${taskId} not found`
+    };
 
   } catch (error) {
     console.error('A2E Text2Image Get Task Error:', error.response?.data || error.message);

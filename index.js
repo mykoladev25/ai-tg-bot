@@ -7229,7 +7229,7 @@ async function generateA2EImage(ctx, state) {
         inputImages: generationData.inputImages || []
       });
 
-      if (!startResult.success || !startResult.taskId) {
+      if (!startResult.success) {
         await adminNotifier.notifyAdmin(bot, new Error(startResult.error || 'Failed to start A2E text2image task'), {
           userId, username, action: 'a2e_image_generation', model: model.name
         });
@@ -7272,7 +7272,7 @@ async function generateA2EImage(ctx, state) {
 
           const detailsResult = await a2eService.getText2ImageTaskDetails(taskId);
           if (!detailsResult.success) {
-            console.error(`Зображення без омежень: Failed to get task details: ${detailsResult.error}`);
+            console.warn(`⚠️ Зображення без омежень: Failed to get task details (attempt ${attempts}): ${detailsResult.error}`);
             continue;
           }
 
@@ -7281,14 +7281,15 @@ async function generateA2EImage(ctx, state) {
           const status = taskData?.current_status || taskData?.status || taskData?.state;
 
           // A2E повертає image_urls[] для готових зображень
-          const imageUrl = (taskData?.image_urls && taskData.image_urls.length > 0) ? taskData.image_urls[0] : null;
+          const imageUrls = taskData?.image_urls || [];
+          const imageUrl = (imageUrls.length > 0 && imageUrls[0]) ? imageUrls[0] : null;
 
           if (status === 'completed' || status === 'success' || imageUrl) {
             finalResult = {
               success: true,
               imageUrl: imageUrl
             };
-            console.log(`✅ Зображення без омежень: Task ${taskId} completed! url=${imageUrl ? imageUrl.substring(0, 100) : 'NULL'}`);
+            console.log(`✅ Зображення без омежень: Task ${taskId} completed! status=${status}, url=${imageUrl ? imageUrl.substring(0, 100) : 'NULL'}`);
             break;
           }
 
@@ -7302,7 +7303,7 @@ async function generateA2EImage(ctx, state) {
           }
 
           if (attempts % 6 === 0) {
-            console.log(`🖼️ Зображення без омежень: Task ${taskId} status=${status} (attempt ${attempts}/${maxAttempts})`);
+            console.log(`🖼️ Зображення без омежень: Task ${taskId} status=${status}, image_urls=${imageUrls.length} (attempt ${attempts}/${maxAttempts})`);
           }
         }
 
