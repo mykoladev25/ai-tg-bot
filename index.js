@@ -76,12 +76,12 @@ function getDesignModelsWithEffectiveCost(userId) {
     }));
 }
 
-/** Моделі відео, що доступні тільки через KIE (Kling 3.0, Sora 2). */
-const KIE_ONLY_VIDEO_MODELS = ['kling_3', 'sora_2'];
+/** Моделі відео, що доступні тільки через KIE (зараз тільки Kling 3.0). */
+const KIE_ONLY_VIDEO_MODELS = ['kling_3'];
 
 
 /**
- * Чи може користувач бачити моделі "тільки KIE" (Kling 3.0, Sora 2).
+ * Чи може користувач бачити моделі "тільки KIE" (Kling 3.0).
  */
 function canSeeKieOnlyVideoModels(userId) {
   if (!accessControl.canUseKieAI(userId) || !kieAI.isKieAIEnabled) return false;
@@ -95,6 +95,37 @@ function useKiePriceForDisplay(userId) {
   if (choice === 'replicate') return false;
   if (choice === 'kie-ai') return true;
   return accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
+}
+
+/**
+ * Чи має використовуватись KIE для конкретної моделі з урахуванням вибору провайдера.
+ * AUTO та KIE.AI → KIE (якщо є доступ/реалізація), Replicate → Replicate.
+ */
+function shouldUseKieProvider(userId, modelKey) {
+  const choice = userProviderChoice.get(userId);
+  if (choice === 'replicate') return false;
+  if (!accessControl.canUseKieAI(userId) || !kieAI.isKieAIEnabled) return false;
+  return kieAI.isKieAIImplemented(modelKey);
+}
+
+/**
+ * Тривалості Sora за провайдером:
+ * - KIE.AI: 10/15 (10s тільки з reference image)
+ * - Replicate: 4/8/12
+ */
+function getSoraDurationsForUser(userId, model) {
+  if (shouldUseKieProvider(userId, 'sora_2')) return [10, 15];
+  return model?.durations || [4, 8, 12];
+}
+
+/**
+ * Тип тарифу Sora для KIE.AI.
+ */
+function resolveSoraType(duration, hasReference = false) {
+  if (hasReference) {
+    return duration >= 15 ? 'image_to_video_15s' : 'image_to_video_10s';
+  }
+  return 'text_to_video_15s';
 }
 
 /**
@@ -153,8 +184,13 @@ function getVideoModelsForUser(userId) {
       };
     }
     if (m.key === 'sora_2') {
-      const durations = m.durations || [4, 8, 12];
-      const minCost = Math.min(...durations.map(d => getEffectiveSora2Cost(userId, m, d)));
+      const useKieSora = shouldUseKieProvider(userId, 'sora_2');
+      const durations = getSoraDurationsForUser(userId, m);
+      const minCost = Math.min(
+        ...durations.map(d =>
+          getEffectiveSora2Cost(userId, m, d, { hasReference: useKieSora && d === 10 })
+        )
+      );
       return { ...m, cost: minCost };
     }
     if (m.key === 'kling_o1_edit') {
@@ -276,8 +312,7 @@ function getEffectiveKlingCostPerSecond(userId) {
 function getEffectiveRunwayTurboCostPerSecond(userId) {
   const model = models.video.models.find(m => m.key === 'runway_turbo');
   const fallback = model?.costPerSecond ?? 9;
-  if (!useKiePriceForDisplay(userId)) return fallback;
-  if (!kieAI.isKieAIImplemented('runway_turbo')) return fallback;
+  if (!shouldUseKieProvider(userId, 'runway_turbo')) return fallback;
   const k = kiePricingSync.getKieTokenCostSync('runway_turbo', { duration: 5 });
   if (!k || typeof k !== 'object' || typeof k.costPerSecond !== 'number') return fallback;
   return k.costPerSecond;
@@ -314,17 +349,13 @@ function getEffectiveKling3CostPerSecond(userId, mode, withAudio) {
  * Ціна за обраним провайдером; якщо KIE без реалізації (напр. Sora) — Replicate ціна і запуск Replicate.
  */
 function getEffectiveSora2Cost(userId, model, duration = 15, options = {}) {
-  if (!useKiePriceForDisplay(userId)) {
+  if (!shouldUseKieProvider(userId, 'sora_2')) {
     return Math.ceil(duration * (model?.costPerSecond || 0));
   }
-  if (!kieAI.isKieAIImplemented('sora_2')) {
-    return Math.ceil(duration * (model?.costPerSecond || 0));
-  }
-  const soraType = options.soraType || (duration >= 15 ? 'text_to_video_15s' : duration >= 10 ? 'image_to_video_10s' : null);
-  if (soraType) {
-    const k = kiePricingSync.getKieTokenCostSync('sora_2', { soraType });
-    if (k && typeof k === 'object' && typeof k.cost === 'number') return k.cost;
-  }
+  const hasReference = options.hasReference === true;
+  const soraType = options.soraType || resolveSoraType(duration, hasReference);
+  const k = kiePricingSync.getKieTokenCostSync('sora_2', { soraType });
+  if (k && typeof k === 'object' && typeof k.cost === 'number') return k.cost;
   return Math.ceil(duration * (model?.costPerSecond || 0));
 }
 
@@ -4175,10 +4206,10 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
 
   await ctx.answerCbQuery();
 
-  // Kling 3.0 та Sora 2 — тільки при доступі KIE (не показуємо в меню при Replicate, але перевіряємо і при прямому кліку)
+  // Kling 3.0 — тільки при доступі KIE (не показуємо в меню при Replicate, але перевіряємо і при прямому кліку)
   if (KIE_ONLY_VIDEO_MODELS.includes(modelKey) && !canSeeKieOnlyVideoModels(ctx.from.id)) {
     await ctx.reply(
-      '🔒 <b>Kling 3.0 / Sora 2</b> доступні тільки при виборі провайдера <b>KIE.AI</b>.\n\n' +
+      '🔒 <b>Kling 3.0</b> доступна тільки при виборі провайдера <b>KIE.AI</b>.\n\n' +
       '👤 Профіль → Вибір провайдера → 🔵 KIE.AI',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
@@ -4225,9 +4256,13 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     requiredCost = minDuration * getEffectiveKling3CostPerSecond(ctx.from.id, 'pro', false);
   }
   if (modelKey === 'sora_2') {
-    const durations = model.durations || [4, 8, 12];
-    const minDuration = Math.min(...durations);
-    requiredCost = getEffectiveSora2Cost(ctx.from.id, model, minDuration);
+    const useKieSora = shouldUseKieProvider(ctx.from.id, 'sora_2');
+    const durations = getSoraDurationsForUser(ctx.from.id, model);
+    requiredCost = Math.min(
+      ...durations.map(d =>
+        getEffectiveSora2Cost(ctx.from.id, model, d, { hasReference: useKieSora && d === 10 })
+      )
+    );
   }
   if (modelKey === 'veo') {
     requiredCost = getEffectiveVeoFlatCost(ctx.from.id, 'veo3_fast'); // мінімальна ціна = Fast
@@ -4526,13 +4561,23 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
       return;
     }
 
-    const durations = model.durations || [4, 8, 12];
+    const useKieSora = shouldUseKieProvider(ctx.from.id, 'sora_2');
+    const durations = getSoraDurationsForUser(ctx.from.id, model);
     const minDuration = Math.min(...durations);
     const maxDuration = Math.max(...durations);
-    const minCost = durations.reduce((acc, d) => Math.min(acc, getEffectiveSora2Cost(ctx.from.id, model, d)), Infinity);
-    const maxCost = durations.reduce((acc, d) => Math.max(acc, getEffectiveSora2Cost(ctx.from.id, model, d)), 0);
+    const minCost = durations.reduce(
+      (acc, d) => Math.min(acc, getEffectiveSora2Cost(ctx.from.id, model, d, { hasReference: useKieSora && d === 10 })),
+      Infinity
+    );
+    const maxCost = durations.reduce(
+      (acc, d) => Math.max(acc, getEffectiveSora2Cost(ctx.from.id, model, d, { hasReference: useKieSora && d === 10 })),
+      0
+    );
     const durationButtons = durations.map(d => ([
-      Markup.button.callback(`${d} сек (${getEffectiveSora2Cost(ctx.from.id, model, d)}⚡)`, `sora_duration_${d}`)
+      Markup.button.callback(
+        `${d} сек (${getEffectiveSora2Cost(ctx.from.id, model, d, { hasReference: useKieSora && d === 10 })}⚡)`,
+        `sora_duration_${d}`
+      )
     ]));
 
     userState.set(ctx.from.id, {
@@ -4546,6 +4591,7 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
       `📐 <b>Крок 1: Оберіть тривалість відео</b>\n\n` +
       `⏱️ ${minDuration}-${maxDuration} секунд\n` +
       `💰 Вартість: ${minCost}—${maxCost}⚡\n` +
+      `${useKieSora ? `💡 10с доступно тільки зі стартовим зображенням\n` : ''}` +
       `🖼️ Опціонально: стартове зображення\n` +
       `📐 Пропорції: portrait / landscape`,
       {
@@ -5443,19 +5489,28 @@ bot.action(/^sora_aspect_(portrait|landscape)$/, async (ctx) => {
     step: 'ask_reference'
   });
 
-  await ctx.reply(
-    `🖼️ <b>Крок 3: Додати стартове зображення?</b>\n\n` +
-    `Опціонально можна задати перший кадр.\n` +
-    `Зображення має мати пропорції <b>${aspectRatio}</b>.`,
-    {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
+  const referenceRequired = state.duration === 10;
+  const referenceText = referenceRequired
+    ? `🖼️ <b>Крок 3: Додайте стартове зображення (обов'язково)</b>\n\n10с режим для Sora 2 вимагає reference image.\nЗображення має мати пропорції <b>${aspectRatio}</b>.`
+    : `🖼️ <b>Крок 3: Додати стартове зображення?</b>\n\nОпціонально можна задати перший кадр.\nЗображення має мати пропорції <b>${aspectRatio}</b>.`;
+  const referenceButtons = referenceRequired
+    ? [
+        [Markup.button.callback('📷 Додати зображення', 'sora_add_reference')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ]
+    : [
         [
           Markup.button.callback('📷 Додати зображення', 'sora_add_reference'),
           Markup.button.callback('⏭️ Без зображення', 'sora_skip_reference')
         ],
         [Markup.button.callback('← Назад', 'video_menu')]
-      ])
+      ];
+
+  await ctx.reply(
+    referenceText,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard(referenceButtons)
     }
   );
 });
@@ -5491,6 +5546,14 @@ bot.action('sora_skip_reference', async (ctx) => {
 
   if (!state || state.action !== 'sora_generation') {
     await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  if (state.duration === 10) {
+    await ctx.reply(
+      '⚠️ Для Sora 2 (10с) стартове зображення обов\'язкове. Додайте reference image.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
     return;
   }
 
@@ -8220,12 +8283,20 @@ async function generateRunwayTurboVideo(ctx, state) {
     return;
   }
 
+  const useKieAI = shouldUseKieProvider(userId, 'runway_turbo');
+  const providerKey = useKieAI ? 'kie' : 'replicate';
+  const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
   const duration = state.duration || 5;
   const aspectRatio = state.aspectRatio || '16:9';
   const costPerSec = getEffectiveRunwayTurboCostPerSecond(userId);
   const runwayCost = duration * costPerSec;
-  const apiCostPerSec = model.apiCostPerSecond || (model.apiCost / 5);
-  const apiCost = duration * apiCostPerSec;
+  let apiCost = duration * (model.apiCostPerSecond || (model.apiCost / 5));
+  if (useKieAI) {
+    const k = kiePricingSync.getKieTokenCostSync('runway_turbo', { duration });
+    if (k && typeof k === 'object' && typeof k.apiCost === 'number') {
+      apiCost = k.apiCost;
+    }
+  }
 
   if (!(await userBalance.hasTokens(userId, runwayCost))) {
     await showInsufficientTokens(ctx, runwayCost);
@@ -8238,8 +8309,9 @@ async function generateRunwayTurboVideo(ctx, state) {
     `⏱️ Тривалість: ${duration} сек\n` +
     `📐 Пропорції: ${aspectRatio}\n` +
     `🖼️ Початкове зображення: Так\n\n` +
+    `🔌 Провайдер: ${providerName}\n` +
     `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
-    `⏱️ Це може зайняти 1-3 хвилини...\n` +
+    `⏱️ Це може зайняти ${useKieAI ? '2-6' : '1-3'} хвилини...\n` +
     `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
     { parse_mode: 'HTML' }
   );
@@ -8252,21 +8324,56 @@ async function generateRunwayTurboVideo(ctx, state) {
 
   (async () => {
     try {
-      const result = await replicate.generateVideoWithRunwayTurbo(
-        generationData.prompt,
-        generationData.startImage,
-        duration,
-        aspectRatio
-      );
+      console.log(`🎯 Runway Turbo using provider: ${providerName}`);
+      const result = useKieAI
+        ? await kieAI.generateRunwayVideoKieAI(generationData.prompt, {
+            imageUrl: generationData.startImage || null,
+            duration,
+            quality: '720p',
+            aspectRatio
+          })
+        : await replicate.generateVideoWithRunwayTurbo(
+            generationData.prompt,
+            generationData.startImage,
+            duration,
+            aspectRatio
+          );
+
+      if (!result.success && result.pending && result.taskId) {
+        console.log(`⏱️ Runway Turbo task ${result.taskId} pending — recovery for user ${userId}`);
+        await bot.telegram.editMessageText(chatId, statusMsg.message_id, null,
+          `⏳ <b>Runway Gen-4 Turbo ще генерується...</b>\n\nВідео буде надіслано автоматично.\n🔄 Перевіряємо у фоні...`,
+          { parse_mode: 'HTML' }
+        );
+        startVideoRecoveryPolling({
+          chatId, userId, username, modelKey: 'runway_turbo', modelLabel: model.name,
+          taskId: result.taskId, cost: runwayCost, deductDescription: `${model.name} generation`,
+          deductMeta: {
+            modelKey: 'runway_turbo',
+            modelName: model.name,
+            apiCost,
+            prompt: generationData.prompt,
+            duration,
+            aspectRatio,
+            hasStartImage: true,
+            provider: providerKey
+          },
+          promptSnippet: `⏱️ ${duration} сек | 📐 ${aspectRatio}`,
+          captionLine: `🎬 Runway Turbo\n⏱️ ${duration}сек | 📐 ${aspectRatio}`,
+          isRunway: true,
+          monitorOptions: { options: { duration, aspectRatio }, provider: providerKey }
+        });
+        return;
+      }
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
           userId, username, action: 'runway_turbo_generation', model: model.name,
-          prompt: generationData.prompt, duration: duration
+          prompt: generationData.prompt, duration, provider: providerName
         });
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
-          `❌ Помилка генерації Runway Turbo.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+          `❌ Помилка генерації Runway Turbo (${providerName}).\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
         );
 
         const isTrial = await isTrialUser(userId);
@@ -8277,7 +8384,8 @@ async function generateRunwayTurboVideo(ctx, state) {
           options: { duration, aspectRatio },
           isTrial,
           isFree: isTrial,
-          errorCode: result.error?.substring(0, 100)
+          errorCode: result.error?.substring(0, 100),
+          provider: providerKey
         });
 
         return;
@@ -8286,11 +8394,12 @@ async function generateRunwayTurboVideo(ctx, state) {
       await userBalance.deductTokens(userId, runwayCost, `${model.name} generation`, {
         modelKey: 'runway_turbo',
         modelName: model.name,
-        apiCost: apiCost,
+        apiCost,
         prompt: generationData.prompt,
-        duration: duration,
-        aspectRatio: aspectRatio,
-        hasStartImage: true
+        duration,
+        aspectRatio,
+        hasStartImage: true,
+        provider: providerKey
       });
 
       const isTrialRunway = await isTrialUser(userId);
@@ -8300,7 +8409,8 @@ async function generateRunwayTurboVideo(ctx, state) {
         success: true,
         options: { duration, aspectRatio },
         isTrial: isTrialRunway,
-        isFree: isTrialRunway
+        isFree: isTrialRunway,
+        provider: providerKey
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -8308,6 +8418,7 @@ async function generateRunwayTurboVideo(ctx, state) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>Runway Gen-4 Turbo готово!</b>\n\n` +
+        `🔌 Провайдер: ${providerName}\n` +
         `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
         `⏱️ ${duration} сек | 📐 ${aspectRatio}\n` +
         `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
@@ -8324,7 +8435,7 @@ async function generateRunwayTurboVideo(ctx, state) {
 
     } catch (error) {
       console.error('Runway Turbo generation failed:', error);
-      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'runway_turbo_generation', model: model.name });
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'runway_turbo_generation', model: model.name, provider: providerName });
       try {
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
@@ -8703,14 +8814,37 @@ async function generateSoraVideo(ctx, state) {
     return;
   }
 
-  const duration = state.duration || 4;
+  const useKieAI = shouldUseKieProvider(userId, 'sora_2');
+  const duration = state.duration || (useKieAI ? 10 : 4);
   const aspectRatio = state.aspectRatio || 'portrait';
   const hasReference = !!state.inputReference;
+  const soraType = resolveSoraType(duration, hasReference);
+  const providerKey = useKieAI ? 'kie' : 'replicate';
+  const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
+
+  // KIE.AI: 10s доступно лише для image-to-video.
+  if (useKieAI && duration === 10 && !hasReference) {
+    await ctx.reply(
+      '⚠️ <b>Sora 2 (KIE.AI): 10с режим доступний тільки зі стартовим зображенням.</b>\n\n' +
+      'Додайте reference image або оберіть 15с.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    userState.delete(userId);
+    userCurrentModel.delete(userId);
+    return;
+  }
+
   const soraCost = getEffectiveSora2Cost(userId, model, duration, {
-    soraType: hasReference ? (duration >= 15 ? 'image_to_video_15s' : 'image_to_video_10s') : (duration >= 15 ? 'text_to_video_15s' : duration >= 10 ? 'image_to_video_10s' : null)
+    soraType,
+    hasReference
   });
-  const apiCostPerSec = model.apiCostPerSecond || 0;
-  const apiCost = duration * apiCostPerSec;
+  let apiCost = duration * (model.apiCostPerSecond || 0);
+  if (useKieAI) {
+    const k = kiePricingSync.getKieTokenCostSync('sora_2', { soraType });
+    if (k && typeof k === 'object' && typeof k.apiCost === 'number') {
+      apiCost = k.apiCost;
+    }
+  }
 
   if (!(await userBalance.hasTokens(userId, soraCost))) {
     await showInsufficientTokens(ctx, soraCost);
@@ -8723,8 +8857,9 @@ async function generateSoraVideo(ctx, state) {
     `📐 Пропорції: ${aspectRatio}\n` +
     `⏱️ Тривалість: ${duration} сек\n` +
     `🖼️ Стартове зображення: ${hasReference ? 'Так' : 'Ні'}\n\n` +
+    `🔌 Провайдер: ${providerName}\n` +
     `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
-    `⏱️ Це може зайняти 2-5 хвилин...\n` +
+    `⏱️ Це може зайняти ${useKieAI ? '5-10' : '2-5'} хвилин...\n` +
     `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
     { parse_mode: 'HTML' }
   );
@@ -8736,21 +8871,56 @@ async function generateSoraVideo(ctx, state) {
 
   (async () => {
     try {
-      const result = await replicate.generateVideoWithSora2(
-        generationData.prompt,
-        duration,
-        aspectRatio,
-        generationData.inputReference || null
-      );
+      console.log(`🎯 Sora 2 using provider: ${providerName}`);
+
+      const result = useKieAI
+        ? await kieAI.generateSora2KieAI(generationData.prompt, {
+            imageUrl: generationData.inputReference || null,
+            duration,
+            aspectRatio
+          })
+        : await replicate.generateVideoWithSora2(
+            generationData.prompt,
+            duration,
+            aspectRatio,
+            generationData.inputReference || null
+          );
+
+      if (!result.success && result.pending && result.taskId) {
+        console.log(`⏱️ Sora 2 task ${result.taskId} pending — recovery for user ${userId}`);
+        await bot.telegram.editMessageText(chatId, statusMsg.message_id, null,
+          `⏳ <b>OpenAI Sora 2 ще генерується...</b>\n\nВідео буде надіслано автоматично.\n🔄 Перевіряємо у фоні...`,
+          { parse_mode: 'HTML' }
+        );
+        startVideoRecoveryPolling({
+          chatId, userId, username, modelKey: 'sora_2', modelLabel: 'OpenAI Sora 2',
+          taskId: result.taskId, cost: soraCost, deductDescription: `${model.name} generation`,
+          deductMeta: {
+            modelKey: 'sora_2',
+            modelName: model.name,
+            apiCost,
+            prompt: generationData.prompt,
+            duration,
+            aspectRatio,
+            hasStartImage: hasReference,
+            provider: providerKey,
+            soraType
+          },
+          promptSnippet: `📐 ${aspectRatio} | ⏱️ ${duration} сек`,
+          captionLine: `🌌 OpenAI Sora 2\n📐 ${aspectRatio} | ⏱️ ${duration}сек`,
+          monitorOptions: { options: { duration, aspectRatio, hasReference }, provider: providerKey }
+        });
+        return;
+      }
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
           userId, username, action: 'sora_generation', model: model.name,
-          prompt: generationData.prompt, aspectRatio: aspectRatio
+          prompt: generationData.prompt, aspectRatio, provider: providerName
         });
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
-          `❌ Помилка генерації Sora 2.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+          `❌ Помилка генерації Sora 2 (${providerName}).\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
         );
 
         const isTrial = await isTrialUser(userId);
@@ -8758,10 +8928,11 @@ async function generateSoraVideo(ctx, state) {
           userId,
           modelKey: 'sora_2',
           success: false,
-          options: { duration },
+          options: { duration, aspectRatio, hasReference },
           isTrial,
           isFree: isTrial,
-          errorCode: result.error?.substring(0, 100)
+          errorCode: result.error?.substring(0, 100),
+          provider: providerKey
         });
 
         return;
@@ -8770,11 +8941,13 @@ async function generateSoraVideo(ctx, state) {
       await userBalance.deductTokens(userId, soraCost, `${model.name} generation`, {
         modelKey: 'sora_2',
         modelName: model.name,
-        apiCost: apiCost,
+        apiCost,
         prompt: generationData.prompt,
-        duration: duration,
-        aspectRatio: aspectRatio,
-        hasStartImage: hasReference
+        duration,
+        aspectRatio,
+        hasStartImage: hasReference,
+        provider: providerKey,
+        soraType
       });
 
       const isTrialSora = await isTrialUser(userId);
@@ -8782,9 +8955,10 @@ async function generateSoraVideo(ctx, state) {
         userId,
         modelKey: 'sora_2',
         success: true,
-        options: { duration },
+        options: { duration, aspectRatio, hasReference },
         isTrial: isTrialSora,
-        isFree: isTrialSora
+        isFree: isTrialSora,
+        provider: providerKey
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -8792,6 +8966,7 @@ async function generateSoraVideo(ctx, state) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>OpenAI Sora 2 готово!</b>\n\n` +
+        `🔌 Провайдер: ${providerName}\n` +
         `📐 Пропорції: ${aspectRatio}\n` +
         `⏱️ Тривалість: ${duration} сек\n` +
         `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
@@ -8809,7 +8984,7 @@ async function generateSoraVideo(ctx, state) {
 
     } catch (error) {
       console.error('Sora 2 generation failed:', error);
-      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'sora_generation', model: model.name });
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'sora_generation', model: model.name, provider: providerName });
       try {
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,

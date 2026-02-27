@@ -487,7 +487,7 @@ function getKieTokenCostSync(modelKey, options = {}) {
       if (usd == null) return null;
       const u = parseFloat(usd);
       if (Number.isNaN(u)) return null;
-      return { cost: kieAiModels.usdToTokens(u), costPerSecond: kieAiModels.usdToTokens(u / d) };
+      return { cost: kieAiModels.usdToTokens(u), costPerSecond: kieAiModels.usdToTokens(u / d), apiCost: u };
     }
 
     // Kling Motion: 720P (std) та 1080P (pro) за секунду; конвенція image 5s, video 10s
@@ -518,7 +518,7 @@ function getKieTokenCostSync(modelKey, options = {}) {
       const type = options.soraType || 'text_to_video_15s';
       const usd = kieAiModels.getKieAIPrice.call(kieAiModels, 'sora_2', { type });
       if (usd == null || usd === 0) return null;
-      return { cost: kieAiModels.usdToTokens(usd) };
+      return { cost: kieAiModels.usdToTokens(usd), apiCost: usd, soraType: type };
     }
 
     return null;
@@ -641,4 +641,3 @@ if (require.main === module) {
     }
   })();
 }
-
