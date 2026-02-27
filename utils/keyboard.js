@@ -51,6 +51,10 @@ function createInlineMenu(buttons, columns = 1) {
         const maxCost = btn.maxCost || Math.max(...Object.values(btn.costs));
         text = `${btn.name} (${minCost}—${maxCost}⚡)`;
       }
+      // Для моделей з діапазоном вартості (наприклад, Nano Banana PRO 2K/4K)
+      else if (btn.maxCost && btn.cost > 0 && btn.maxCost > btn.cost) {
+        text = `${btn.name} (${btn.cost}—${btn.maxCost}⚡)`;
+      }
       else if (btn.cost > 0) {
         text = `${btn.name} (${btn.cost}⚡)`;
       } else {

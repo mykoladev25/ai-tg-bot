@@ -55,12 +55,14 @@ function getDesignModelsWithEffectiveCost(userId) {
     .filter(m => {
       // Пропускаємо вимкнені моделі
       if (m.available === false) return false;
+      // Пропускаємо приховані в меню моделі (використовуються внутрішньо)
+      if (m.menuHidden) return false;
       // Midjourney та Z-Image доступні тільки якщо KIE.AI налаштований
       if (m.key === 'midjourney' || m.key === 'z_image') {
         return kieAI.isKieAIEnabled;
       }
-      // Nano Banana PRO FREE доступна тільки якщо Google Gemini API налаштований
-      if (m.key === 'nano_banana_free') {
+      // Google direct моделі (Nano Banana FREE / Nano Banana 2) доступні тільки якщо Gemini API налаштований
+      if (m.googleDirect) {
         return geminiImage.isConfigured;
       }
       // Зображення без омежень доступна тільки якщо A2E API налаштований
@@ -70,10 +72,39 @@ function getDesignModelsWithEffectiveCost(userId) {
       }
       return true;
     })
-    .map(m => ({
-      ...m,
-      cost: getEffectiveImageCost(userId, m, m.key)
-    }));
+    .map(m => {
+      // Nano Banana PRO — показуємо динамічний діапазон 2K/4K за активним провайдером
+      if (m.key === 'nano_banana_pro') {
+        const model2k = models.design.models.find(x => x.key === 'nano_banana_2k');
+        const model4k = models.design.models.find(x => x.key === 'nano_banana_4k');
+        const cost2k = model2k ? getEffectiveImageCost(userId, model2k, 'nano_banana_2k') : (m.costsBySize?.['2K'] || m.cost);
+        const cost4k = model4k ? getEffectiveImageCost(userId, model4k, 'nano_banana_4k') : (m.costsBySize?.['4K'] || m.maxCost || m.cost);
+        return {
+          ...m,
+          cost: cost2k,
+          maxCost: cost4k
+        };
+      }
+
+      // Google direct моделі з кількома розмірами — показуємо діапазон
+      if (m.googleDirect && m.costsBySize && typeof m.costsBySize === 'object') {
+        const values = Object.values(m.costsBySize).filter(v => typeof v === 'number');
+        if (values.length > 0) {
+          const minCost = Math.min(...values);
+          const maxCost = Math.max(...values);
+          return {
+            ...m,
+            cost: minCost,
+            maxCost
+          };
+        }
+      }
+
+      return {
+        ...m,
+        cost: getEffectiveImageCost(userId, m, m.key)
+      };
+    });
 }
 
 /** Моделі відео, що доступні тільки через KIE (зараз тільки Kling 3.0). */
@@ -132,9 +163,14 @@ function resolveSoraType(duration, hasReference = false) {
  * Список відео-моделей для меню з ефективними цінами (KIE/Replicate за провайдером).
  */
 function getVideoModelsForUser(userId) {
-  const list = canSeeKieOnlyVideoModels(userId)
+  const providerChoice = userProviderChoice.get(userId) || 'auto';
+  let list = canSeeKieOnlyVideoModels(userId)
     ? models.video.models
     : models.video.models.filter(m => !KIE_ONLY_VIDEO_MODELS.includes(m.key));
+  // Sora 2 тимчасово працює тільки через Replicate
+  if (providerChoice === 'kie-ai') {
+    list = list.filter(m => m.key !== 'sora_2');
+  }
   return list.map(m => {
     if (m.key === 'veo') {
       return {
@@ -663,6 +699,8 @@ const IMAGE_MODELS = [
   'stable_diffusion',
   'nano_banana',
   'nano_banana_free',
+  'nano_banana_2',
+  'nano_banana_pro',
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_4k',
@@ -677,6 +715,8 @@ const IMAGE_MODELS = [
 const MODELS_WITH_ASPECT_RATIO = [
   'nano_banana',
   'nano_banana_free',
+  'nano_banana_2',
+  'nano_banana_pro',
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_4k',
@@ -692,7 +732,7 @@ const MODELS_WITH_STATE = [
   'kling_motion',           // mode + orientation + sound + фото + відео
   'veo',                    // aspect ratio + prompt + last_frame + start_image
   'sora_2',                 // duration + aspect ratio + optional reference + prompt
-  'nano_banana_pro',        // вибір розміру (майбутнє)
+  'nano_banana_pro',        // вибір розміру (2K/4K)
   ...MODELS_WITH_ASPECT_RATIO // добавляємо моделі з вибором aspect ratio
 ];
 
@@ -700,6 +740,8 @@ const ASPECT_RATIO_OPTIONS = {
   seedream_4k: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
   nano_banana: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   nano_banana_free: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+  nano_banana_2: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9', '1:4', '4:1', '1:8', '8:1'],
+  nano_banana_pro: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   nano_banana_2k: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   nano_banana_4k: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   stable_diffusion: ['1:1', '16:9', '21:9', '2:3', '3:2', '4:5', '5:4', '9:16', '9:21'],
@@ -713,6 +755,10 @@ const ASPECT_RATIO_LABELS = {
   '2:1': '🖼️ 2:1 (Wide)',
   '1:3': '📱 1:3 (Tall)',
   '3:1': '🖼️ 3:1 (Panorama)',
+  '1:4': '📱 1:4 (Tall)',
+  '4:1': '🖼️ 4:1 (Panorama)',
+  '1:8': '📱 1:8 (Ultra Tall)',
+  '8:1': '🖼️ 8:1 (Ultra Wide)',
   '4:5': '📱 4:5 (Portrait)',
   '5:4': '🖼️ 5:4 (Classic Landscape)',
   '4:3': '🎬 4:3 (Landscape)',
@@ -737,6 +783,8 @@ const RATIO_NOTES = {
 const TEXT_ASPECT_RATIO_MODELS = new Set([
   'nano_banana',
   'nano_banana_free',
+  'nano_banana_2',
+  'nano_banana_pro',
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_4k',
@@ -744,6 +792,35 @@ const TEXT_ASPECT_RATIO_MODELS = new Set([
   'stable_diffusion',
   'z_image'
 ]);
+
+const IMAGE_SIZE_OPTIONS = {
+  nano_banana_2: ['0.5K', '1K', '2K', '4K'],
+  nano_banana_pro: ['2K', '4K']
+};
+
+function resolveModelKeyBySize(modelKey, imageSize) {
+  if (modelKey === 'nano_banana_pro') {
+    return imageSize === '4K' ? 'nano_banana_4k' : 'nano_banana_2k';
+  }
+  return modelKey;
+}
+
+function getImageGenerationCostBySize(userId, modelKey, imageSize) {
+  if (modelKey === 'nano_banana_pro') {
+    const resolvedKey = resolveModelKeyBySize(modelKey, imageSize);
+    const resolvedModel = models.design.models.find(m => m.key === resolvedKey);
+    return resolvedModel ? getEffectiveImageCost(userId, resolvedModel, resolvedKey) : 0;
+  }
+
+  const model = models.design.models.find(m => m.key === modelKey);
+  if (!model) return 0;
+
+  if (model.costsBySize && imageSize && Object.prototype.hasOwnProperty.call(model.costsBySize, imageSize)) {
+    return model.costsBySize[imageSize];
+  }
+
+  return getEffectiveImageCost(userId, model, modelKey);
+}
 
 function getAspectRatiosForModel(modelKey, hasImageInput = true) {
   const ratios = ASPECT_RATIO_OPTIONS[modelKey] || ['1:1', 'match_input_image'];
@@ -3244,11 +3321,11 @@ bot.action('new_conversation', async (ctx) => {
 });
 
 // ==================== ASPECT RATIO SELECTION ====================
-bot.action(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|4:5|5:4|9:16|10:16|16:10|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/, async (ctx) => {
+bot.action(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|1:4|4:1|1:8|8:1|4:5|5:4|9:16|10:16|16:10|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   const callbackData = ctx.callbackQuery.data;
-  const match = callbackData.match(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|4:5|5:4|9:16|10:16|16:10|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/);
+  const match = callbackData.match(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|1:4|4:1|1:8|8:1|4:5|5:4|9:16|10:16|16:10|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/);
   const userId = ctx.from.id;
 
   console.log(`📐 Aspect ratio callback: ${callbackData}`);
@@ -3281,8 +3358,10 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|4:5|5:4|9:16|10:16|16:10|4:
 
   // Генеруємо з вибраним aspect ratio (у фоні, щоб не блокувати інші апдейти)
   const imageInput = state.imageUrl || null;
+  const targetModelKey = state.targetModelKey || modelKey;
+  const generationOptions = state.imageSize ? { imageSize: state.imageSize } : undefined;
   runBackgroundTask(
-    () => handleImageGeneration(ctx, state.prompt, modelKey, imageInput, aspectRatio),
+    () => handleImageGeneration(ctx, state.prompt, targetModelKey, imageInput, aspectRatio, generationOptions),
     'image_generation_aspect_ratio'
   );
 
@@ -3873,7 +3952,7 @@ bot.action(/^mj_vary_(.+)_(\d+)$/, async (ctx) => {
 });
 
 // Design Models
-bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram|z_image|a2e_image)$/, async (ctx) => {
+bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram|z_image|a2e_image)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
 
@@ -3904,12 +3983,13 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
 
   await ctx.answerCbQuery();
 
+  if (model.googleDirect && !geminiImage.isConfigured) {
+    await ctx.reply('❌ Модель тимчасово недоступна (Google API not configured).');
+    return;
+  }
+
   // 🎁 FREE MODEL CHECK: Nano Banana PRO FREE — перевірка ліміту безкоштовних генерацій
   if (modelKey === 'nano_banana_free') {
-    if (!geminiImage.isConfigured) {
-      await ctx.reply('❌ Модель тимчасово недоступна (Google API not configured).');
-      return;
-    }
     const user = await User.findById(ctx.from.id);
     const freeUsed = user?.freeUsage?.nano_banana_free || 0;
     const freeLimit = geminiImage.FREE_GENERATIONS_LIMIT;
@@ -3919,13 +3999,52 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
         `❌ Ви вже використали всі ${freeLimit} безкоштовних генерацій!\n\n` +
         `💡 Спробуйте платні моделі з більшими можливостями:\n` +
         `• 🍌 Nano Banana — 4⚡ за генерацію\n` +
-        `• 🍌 Nano Banana PRO 2K — 15⚡\n` +
-        `• 🍌 Nano Banana PRO 4K — 20⚡\n\n` +
+        `• 🍌 Nano Banana PRO — 2K/4K (від 25⚡)\n` +
+        `• 🍌 Nano Banana 2 — 0.5K/1K/2K/4K (від 8⚡)\n\n` +
         `Або поповніть баланс для доступу до всіх моделей! 🚀`,
         { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
       );
       return;
     }
+  }
+
+  // 🍌 Вибір якості для Nano Banana 2 / Nano Banana PRO
+  if (IMAGE_SIZE_OPTIONS[modelKey]) {
+    const sizes = IMAGE_SIZE_OPTIONS[modelKey];
+    const modelTitle = modelKey === 'nano_banana_pro' ? 'Nano Banana PRO' : model.name;
+    const rows = sizes
+      .map((size) => {
+        const cost = getImageGenerationCostBySize(ctx.from.id, modelKey, size);
+        return Markup.button.callback(`🖼️ ${size} (${cost}⚡)`, `img_quality_${modelKey}_${size}`);
+      })
+      .reduce((acc, btn, i) => {
+        if (i % 2 === 0) acc.push([btn]);
+        else acc[acc.length - 1].push(btn);
+        return acc;
+      }, []);
+
+    imageGenState.set(ctx.from.id, {
+      model: modelKey,
+      step: 'select_quality',
+      photos: []
+    });
+
+    userCurrentModel.set(ctx.from.id, modelKey);
+
+    await ctx.reply(
+      `🍌 <b>${modelTitle}</b>\n\n` +
+      `🎯 <b>Крок 1: Оберіть якість</b>\n\n` +
+      `${sizes.map((size) => `• ${size} — ${getImageGenerationCostBySize(ctx.from.id, modelKey, size)}⚡`).join('\n')}\n\n` +
+      `Після вибору якості можна додати референси та ввести промпт.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          ...rows,
+          [Markup.button.callback('← Назад', 'design_menu')]
+        ])
+      }
+    );
+    return;
   }
 
   const effectiveCost = getEffectiveImageCost(ctx.from.id, model, modelKey);
@@ -4051,6 +4170,13 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
       `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~20-30 секунд`,
 
+    nano_banana_2: `🍌 <b>${model.name}</b>\n\n` +
+      refsStep +
+      `Нова Gemini модель для швидкої генерації та редагування.\n` +
+      `💡 Підтримує: 0.5K / 1K / 2K / 4K, Search Grounding, розширені пропорції.\n\n` +
+      `💰 Вартість: ${effectiveCost}⚡\n` +
+      `⏱️ Час: ~10-25 секунд`,
+
     nano_banana_free: `🍌🎁 <b>Nano Banana PRO FREE</b>\n\n` +
       `🆓 Безкоштовна генерація зображень!\n` +
       `📊 Ліміт: ${geminiImage.FREE_GENERATIONS_LIMIT} генерацій на користувача\n` +
@@ -4077,6 +4203,7 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
   // Для nano_banana та seedream моделей використовуємо спільний шаблон
   let messageKey = modelKey;
   if (modelKey === 'nano_banana_free') messageKey = 'nano_banana_free';
+  else if (modelKey === 'nano_banana_2') messageKey = 'nano_banana_2';
   else if (modelKey.startsWith('nano_banana')) messageKey = 'nano_banana';
   if (modelKey.startsWith('seedream')) messageKey = 'seedream';
 
@@ -4087,6 +4214,73 @@ bot.action(/^(flux|nano_banana_free|nano_banana|nano_banana_2k|nano_banana_4k|st
 
   await ctx.reply(
     messages[messageKey] || defaultMessage,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
+        [Markup.button.callback('← Назад', 'design_menu')]
+      ])
+    }
+  );
+});
+
+// 🍌 Крок вибору якості для Nano Banana 2 / Nano Banana PRO
+bot.action(/^img_quality_(nano_banana_2|nano_banana_pro)_(0\.5K|1K|2K|4K)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const userId = ctx.from.id;
+  const modelKey = ctx.match[1];
+  const imageSize = ctx.match[2];
+  const imgState = imageGenState.get(userId);
+  const model = models.design.models.find(m => m.key === modelKey);
+
+  if (!model || !IMAGE_SIZE_OPTIONS[modelKey]) {
+    await ctx.reply('❌ Помилка. Модель не знайдена.', keyboard.createBackButton('design_menu'));
+    return;
+  }
+
+  if (!IMAGE_SIZE_OPTIONS[modelKey].includes(imageSize)) {
+    await ctx.reply('❌ Цей розмір недоступний для обраної моделі.', keyboard.createBackButton('design_menu'));
+    return;
+  }
+
+  if (!imgState || imgState.model !== modelKey || imgState.step !== 'select_quality') {
+    imageGenState.set(userId, {
+      model: modelKey,
+      step: 'select_quality',
+      photos: []
+    });
+  }
+
+  const cost = getImageGenerationCostBySize(userId, modelKey, imageSize);
+  if (cost > 0 && !(await userBalance.hasTokens(userId, cost))) {
+    await showInsufficientTokens(ctx, cost);
+    return;
+  }
+
+  const selectedModelKey = resolveModelKeyBySize(modelKey, imageSize);
+  const maxPhotos = model.maxImages || 1;
+
+  imageGenState.set(userId, {
+    ...(imageGenState.get(userId) || {}),
+    model: modelKey,
+    selectedModelKey,
+    imageSize,
+    selectedCost: cost,
+    step: 'waiting_photos',
+    photos: []
+  });
+
+  const refsStep = `📝 <b>Крок 2:</b> Надішліть референс-зображення (опціонально)\n` +
+    `💡 Можна до ${maxPhotos} фото\n\n` +
+    `✍️ <b>Крок 3:</b> Введіть промпт\n\n` +
+    `Натисніть <b>"Далі до промпту"</b> якщо без референсів.\n\n`;
+
+  await ctx.reply(
+    `✅ <b>${model.name}</b>\n\n` +
+    `🎯 Якість: <b>${imageSize}</b>\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    refsStep,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
@@ -4111,6 +4305,14 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
     return;
   }
 
+  if (imgState.step === 'select_quality') {
+    await ctx.reply(
+      '🎯 Спочатку оберіть якість зображення.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
+
   if ((modelKey === 'clarity' || modelKey === 'recraft_upscale') && (!imgState.photos || imgState.photos.length === 0)) {
     imageGenState.set(userId, { ...imgState, step: 'waiting_photos' });
     await ctx.reply(
@@ -4124,10 +4326,12 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
   if (modelKey === 'recraft_upscale' && imgState.photos && imgState.photos.length > 0 && !imgState.prompt) {
     const prompt = imgState.prompt || 'upscale image';
     const references = normalizeReferenceOrder(imgState.photos || []);
+    const targetModelKey = imgState.selectedModelKey || modelKey;
+    const generationOptions = imgState.imageSize ? { imageSize: imgState.imageSize } : undefined;
     imageGenState.delete(userId);
     await ctx.reply('🚀 Починаємо upscale...', { parse_mode: 'HTML' });
     runBackgroundTask(
-      () => handleImageGeneration(ctx, prompt, modelKey, references.length ? references : null),
+      () => handleImageGeneration(ctx, prompt, targetModelKey, references.length ? references : null, '1:1', generationOptions),
       'image_generation_upscale_start'
     );
     return;
@@ -4148,11 +4352,13 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
 
   const prompt = imgState.prompt;
   const references = normalizeReferenceOrder(imgState.photos || []);
+  const targetModelKey = imgState.selectedModelKey || modelKey;
+  const generationOptions = imgState.imageSize ? { imageSize: imgState.imageSize } : undefined;
   imageGenState.delete(userId);
 
   await ctx.reply('🚀 Починаємо генерацію...', { parse_mode: 'HTML' });
   runBackgroundTask(
-    () => handleImageGeneration(ctx, prompt, modelKey, references.length ? references : null),
+    () => handleImageGeneration(ctx, prompt, targetModelKey, references.length ? references : null, '1:1', generationOptions),
     'image_generation_start'
   );
 });
@@ -4211,6 +4417,16 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     await ctx.reply(
       '🔒 <b>Kling 3.0</b> доступна тільки при виборі провайдера <b>KIE.AI</b>.\n\n' +
       '👤 Профіль → Вибір провайдера → 🔵 KIE.AI',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  // Sora 2 тимчасово доступна тільки через Replicate
+  if (modelKey === 'sora_2' && userProviderChoice.get(ctx.from.id) === 'kie-ai') {
+    await ctx.reply(
+      '⚠️ <b>Sora 2</b> тимчасово працює тільки через <b>Replicate</b>.\n\n' +
+      'Змініть провайдера: 👤 Профіль → Вибір провайдера → 🟣 Replicate',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
     return;
@@ -9775,6 +9991,17 @@ bot.on('text', async (ctx) => {
   // ✅ НОВИЙ ФЛОУ ДЛЯ ГРАФІЧНИХ МОДЕЛЕЙ
   const imgState = imageGenState.get(userId);
   if (imgState && IMAGE_MODELS.includes(currentModel)) {
+    if (imgState.step === 'select_quality') {
+      await ctx.reply(
+        '🎯 Спочатку оберіть якість зображення кнопками нижче.',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+      );
+      return;
+    }
+
+    const targetModelKey = imgState.selectedModelKey || currentModel;
+    const generationOptions = imgState.imageSize ? { imageSize: imgState.imageSize } : undefined;
+
     if ((currentModel === 'clarity' || currentModel === 'recraft_upscale') && (!imgState.photos || imgState.photos.length === 0)) {
       imageGenState.set(userId, { ...imgState, step: 'waiting_photos' });
       await ctx.reply(
@@ -9799,7 +10026,7 @@ bot.on('text', async (ctx) => {
           { parse_mode: 'HTML' }
         );
         runBackgroundTask(
-          () => handleImageGeneration(ctx, text, currentModel, references.length ? references : null),
+          () => handleImageGeneration(ctx, text, targetModelKey, references.length ? references : null, '1:1', generationOptions),
           'image_generation_references_prompt'
         );
         return;
@@ -9809,6 +10036,8 @@ bot.on('text', async (ctx) => {
         imageGenState.delete(userId);
         userState.set(userId, {
           model: currentModel,
+          targetModelKey,
+          imageSize: imgState.imageSize || null,
           step: 'waiting_aspect_ratio',
           imageUrl: hasReferences ? references : null,
           prompt: text
@@ -9833,7 +10062,7 @@ bot.on('text', async (ctx) => {
       );
 
       runBackgroundTask(
-        () => handleImageGeneration(ctx, text, currentModel, references.length ? references : null),
+        () => handleImageGeneration(ctx, text, targetModelKey, references.length ? references : null, '1:1', generationOptions),
         'image_generation_references_prompt'
       );
       return;
@@ -9853,7 +10082,7 @@ bot.on('text', async (ctx) => {
           { parse_mode: 'HTML' }
         );
         runBackgroundTask(
-          () => handleImageGeneration(ctx, text, currentModel, references.length ? references : null),
+          () => handleImageGeneration(ctx, text, targetModelKey, references.length ? references : null, '1:1', generationOptions),
           'image_generation_prompt'
         );
         return;
@@ -9863,6 +10092,8 @@ bot.on('text', async (ctx) => {
         imageGenState.delete(userId);
         userState.set(userId, {
           model: currentModel,
+          targetModelKey,
+          imageSize: imgState.imageSize || null,
           step: 'waiting_aspect_ratio',
           imageUrl: hasReferences ? references : null,
           prompt: text
@@ -9887,7 +10118,7 @@ bot.on('text', async (ctx) => {
       );
 
       runBackgroundTask(
-        () => handleImageGeneration(ctx, text, currentModel, references.length ? references : null),
+        () => handleImageGeneration(ctx, text, targetModelKey, references.length ? references : null, '1:1', generationOptions),
         'image_generation_prompt'
       );
       return;
@@ -10086,6 +10317,8 @@ bot.on('text', async (ctx) => {
     flux: () => handleImageGeneration(ctx, text, 'flux'),
     stable_diffusion: () => handleImageGeneration(ctx, text, 'stable_diffusion'),
     nano_banana: () => handleImageGeneration(ctx, text, 'nano_banana'),
+    nano_banana_2: () => handleImageGeneration(ctx, text, 'nano_banana_2'),
+    nano_banana_pro: () => handleImageGeneration(ctx, text, 'nano_banana_pro'),
     nano_banana_2k: () => handleImageGeneration(ctx, text, 'nano_banana_2k'),
     nano_banana_4k: () => handleImageGeneration(ctx, text, 'nano_banana_4k'),
     seedream_4k: () => handleImageGeneration(ctx, text, 'seedream_4k'),
@@ -10546,6 +10779,14 @@ bot.on('photo', async (ctx) => {
 
   // ✅ НОВИЙ ФЛОУ: Обробка референс-фото
   const imgState = imageGenState.get(userId);
+  if (imgState && imgState.step === 'select_quality') {
+    await ctx.reply(
+      '🎯 Спочатку оберіть якість зображення (2K/4K або 0.5K/1K/2K/4K).',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
+
   if (imgState && imgState.step === 'waiting_photos') {
     const modelKey = imgState.model;
     const model = models.design.models.find(m => m.key === modelKey);
@@ -10778,7 +11019,7 @@ bot.on('photo', async (ctx) => {
 
   // Обробка одного фото
   const videoModels = ['kling', 'kling_v2_6', 'runway_gen4'];
-  const imageModels = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_4k', 'ideogram', 'recraft_upscale'];
+  const imageModels = ['nano_banana', 'nano_banana_2', 'nano_banana_pro', 'nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_4k', 'ideogram', 'recraft_upscale'];
 
   // Отримуємо caption як промпт
   let prompt = ctx.message.caption || '';
@@ -11215,8 +11456,8 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
       `❌ Ви вже використали всі ${freeLimit} безкоштовних генерацій!\n\n` +
       `💡 Спробуйте платні моделі для більших можливостей:\n` +
       `• 🍌 Nano Banana — 4⚡ за генерацію\n` +
-      `• 🍌 Nano Banana PRO 2K — 15⚡\n` +
-      `• 🍌 Nano Banana PRO 4K — 20⚡`,
+      `• 🍌 Nano Banana PRO — 2K/4K (від 25⚡)\n` +
+      `• 🍌 Nano Banana 2 — 0.5K/1K/2K/4K (від 8⚡)`,
       { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
     );
     return;
@@ -11340,14 +11581,188 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
   }
 }
 
-async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, aspectRatio = '1:1') {
+/**
+ * 💳 Google Gemini direct model — платна генерація через Google API (без KIE/Replicate fallback)
+ */
+async function handleGeminiDirectGeneration(ctx, prompt, model, imageInput, aspectRatio, generationOptions = {}) {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
-  const model = models.design.models.find(m => m.key === modelKey);
+  const chatId = ctx.chat.id;
+  const modelKey = model.key;
+  const modelName = model.name;
+  const imageSize = generationOptions.imageSize || model.imageSize || '1K';
+  const geminiModelCode = model.googleModel || geminiImage.GEMINI_MODEL;
+  const effectiveImageCost = (model.costsBySize && Object.prototype.hasOwnProperty.call(model.costsBySize, imageSize))
+    ? model.costsBySize[imageSize]
+    : getEffectiveImageCost(userId, model, modelKey);
+  const modelApiCost = (model.apiCostsBySize && Object.prototype.hasOwnProperty.call(model.apiCostsBySize, imageSize))
+    ? model.apiCostsBySize[imageSize]
+    : model.apiCost;
+
+  if (!(await userBalance.hasTokens(userId, effectiveImageCost))) {
+    await showInsufficientTokens(ctx, effectiveImageCost);
+    return;
+  }
+
+  const isAlbum = Array.isArray(imageInput) && imageInput.length > 1;
+  const refCount = Array.isArray(imageInput) ? imageInput.length : (imageInput ? 1 : 0);
+  const mode = imageInput ? (isAlbum ? `album (${refCount} refs)` : 'img2img') : 'text2img';
+
+  if (gracefulShutdown.isInShutdown()) {
+    await ctx.reply('⚠️ Бот оновлюється. Спробуйте через 1-2 хвилини.');
+    return;
+  }
+
+  const statusMsg = await ctx.reply(
+    `${modelName} генерація (${mode})...\n\n` +
+    `🤖 Модель: ${geminiModelCode}\n` +
+    (refCount > 0 ? `📸 Референсів: ${refCount}\n` : '') +
+    `📐 Пропорції: ${aspectRatio}\n` +
+    `🖼️ Розмір: ${imageSize}\n` +
+    `📝 Промпт: "${prompt.substring(0, 150)}${prompt.length > 150 ? '...' : ''}"`
+  );
+
+  const requestId = gracefulShutdown.generateRequestId();
+  gracefulShutdown.registerGeneration(requestId, {
+    userId,
+    chatId,
+    model: modelName,
+    modelKey
+  });
+
+  let finished = false;
+  try {
+    const result = await geminiImage.generateImage(prompt, imageInput, aspectRatio, imageSize, geminiModelCode);
+
+    if (!result.success) {
+      await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+        userId,
+        username,
+        action: `${modelKey}_generation`,
+        model: modelName,
+        prompt,
+        refs: refCount,
+        aspectRatio,
+        provider: 'google-gemini',
+        googleModel: geminiModelCode
+      });
+
+      await bot.telegram.editMessageText(
+        chatId,
+        statusMsg.message_id,
+        null,
+        `❌ Помилка генерації (${modelName}).\n\n${result.error}\n\nСпробуйте інший промпт або модель.`
+      );
+      finished = true;
+      gracefulShutdown.completeGeneration(requestId, false);
+      return;
+    }
+
+    await userBalance.deductTokens(userId, effectiveImageCost, `${modelName} generation`, {
+      modelKey,
+      modelName,
+      apiCost: modelApiCost,
+      prompt,
+      hasImage: !!imageInput,
+      provider: 'google-gemini',
+      googleModel: geminiModelCode,
+      aspectRatio,
+      imageSize
+    });
+
+    const isTrial = await isTrialUser(userId);
+    await monitoringLoggers.logUsageEvent({
+      userId,
+      modelKey,
+      success: true,
+      isTrial,
+      isFree: isTrial,
+      provider: 'google-gemini',
+      metadata: {
+        refCount,
+        aspectRatio,
+        imageSize,
+        model: geminiModelCode
+      }
+    });
+
+    try {
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+    } catch (e) {
+      console.warn('Could not delete status message:', e.message);
+    }
+
+    const safePrompt = prompt.replace(/[<>&]/g, (c) => (c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;'));
+    const caption = `${modelName} (${mode})\n\n` +
+      `📝 Промпт: ${safePrompt.substring(0, 800)}${safePrompt.length > 800 ? '...' : ''}\n` +
+      `📐 Пропорції: ${aspectRatio}\n` +
+      `🖼️ Розмір: ${imageSize}\n\n` +
+      `💰 Витрачено: ${effectiveImageCost}⚡`;
+
+    const maxPhotoSize = 10 * 1024 * 1024;
+    if (result.imageBuffer.length > maxPhotoSize) {
+      const fileSizeMB = (result.imageBuffer.length / (1024 * 1024)).toFixed(2);
+      await bot.telegram.sendDocument(
+        chatId,
+        { source: result.imageBuffer, filename: `${modelKey}.png` },
+        {
+          caption: `${caption}\n\n📊 Розмір: ${fileSizeMB} MB (відправлено як файл)`,
+          parse_mode: 'HTML',
+          ...keyboard.createBackButton('design_menu')
+        }
+      );
+    } else {
+      await bot.telegram.sendPhoto(
+        chatId,
+        { source: result.imageBuffer, filename: `${modelKey}.png` },
+        { caption, parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+      );
+    }
+
+    finished = true;
+    gracefulShutdown.completeGeneration(requestId, true);
+  } catch (error) {
+    console.error(`❌ ${modelKey} (google-gemini) generation failed:`, error);
+    await adminNotifier.notifyAdmin(bot, error, {
+      userId,
+      username,
+      action: `${modelKey}_generation`,
+      model: modelName,
+      prompt,
+      provider: 'google-gemini',
+      googleModel: geminiModelCode
+    });
+
+    try {
+      await bot.telegram.editMessageText(
+        chatId,
+        statusMsg.message_id,
+        null,
+        '❌ Помилка генерації. Спробуйте ще раз або оберіть іншу модель.'
+      );
+    } catch (e) {
+      try {
+        await bot.telegram.sendMessage(chatId, '❌ Помилка генерації.', keyboard.createBackButton('design_menu'));
+      } catch (sendErr) {
+        console.error('Could not notify user:', sendErr.message);
+      }
+    }
+
+    if (!finished) {
+      gracefulShutdown.completeGeneration(requestId, false);
+    }
+  }
+}
+
+async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, aspectRatio = '1:1', generationOptions = {}) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const resolvedModelKey = resolveModelKeyBySize(modelKey, generationOptions.imageSize);
+  const model = models.design.models.find(m => m.key === resolvedModelKey);
 
   // ✅ Перевіримо чи модель знайдена
   if (!model) {
-    console.error(`❌ Model not found: ${modelKey}`);
+    console.error(`❌ Model not found: ${resolvedModelKey} (requested: ${modelKey})`);
     await ctx.reply('❌ Модель не знайдена. Спробуйте ще раз.');
     return;
   }
@@ -11355,32 +11770,18 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   imageInput = normalizeReferenceOrder(imageInput);
 
   // 🎁 Nano Banana PRO FREE — окремий шлях генерації через Google Gemini API
-  if (modelKey === 'nano_banana_free') {
+  if (resolvedModelKey === 'nano_banana_free') {
     return handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio);
-  }
-
-  const effectiveImageCost = getEffectiveImageCost(userId, model, modelKey);
-  if (!(await userBalance.hasTokens(userId, effectiveImageCost))) {
-    await showInsufficientTokens(ctx, effectiveImageCost);
-    return;
   }
 
   if (!imageInput && ctx.message?.photo) {
     imageInput = await getImageUrl(ctx);
   }
-  if ((modelKey === 'clarity' || modelKey === 'recraft_upscale') && !imageInput) {
-    await ctx.reply(
-      '🔮 <b>Upscaler</b> потребує зображення.\n\n' +
-      '📷 Надішліть фото для покращення якості.',
-      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
-    );
-    return;
-  }
 
   if (model.maxImages && Array.isArray(imageInput)) {
     const originalCount = imageInput.length;
     imageInput = await validateImageCount(imageInput, model.maxImages);
-    
+
     if (originalCount > model.maxImages) {
       await ctx.reply(
         `⚠️ ${model.name} підтримує до ${model.maxImages} зображень.\n\n` +
@@ -11388,6 +11789,25 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         `Обробляю перші ${model.maxImages}...`
       );
     }
+  }
+
+  if (model.googleDirect) {
+    return handleGeminiDirectGeneration(ctx, prompt, model, imageInput, aspectRatio, generationOptions);
+  }
+
+  const effectiveImageCost = getEffectiveImageCost(userId, model, resolvedModelKey);
+  if (!(await userBalance.hasTokens(userId, effectiveImageCost))) {
+    await showInsufficientTokens(ctx, effectiveImageCost);
+    return;
+  }
+
+  if ((resolvedModelKey === 'clarity' || resolvedModelKey === 'recraft_upscale') && !imageInput) {
+    await ctx.reply(
+      '🔮 <b>Upscaler</b> потребує зображення.\n\n' +
+      '📷 Надішліть фото для покращення якості.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
   }
 
   const isAlbum = Array.isArray(imageInput) && imageInput.length > 1;
@@ -11407,7 +11827,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
     userId,
     chatId: ctx.chat.id,
     model: model.name,
-    modelKey
+    modelKey: resolvedModelKey
   });
 
   const chatId = ctx.chat.id;
@@ -11416,7 +11836,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
     username,
     chatId,
     prompt,
-    modelKey,
+    modelKey: resolvedModelKey,
     modelName: model.name,
     modelCost: effectiveImageCost,
     modelApiCost: model.apiCost,
@@ -11586,7 +12006,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
 
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
-          userId, username, action: `${modelKey}_generation`,
+          userId, username, action: `${generationData.modelKey}_generation`,
           model: generationData.modelName || 'unknown',
           prompt,
           hasImage: !!imageInput,
@@ -11596,15 +12016,15 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         });
 
         const errorMsg = result.hadFallback
-          ? `❌ Помилка генерації.\n\nСпробували: ${result.triedProviders.join(' → ')}\nВсі провайдери недоступні.\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`
-          : `❌ Помилка генерації (${providerName}).\n\nСпробуйте ${modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`;
+          ? `❌ Помилка генерації.\n\nСпробували: ${result.triedProviders.join(' → ')}\nВсі провайдери недоступні.\n\nСпробуйте ${generationData.modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`
+          : `❌ Помилка генерації (${providerName}).\n\nСпробуйте ${generationData.modelKey === 'stable_diffusion' ? 'написати промпт англійською або ' : ''}іншу модель.`;
 
         await bot.telegram.editMessageText(chatId, generationData.statusMsgId, null, errorMsg);
 
         const isTrial = await isTrialUser(userId);
         await monitoringLoggers.logUsageEvent({
           userId,
-          modelKey,
+          modelKey: generationData.modelKey,
           success: false,
           isTrial,
           isFree: isTrial,
@@ -11618,7 +12038,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       }
 
       await userBalance.deductTokens(userId, generationData.modelCost, `${generationData.modelName} generation`, {
-        modelKey,
+        modelKey: generationData.modelKey,
         modelName: generationData.modelName,
         apiCost: generationData.modelApiCost,
         prompt: generationData.prompt,
@@ -11628,7 +12048,7 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       const isTrialImg = await isTrialUser(userId);
       await monitoringLoggers.logUsageEvent({
         userId,
-        modelKey,
+        modelKey: generationData.modelKey,
         success: true,
         isTrial: isTrialImg,
         isFree: isTrialImg,
@@ -11690,8 +12110,14 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
       gracefulShutdown.completeGeneration(requestId, true);
 
     } catch (error) {
-      console.error(`${modelKey} generation failed:`, error);
-      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: `${modelKey}_generation`, model: model.name, prompt });
+      console.error(`${generationData.modelKey} generation failed:`, error);
+      await adminNotifier.notifyAdmin(bot, error, {
+        userId,
+        username,
+        action: `${generationData.modelKey}_generation`,
+        model: generationData.modelName,
+        prompt
+      });
 
       const isTimeout = error?.message?.includes('Timeout waiting for');
       const userMessage = isTimeout
@@ -13799,7 +14225,7 @@ async function startBot() {
         // DESIGN MODELS with debug fields + KIE.AI pricing priority
         // ============================================================
         const designModels = models.design.models
-          .filter(m => m.available)
+          .filter(m => m.available && !m.menuHidden)
           .map(m => {
             // 🔥 Пріоритет KIE.AI: якщо модель підтримується на KIE, беремо ціну звідти
             let effectiveCost = m.cost;
@@ -14013,7 +14439,7 @@ async function startBot() {
 
         // Design models (available only) — use KIE prices when available
         models.design.models
-          .filter(m => m.available)
+          .filter(m => m.available && !m.menuHidden)
           .forEach((m) => {
             // Nano Banana PRO FREE — показуємо окремо з freeLimit
             if (m.key === 'nano_banana_free') {

@@ -313,6 +313,40 @@ module.exports = {
         googleDirect: true  // маркер: через Google Gemini API напряму
       },
 
+      /**
+       * Nano Banana 2 — Gemini 3.1 Flash Image Preview (Google direct)
+       * gemini-3.1-flash-image-preview
+       *
+       * Конвертація в поінти (1 токен = $0.01, множник 1.65):
+       * - 0.5K: $0.045 -> ceil(0.045*1.65/0.01)=8
+       * - 1K:   $0.067 -> ceil(0.067*1.65/0.01)=12  (default)
+       * - 2K:   $0.101 -> ceil(0.101*1.65/0.01)=17
+       * - 4K:   $0.151 -> ceil(0.151*1.65/0.01)=25
+       */
+      {
+        name: '🍌 Nano Banana 2',
+        key: 'nano_banana_2',
+        cost: 12, // default 1K
+        apiCost: 0.067, // default 1K
+        costsBySize: {
+          '0.5K': 8,
+          '1K': 12,
+          '2K': 17,
+          '4K': 25
+        },
+        apiCostsBySize: {
+          '0.5K': 0.045,
+          '1K': 0.067,
+          '2K': 0.101,
+          '4K': 0.151
+        },
+        maxImages: 14,
+        available: true,
+        googleDirect: true,
+        googleModel: 'gemini-3.1-flash-image-preview',
+        imageSize: '1K'
+      },
+
       // nano_banana $0.039 -> 7
       {
         name: '🍌 Nano Banana',
@@ -323,6 +357,29 @@ module.exports = {
         available: true
       },
 
+      /**
+       * Nano Banana PRO — єдина кнопка з вибором якості (2K/4K)
+       * Реальна генерація виконується через nano_banana_2k / nano_banana_4k
+       */
+      {
+        name: '🍌 Nano Banana PRO',
+        key: 'nano_banana_pro',
+        cost: 25,            // 2K (мінімальна)
+        maxCost: 50,         // 4K
+        apiCost: 0.15,       // 2K
+        apiCostMax: 0.30,    // 4K
+        maxImages: 14,
+        available: true,
+        costsBySize: {
+          '2K': 25,
+          '4K': 50
+        },
+        apiCostsBySize: {
+          '2K': 0.15,
+          '4K': 0.30
+        }
+      },
+
       // nano_banana_2k $0.15 -> 25
       {
         name: '🍌 Nano Banana PRO 2K',
@@ -331,7 +388,8 @@ module.exports = {
         apiCost: 0.15,
         resolution: '2K',
         maxImages: 14,
-        available: true
+        available: true,
+        menuHidden: true // використовується внутрішньо через nano_banana_pro
       },
 
       // nano_banana_4k $0.30 -> 50
@@ -342,7 +400,8 @@ module.exports = {
         apiCost: 0.30,
         resolution: '4K',
         maxImages: 14,
-        available: true
+        available: true,
+        menuHidden: true // використовується внутрішньо через nano_banana_pro
       },
 
       // seedream $0.04 -> 7

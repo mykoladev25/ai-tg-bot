@@ -2573,7 +2573,6 @@ module.exports = {
       'kling_3',          // ✅ kling-3.0/video (multi-shot, element refs) 🆕
       'kling_motion',     // ✅ kling-2.6/motion-control
       'runway_turbo',     // ✅ /runway/generate (endpoint!)
-      'sora_2',           // ✅ sora-2-pro-text-to-video, sora-2-image-to-video 🆕
       'veo'               // ✅ veo3, veo3_fast (/veo/generate endpoint!)
     ],
     // Моделі які ТІЛЬКИ на KIE.AI - немає на Replicate!
@@ -2584,7 +2583,8 @@ module.exports = {
     // Моделі які НЕ підтримуються на KIE.AI — ціна та запуск через Replicate
     notSupported: [
       'stable_diffusion', // ❌ Немає на KIE.AI
-      'clarity'           // ❌ Немає на KIE.AI
+      'clarity',          // ❌ Немає на KIE.AI
+      'sora_2'            // ⏸️ Тимчасово вимкнено на KIE.AI (використовуємо Replicate)
     ]
   },
 
@@ -2628,4 +2628,3 @@ module.exports = {
     jobs_recordInfo: '/jobs/recordInfo'
   }
 };
-
