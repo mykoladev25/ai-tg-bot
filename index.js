@@ -879,6 +879,11 @@ bot.on('callback_query', async (ctx, next) => {
     return next();
   }
 
+  // ✅ ДОЗВОЛЯЄМО IMG QUALITY CALLBACKS (вибір resolution)
+  if (callbackData.startsWith('img_quality_')) {
+    return next();
+  }
+
   // ✅ ДОЗВОЛЯЄМО VEO CALLBACKS
   if (callbackData.startsWith('veo_')) {
     return next();
@@ -4270,6 +4275,9 @@ bot.action(/^img_quality_(nano_banana_2|nano_banana_pro)_(0\.5K|1K|2K|4K)$/, asy
     step: 'waiting_photos',
     photos: []
   });
+
+  // Підтримуємо поточну модель у сесії для подальшої обробки тексту/фото
+  userCurrentModel.set(userId, modelKey);
 
   const refsStep = `📝 <b>Крок 2:</b> Надішліть референс-зображення (опціонально)\n` +
     `💡 Можна до ${maxPhotos} фото\n\n` +
@@ -9990,7 +9998,8 @@ bot.on('text', async (ctx) => {
 
   // ✅ НОВИЙ ФЛОУ ДЛЯ ГРАФІЧНИХ МОДЕЛЕЙ
   const imgState = imageGenState.get(userId);
-  if (imgState && IMAGE_MODELS.includes(currentModel)) {
+  const activeImageModel = currentModel || imgState?.model;
+  if (imgState && IMAGE_MODELS.includes(activeImageModel)) {
     if (imgState.step === 'select_quality') {
       await ctx.reply(
         '🎯 Спочатку оберіть якість зображення кнопками нижче.',
@@ -9999,10 +10008,10 @@ bot.on('text', async (ctx) => {
       return;
     }
 
-    const targetModelKey = imgState.selectedModelKey || currentModel;
+    const targetModelKey = imgState.selectedModelKey || activeImageModel;
     const generationOptions = imgState.imageSize ? { imageSize: imgState.imageSize } : undefined;
 
-    if ((currentModel === 'clarity' || currentModel === 'recraft_upscale') && (!imgState.photos || imgState.photos.length === 0)) {
+    if ((activeImageModel === 'clarity' || activeImageModel === 'recraft_upscale') && (!imgState.photos || imgState.photos.length === 0)) {
       imageGenState.set(userId, { ...imgState, step: 'waiting_photos' });
       await ctx.reply(
         '🔮 <b>Upscaler</b> потребує зображення.\n\n' +
@@ -10018,7 +10027,7 @@ bot.on('text', async (ctx) => {
       const referenceList = Array.isArray(references) ? references : (references ? [references] : []);
       const hasReferences = referenceList.length > 0;
 
-      if (currentModel === 'stable_diffusion' && hasReferences) {
+      if (activeImageModel === 'stable_diffusion' && hasReferences) {
         imageGenState.delete(userId);
         await ctx.reply(
           'ℹ️ Для Stable Diffusion 3.5 з референсом пропорції беруться з самого фото.\n' +
@@ -10032,10 +10041,10 @@ bot.on('text', async (ctx) => {
         return;
       }
 
-      if (TEXT_ASPECT_RATIO_MODELS.has(currentModel)) {
+      if (TEXT_ASPECT_RATIO_MODELS.has(activeImageModel)) {
         imageGenState.delete(userId);
         userState.set(userId, {
-          model: currentModel,
+          model: activeImageModel,
           targetModelKey,
           imageSize: imgState.imageSize || null,
           step: 'waiting_aspect_ratio',
@@ -10044,7 +10053,7 @@ bot.on('text', async (ctx) => {
         });
 
         await promptAspectRatioSelection(ctx, {
-          modelKey: currentModel,
+          modelKey: activeImageModel,
           promptText: text,
           hasReferences,
           referencesCount: referenceList.length
@@ -10074,7 +10083,7 @@ bot.on('text', async (ctx) => {
       const referenceList = Array.isArray(references) ? references : (references ? [references] : []);
       const hasReferences = referenceList.length > 0;
 
-      if (currentModel === 'stable_diffusion' && hasReferences) {
+      if (activeImageModel === 'stable_diffusion' && hasReferences) {
         imageGenState.delete(userId);
         await ctx.reply(
           'ℹ️ Для Stable Diffusion 3.5 з референсом пропорції беруться з самого фото.\n' +
@@ -10088,10 +10097,10 @@ bot.on('text', async (ctx) => {
         return;
       }
 
-      if (TEXT_ASPECT_RATIO_MODELS.has(currentModel)) {
+      if (TEXT_ASPECT_RATIO_MODELS.has(activeImageModel)) {
         imageGenState.delete(userId);
         userState.set(userId, {
-          model: currentModel,
+          model: activeImageModel,
           targetModelKey,
           imageSize: imgState.imageSize || null,
           step: 'waiting_aspect_ratio',
@@ -10100,7 +10109,7 @@ bot.on('text', async (ctx) => {
         });
 
         await promptAspectRatioSelection(ctx, {
-          modelKey: currentModel,
+          modelKey: activeImageModel,
           promptText: text,
           hasReferences,
           referencesCount: referenceList.length
