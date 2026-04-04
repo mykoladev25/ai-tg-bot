@@ -14,8 +14,7 @@ Open-source Telegram bot for AI text, image, video, and payment workflows. The p
 
 ## Screenshots
 
-- Add bot screenshots here before publishing.
-- Recommended: main menu, generation flow, payment page, admin dashboard.
+##TODO
 
 ## Requirements
 

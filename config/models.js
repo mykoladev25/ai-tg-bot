@@ -40,11 +40,9 @@ module.exports = {
     actions: [
       { name: '🎙️ Voice', key: 'voice', cost: 0, apiCost: 0 },
 
-      { name: '✍️ Text', key: 'text', cost: 2, apiCost: 0.008 },
+      { name: '✍️ Text', key: 'text', cost: 1, apiCost: 0.008 },
 
-      { name: '🖼️ Upload an image for analysis', key: 'image', cost: 8, apiCost: 0.048 },
-
-      { name: '🧹 Remove Sora watermark', key: 'sora_watermark_remover', cost: 0, apiCost: 0, isDynamic: true, kieModel: 'sora-watermark-remover' }
+      { name: '🖼️ Upload an image for analysis', key: 'image', cost: 1, apiCost: 0.048 },
     ]
   },
 
@@ -171,19 +169,23 @@ module.exports = {
         apiCostPerSecond: 0.10,
         durations: [4, 8, 12],
         aspectRatios: ['portrait', 'landscape'],
-        available: true,
+        available: false,
         requiresImage: false,
         supportsReferences: true
       },
 
       /**
        * ByteDance Seedance 2 — KIE.AI ONLY
-       * Pricing API (checked 2026-04-04), text-to-video / no-video-input:
-       * - 480p: $0.095/sec -> 16 tokens/sec
-       * - 720p: $0.205/sec -> 34 tokens/sec
-       * Range in bot:
-       * - 4s 480p = 63 tokens
-       * - 15s 720p = 508 tokens
+       * Pricing API (checked 2026-04-04):
+       * - no_video_input:
+       *   - 480p: $0.095/sec
+       *   - 720p: $0.205/sec
+       * - with_video_input:
+       *   - 480p: $0.0575/sec
+       *   - 720p: $0.125/sec
+       *
+       * Telegram flow currently defaults to no_video_input pricing unless
+       * reference video URLs are explicitly attached to the generation state.
        */
       {
         name: '🎞️ ByteDance Seedance 2 💎',
@@ -197,6 +199,26 @@ module.exports = {
         apiCostPerSecondByResolution: {
           '480p': 0.095,
           '720p': 0.205
+        },
+        costPerSecondByInputTypeAndResolution: {
+          no_video_input: {
+            '480p': 16,
+            '720p': 34
+          },
+          with_video_input: {
+            '480p': 10,
+            '720p': 21
+          }
+        },
+        apiCostPerSecondByInputTypeAndResolution: {
+          no_video_input: {
+            '480p': 0.095,
+            '720p': 0.205
+          },
+          with_video_input: {
+            '480p': 0.0575,
+            '720p': 0.125
+          }
         },
         cost: 63,
         maxCost: 508,
@@ -213,12 +235,16 @@ module.exports = {
 
       /**
        * ByteDance Seedance 2 Fast — KIE.AI ONLY
-       * Pricing API (checked 2026-04-04), text-to-video / no-video-input:
-       * - 480p: $0.0775/sec -> 13 tokens/sec
-       * - 720p: $0.165/sec -> 28 tokens/sec
-       * Range in bot:
-       * - 4s 480p = 52 tokens
-       * - 15s 720p = 409 tokens
+       * Pricing API (checked 2026-04-04):
+       * - no_video_input:
+       *   - 480p: $0.0775/sec
+       *   - 720p: $0.165/sec
+       * - with_video_input:
+       *   - 480p: $0.045/sec
+       *   - 720p: $0.10/sec
+       *
+       * Telegram flow currently defaults to no_video_input pricing unless
+       * reference video URLs are explicitly attached to the generation state.
        */
       {
         name: '⚡ ByteDance Seedance 2 Fast',
@@ -232,6 +258,26 @@ module.exports = {
         apiCostPerSecondByResolution: {
           '480p': 0.0775,
           '720p': 0.165
+        },
+        costPerSecondByInputTypeAndResolution: {
+          no_video_input: {
+            '480p': 13,
+            '720p': 28
+          },
+          with_video_input: {
+            '480p': 8,
+            '720p': 17
+          }
+        },
+        apiCostPerSecondByInputTypeAndResolution: {
+          no_video_input: {
+            '480p': 0.0775,
+            '720p': 0.165
+          },
+          with_video_input: {
+            '480p': 0.045,
+            '720p': 0.10
+          }
         },
         cost: 52,
         maxCost: 409,

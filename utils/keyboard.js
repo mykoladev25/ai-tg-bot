@@ -19,7 +19,7 @@ function createMainMenu(localeSource = 'en') {
     [t(localeSource, 'menu.topUpBalance'), t(localeSource, 'menu.creatives')],
     [t(localeSource, 'menu.video'), t(localeSource, 'menu.images')],
     [t(localeSource, 'menu.profile'), t(localeSource, 'menu.assistants')],
-    [t(localeSource, 'menu.settings'), t(localeSource, 'menu.help')]
+    [t(localeSource, 'menu.feedback'), t(localeSource, 'menu.help')]
   ]).resize();
 }
 

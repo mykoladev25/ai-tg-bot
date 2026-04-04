@@ -7,6 +7,7 @@
  * - gemini-3.1-flash-image-preview (Nano Banana 2)
  */
 const axios = require('axios');
+const { resolveServerSideTelegramFileUrl } = require('../utils/telegramFiles');
 
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
 const FREE_GENERATIONS_LIMIT = 3;
@@ -99,9 +100,10 @@ async function generateImage(
               console.log(`🔄 Gemini: retry download #${attempt} for ...${imgUrl.substring(imgUrl.length - 30)}`);
               await new Promise((r) => setTimeout(r, 3000));
             }
-            const resp = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 45000 });
+            const sourceUrl = resolveServerSideTelegramFileUrl(imgUrl);
+            const resp = await axios.get(sourceUrl, { responseType: 'arraybuffer', timeout: 45000 });
             const base64 = Buffer.from(resp.data).toString('base64');
-            const mimeType = detectMimeType(resp.headers, imgUrl, resp.data);
+            const mimeType = detectMimeType(resp.headers, sourceUrl, resp.data);
             console.log(`🔍 Gemini: MIME=${mimeType}, size=${(resp.data.length / 1024).toFixed(1)}KB for ...${imgUrl.substring(imgUrl.length - 30)}`);
             return { inline_data: { mime_type: mimeType, data: base64 } };
           } catch (imgErr) {

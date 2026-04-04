@@ -43,6 +43,7 @@ const providerFallback = require('./utils/providerFallback');
 const db = require('./database/connection');
 const User = require('./database/models/User');
 const GenerationResult = require('./database/models/GenerationResult');
+const PendingGenerationTask = require('./database/models/PendingGenerationTask');
 
 // Configuration
 const models = require('./config/models');
@@ -51,6 +52,26 @@ const accessControl = require('./config/access');
 
 const TOKEN_USD = models?._pricingAssumptions?.tokenUSD || 0.01;
 const PRICING_MULTIPLIER = models?._pricingAssumptions?.pricingMultiplier || 1.65;
+
+function getBotUsername() {
+  return String(process.env.BOT_USERNAME || 'neuro_lab_ai_bot').replace(/^@/, '');
+}
+
+async function sendTemplatedPublicHtml(res, relativeFilePath) {
+  try {
+    const filePath = path.join(__dirname, relativeFilePath);
+    const html = await fs.promises.readFile(filePath, 'utf8');
+    const injectedHtml = html.replace(
+      '</head>',
+      `  <script>window.BOT_USERNAME = ${JSON.stringify(getBotUsername())};</script>\n</head>`
+    );
+
+    res.type('html').send(injectedHtml);
+  } catch (error) {
+    console.error(`Failed to send public page ${relativeFilePath}:`, error);
+    res.status(500).send('Failed to load page');
+  }
+}
 
 
 function getDesignModelsWithEffectiveCost(userId) {
@@ -415,33 +436,91 @@ function getEffectiveSora2Cost(userId, model, duration = 15, options = {}) {
   return Math.ceil(duration * (model?.costPerSecond || 0));
 }
 
-function getEffectiveSeedanceCostPerSecond(userId, modelKey, resolution = '480p') {
+function getEffectiveSeedanceCostPerSecond(userId, modelKey, resolution = '480p', options = {}) {
   const model = models.video.models.find(m => m.key === modelKey);
-  const fallback = model?.costPerSecondByResolution?.[resolution] ?? model?.costPerSecond ?? 0;
+  const inputType = resolveSeedanceInputType(options);
+  const fallback =
+    model?.costPerSecondByInputTypeAndResolution?.[inputType]?.[resolution]
+    ?? model?.costPerSecondByResolution?.[resolution]
+    ?? model?.costPerSecond
+    ?? 0;
   if (!shouldUseKieProvider(userId, modelKey)) return fallback;
-  const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration: 4, resolution });
+  const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration: 4, resolution, inputType });
   if (!k || typeof k !== 'object' || typeof k.costPerSecond !== 'number') return fallback;
   return k.costPerSecond;
 }
 
-function getSeedanceApiCostUSD(userId, modelKey, duration = 4, resolution = '480p') {
+function resolveSeedanceInputType(options = {}) {
+  if (options.inputType === 'with_video_input' || options.inputType === 'no_video_input') {
+    return options.inputType;
+  }
+
+  if (options.hasVideoInput === true) {
+    return 'with_video_input';
+  }
+
+  const videoRefs = Array.isArray(options.referenceVideoUrls)
+    ? options.referenceVideoUrls.filter(Boolean)
+    : [];
+
+  return videoRefs.length > 0 ? 'with_video_input' : 'no_video_input';
+}
+
+function getSeedanceInputVideoDuration(options = {}) {
+  const duration = Number(
+    options.inputVideoDuration
+    ?? options.referenceVideoDuration
+    ?? options.videoInputDuration
+    ?? 0
+  );
+
+  return Number.isFinite(duration) && duration > 0 ? duration : 0;
+}
+
+function getSeedanceBillableDuration(outputDuration = 4, options = {}) {
+  const safeOutputDuration = Math.max(0, Number(outputDuration) || 0);
+  if (resolveSeedanceInputType(options) !== 'with_video_input') {
+    return safeOutputDuration;
+  }
+
+  return safeOutputDuration + getSeedanceInputVideoDuration(options);
+}
+
+function isSeedanceModelKey(modelKey) {
+  return modelKey === 'seedance_2' || modelKey === 'seedance_2_fast';
+}
+
+function isSeedanceWaitingForPrompt(state, currentModel) {
+  const modelKey = state?.modelKey || currentModel;
+  return isSeedanceModelKey(modelKey) && state?.step === 'waiting_prompt';
+}
+
+function getSeedanceApiCostUSD(userId, modelKey, duration = 4, resolution = '480p', options = {}) {
   const model = models.video.models.find(m => m.key === modelKey);
-  const fallbackRate = model?.apiCostPerSecondByResolution?.[resolution] ?? model?.apiCostPerSecond ?? 0;
-  if (!shouldUseKieProvider(userId, modelKey)) return +(fallbackRate * duration).toFixed(4);
-  const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration, resolution });
-  if (!k || typeof k !== 'object' || typeof k.apiCost !== 'number') return +(fallbackRate * duration).toFixed(4);
+  const inputType = resolveSeedanceInputType(options);
+  const billableDuration = getSeedanceBillableDuration(duration, options);
+  const fallbackRate =
+    model?.apiCostPerSecondByInputTypeAndResolution?.[inputType]?.[resolution]
+    ?? model?.apiCostPerSecondByResolution?.[resolution]
+    ?? model?.apiCostPerSecond
+    ?? 0;
+  if (!shouldUseKieProvider(userId, modelKey)) return +(fallbackRate * billableDuration).toFixed(4);
+  const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration: billableDuration, resolution, inputType });
+  if (!k || typeof k !== 'object' || typeof k.apiCost !== 'number') return +(fallbackRate * billableDuration).toFixed(4);
   return k.apiCost;
 }
 
-function getEffectiveSeedanceCost(userId, modelKey, duration = 4, resolution = '480p') {
-  const fallback = duration * getEffectiveSeedanceCostPerSecond(userId, modelKey, resolution);
+function getEffectiveSeedanceCost(userId, modelKey, duration = 4, resolution = '480p', options = {}) {
+  const fallback = usdToTokens(getSeedanceApiCostUSD(userId, modelKey, duration, resolution, options));
+  const inputType = resolveSeedanceInputType(options);
+  const billableDuration = getSeedanceBillableDuration(duration, options);
   if (!shouldUseKieProvider(userId, modelKey)) return fallback;
-  const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration, resolution });
+  const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration: billableDuration, resolution, inputType });
   if (!k || typeof k !== 'object' || typeof k.cost !== 'number') return fallback;
   return k.cost;
 }
 
-function getSeedanceCostRange(userId, modelKey) {
+function getSeedanceCostRange(userId, modelKey, options = {}) {
   const model = models.video.models.find(m => m.key === modelKey);
   const durations = model?.durations?.length ? model.durations : [4];
   const resolutions = model?.resolutions?.length ? model.resolutions : ['480p'];
@@ -449,7 +528,7 @@ function getSeedanceCostRange(userId, modelKey) {
 
   for (const resolution of resolutions) {
     for (const duration of durations) {
-      values.push(getEffectiveSeedanceCost(userId, modelKey, duration, resolution));
+      values.push(getEffectiveSeedanceCost(userId, modelKey, duration, resolution, options));
     }
   }
 
@@ -457,6 +536,101 @@ function getSeedanceCostRange(userId, modelKey) {
     minCost: values.length ? Math.min(...values) : 0,
     maxCost: values.length ? Math.max(...values) : 0
   };
+}
+
+function buildSeedanceVideoInputSummary(state = {}) {
+  const inputType = resolveSeedanceInputType(state);
+  if (inputType !== 'with_video_input') {
+    return '';
+  }
+
+  const inputDuration = getSeedanceInputVideoDuration(state);
+  const durationLabel = inputDuration > 0 ? ` (${inputDuration} сек)` : '';
+  return `\n🎞️ Референс-відео: так${durationLabel}`;
+}
+
+async function promptSeedanceAudioStep(ctx, state = {}) {
+  const userId = ctx.from.id;
+  const model = models.video.models.find(m => m.key === state.modelKey);
+  const cost = getEffectiveSeedanceCost(
+    userId,
+    state.modelKey,
+    state.duration || 4,
+    state.resolution || '480p',
+    state
+  );
+
+  await ctx.reply(
+    `<b>${model?.name || 'Seedance'}</b>\n\n` +
+    `🖥️ ${state.resolution} | ⏱️ ${state.duration} сек | 📐 ${state.aspectRatio}` +
+    `${buildSeedanceVideoInputSummary(state)}\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `🔊 <b>AI-аудіо для результату</b>\n\n` +
+    `Цей параметр не змінює ціну. Оберіть, чи генерувати звук у фінальному відео.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`🔊 З аудіо (${cost}⚡)`, 'seedance_audio_on'),
+          Markup.button.callback(`🔇 Без аудіо (${cost}⚡)`, 'seedance_audio_off')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+}
+
+async function promptSeedanceReferenceAudioStep(ctx, state = {}) {
+  const userId = ctx.from.id;
+  const model = models.video.models.find(m => m.key === state.modelKey);
+  const cost = getEffectiveSeedanceCost(
+    userId,
+    state.modelKey,
+    state.duration || 4,
+    state.resolution || '480p',
+    state
+  );
+
+  await ctx.reply(
+    `<b>${model?.name || 'Seedance'}</b>\n\n` +
+    `🖥️ ${state.resolution} | ⏱️ ${state.duration} сек | 📐 ${state.aspectRatio} | ${state.generateAudio ? '🔊' : '🔇'}` +
+    `${buildSeedanceVideoInputSummary(state)}\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `🎵 <b>Референс-аудіо (опціонально)</b>\n\n` +
+    `Можете додати аудіофайл як reference. Це не змінює ціну в Seedance.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🎵 Додати референс-аудіо', 'seedance_add_reference_audio')],
+        [Markup.button.callback('⏭️ Без референс-аудіо', 'seedance_skip_reference_audio')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+}
+
+async function promptSeedancePromptStep(ctx, state = {}) {
+  const userId = ctx.from.id;
+  const model = models.video.models.find(m => m.key === state.modelKey);
+  const cost = getEffectiveSeedanceCost(
+    userId,
+    state.modelKey,
+    state.duration || 4,
+    state.resolution || '480p',
+    state
+  );
+  const hasReferenceAudio = Array.isArray(state.referenceAudioUrls) && state.referenceAudioUrls.filter(Boolean).length > 0;
+
+  await ctx.reply(
+    `<b>${model?.name || 'Seedance'}</b>\n\n` +
+    `🖥️ ${state.resolution} | ⏱️ ${state.duration} сек | 📐 ${state.aspectRatio} | ${state.generateAudio ? '🔊' : '🔇'}` +
+    `${buildSeedanceVideoInputSummary(state)}\n` +
+    `🎵 Референс-аудіо: <b>${hasReferenceAudio ? 'так' : 'ні'}</b>\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `✍️ <b>Введіть промпт</b>\n\n` +
+    `Опишіть детально, що має відбуватися у відео.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
 }
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -480,6 +654,368 @@ const PROVIDER_CHOICE_FILE = path.join(__dirname, 'config', 'provider-choice.jso
 // KIE.AI callback map: taskId -> { chatId, userId, username, model, prompt, cost, apiCost, options }
 const kieCallbackMap = new Map();
 const kieCallbackDelivered = new Set();
+const activeKieRecoveryTasks = new Set();
+
+function buildPendingVideoTaskPayload({
+  chatId,
+  userId,
+  username,
+  modelKey,
+  modelLabel,
+  taskId,
+  cost,
+  deductDescription,
+  deductMeta,
+  promptSnippet,
+  captionLine,
+  isRunway = false,
+  pollStrategy,
+  monitorOptions = {}
+}) {
+  return {
+    taskId,
+    provider: 'kie-ai',
+    resultType: 'video',
+    pollStrategy: pollStrategy || (modelKey === 'veo' ? 'veo' : (isRunway ? 'runway' : 'recordInfo')),
+    status: 'pending',
+    chatId,
+    userId,
+    username: username || 'unknown',
+    modelKey,
+    modelName: modelLabel,
+    cost,
+    deductDescription,
+    deductMeta: deductMeta || {},
+    promptSnippet: promptSnippet || '',
+    captionLine: captionLine || modelLabel,
+    monitorOptions: monitorOptions || {}
+  };
+}
+
+async function persistPendingVideoTask(task) {
+  try {
+    if (!task?.taskId) return;
+    await PendingGenerationTask.findOneAndUpdate(
+      { taskId: task.taskId },
+      {
+        ...task,
+        status: 'pending',
+        lastState: 'pending',
+        lastCheckedAt: new Date()
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+  } catch (error) {
+    console.warn(`⚠️ Failed to persist pending task ${task?.taskId || 'unknown'}:`, error.message);
+  }
+}
+
+async function updatePendingVideoTask(taskId, update) {
+  try {
+    if (!taskId) return;
+    await PendingGenerationTask.findOneAndUpdate(
+      { taskId },
+      update,
+      { new: true }
+    );
+  } catch (error) {
+    console.warn(`⚠️ Failed to update pending task ${taskId}:`, error.message);
+  }
+}
+
+async function getPendingVideoTask(taskId) {
+  try {
+    if (!taskId) return null;
+    return PendingGenerationTask.findOne({ taskId }).lean();
+  } catch (error) {
+    console.warn(`⚠️ Failed to load pending task ${taskId}:`, error.message);
+    return null;
+  }
+}
+
+async function claimPendingVideoTask(taskId) {
+  try {
+    if (!taskId) return null;
+    return PendingGenerationTask.findOneAndUpdate(
+      { taskId, status: 'pending' },
+      { status: 'delivering', lastCheckedAt: new Date() },
+      { new: true }
+    ).lean();
+  } catch (error) {
+    console.warn(`⚠️ Failed to claim pending task ${taskId}:`, error.message);
+    return null;
+  }
+}
+
+async function createDeliveredGenerationResult(task, videoUrl) {
+  try {
+    await GenerationResult.create({
+      userId: task.userId,
+      username: task.username,
+      modelKey: task.modelKey,
+      modelName: task.modelName,
+      resultUrl: videoUrl,
+      resultType: 'video',
+      prompt: task.deductMeta?.prompt,
+      options: task.deductMeta || {},
+      duration: task.deductMeta?.duration,
+      success: true,
+      provider: 'kie-ai',
+      providerTaskId: task.taskId,
+      tokensSpent: task.cost,
+      apiCostUSD: task.deductMeta?.apiCost,
+      generatedAt: new Date()
+    });
+  } catch (error) {
+    console.warn(`⚠️ Failed to store generation result for task ${task.taskId}:`, error.message);
+  }
+}
+
+async function deliverPendingVideoTask(task, videoUrl, source = 'recovery') {
+  if (!task?.taskId || !videoUrl) {
+    return false;
+  }
+
+  if (kieCallbackDelivered.has(task.taskId)) {
+    return true;
+  }
+
+  const claimedTask = await claimPendingVideoTask(task.taskId);
+  if (!claimedTask) {
+    return true;
+  }
+
+  try {
+    await userBalance.deductTokens(claimedTask.userId, claimedTask.cost, claimedTask.deductDescription, claimedTask.deductMeta || {});
+    const isTrial = await isTrialUser(claimedTask.userId);
+    await monitoringLoggers.logUsageEvent({
+      userId: claimedTask.userId,
+      modelKey: claimedTask.modelKey,
+      success: true,
+      isTrial,
+      isFree: isTrial,
+      ...(claimedTask.monitorOptions || {})
+    });
+
+    await bot.telegram.sendMessage(
+      claimedTask.chatId,
+      `✅ <b>${claimedTask.modelName} готово!</b>\n\n` +
+      `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
+      `${claimedTask.promptSnippet || ''}${claimedTask.promptSnippet ? '\n' : ''}` +
+      `💰 Витрачено: ${claimedTask.cost}⚡`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+
+    await safeSendVideo(claimedTask.chatId, videoUrl, {
+      caption: `${claimedTask.captionLine}\n\n💰 Витрачено: ${claimedTask.cost}⚡`,
+      ...keyboard.createBackButton('video_menu')
+    });
+
+    kieCallbackDelivered.add(claimedTask.taskId);
+    kieCallbackMap.delete(claimedTask.taskId);
+    await createDeliveredGenerationResult(claimedTask, videoUrl);
+    await updatePendingVideoTask(claimedTask.taskId, {
+      status: 'delivered',
+      resultUrl: videoUrl,
+      deliveredAt: new Date(),
+      lastState: 'success',
+      lastCheckedAt: new Date(),
+      failureMessage: '',
+      deliverySource: source
+    });
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to deliver pending task ${claimedTask.taskId}:`, error.message);
+    await updatePendingVideoTask(claimedTask.taskId, {
+      status: 'pending',
+      lastState: 'success',
+      lastCheckedAt: new Date(),
+      failureMessage: `Delivery failed: ${error.message}`
+    });
+    try {
+      await bot.telegram.sendMessage(claimedTask.chatId, `🎥 Відео готове: ${videoUrl}\n\n💰 Витрачено: ${claimedTask.cost}⚡`);
+    } catch (fallbackError) {
+      console.error(`❌ Fallback delivery also failed for ${claimedTask.taskId}:`, fallbackError.message);
+    }
+    return false;
+  }
+}
+
+async function failPendingVideoTask(task, errorMessage, source = 'recovery') {
+  if (!task?.taskId) return;
+
+  const message = errorMessage || 'Unknown error';
+  console.error(`❌ Pending task ${task.taskId} failed via ${source}: ${message}`);
+
+  try {
+    await bot.telegram.sendMessage(
+      task.chatId,
+      `❌ ${task.modelName}: генерація не вдалась.\n${message}\n\nТокени НЕ списано.`
+    );
+  } catch (error) {
+    console.error(`❌ Could not notify user about failed task ${task.taskId}:`, error.message);
+  }
+
+  try {
+    const isTrial = await isTrialUser(task.userId);
+    await monitoringLoggers.logUsageEvent({
+      userId: task.userId,
+      modelKey: task.modelKey,
+      success: false,
+      isTrial,
+      isFree: isTrial,
+      errorCode: String(message).substring(0, 100),
+      ...(task.monitorOptions || {})
+    });
+  } catch (error) {
+    console.warn(`⚠️ Failed to log failed task ${task.taskId}:`, error.message);
+  }
+
+  kieCallbackMap.delete(task.taskId);
+  await updatePendingVideoTask(task.taskId, {
+    status: 'failed',
+    failureMessage: String(message),
+    lastState: 'failed',
+    lastCheckedAt: new Date(),
+    deliverySource: source
+  });
+}
+
+async function extractPendingTaskVideoUrl(taskId, job, pollStrategy) {
+  if (pollStrategy === 'runway') {
+    return job?.videoInfo?.videoUrl || null;
+  }
+
+  let videoUrl = kieAI.extractVideoUrlExported(job);
+  if (!videoUrl && pollStrategy === 'veo' && taskId) {
+    videoUrl = await kieAI.fetchVeo1080pUrlExported(taskId);
+    if (!videoUrl) {
+      await new Promise(resolve => setTimeout(resolve, 60000));
+      videoUrl = await kieAI.fetchVeo1080pUrlExported(taskId);
+    }
+  }
+
+  return videoUrl;
+}
+
+async function fetchPendingTaskJob(task) {
+  if (task.pollStrategy === 'runway') {
+    const job = await kieAI.fetchRunwayTaskInfoExported(task.taskId);
+    return {
+      job,
+      state: String(job?.state || '').toLowerCase()
+    };
+  }
+
+  if (task.pollStrategy === 'veo') {
+    const job = await kieAI.fetchVeoTaskInfoExported(task.taskId);
+    return {
+      job,
+      state: String(job?.state || job?.status || '').toLowerCase()
+    };
+  }
+
+  const job = await kieAI.fetchTaskRecordInfoExported(task.taskId);
+  return {
+    job,
+    state: String(job?.state || job?.status || '').toLowerCase()
+  };
+}
+
+function buildCallbackMapEntryFromTask(task) {
+  if (!task) return null;
+
+  if (task.modelKey !== 'veo') {
+    return {
+      chatId: task.chatId,
+      userId: task.userId,
+      username: task.username,
+      model: task.modelKey,
+      modelName: task.modelName,
+      prompt: task.deductMeta?.prompt,
+      createdAt: Date.now()
+    };
+  }
+
+  return {
+    chatId: task.chatId,
+    userId: task.userId,
+    username: task.username,
+    model: 'veo',
+    modelName: task.modelName,
+    prompt: task.deductMeta?.prompt,
+    aspectRatio: task.deductMeta?.aspectRatio,
+    duration: task.deductMeta?.duration,
+    generateAudio: task.deductMeta?.generateAudio,
+    veoCost: task.cost,
+    apiCost: task.deductMeta?.apiCost,
+    hasStartImage: task.deductMeta?.hasStartImage,
+    hasLastFrame: task.deductMeta?.hasLastFrame,
+    references: task.deductMeta?.references || 0,
+    createdAt: Date.now()
+  };
+}
+
+async function resumePendingKieVideoTasks() {
+  try {
+    const pendingTasks = await PendingGenerationTask.find({
+      provider: 'kie-ai',
+      resultType: 'video',
+      status: 'pending'
+    }).lean();
+
+    if (!pendingTasks.length) {
+      return;
+    }
+
+    console.log(`🔄 Resuming ${pendingTasks.length} pending KIE video task(s) from database...`);
+
+    for (const task of pendingTasks) {
+      if (!task?.taskId || activeKieRecoveryTasks.has(task.taskId)) {
+        continue;
+      }
+
+      if (task.pollStrategy === 'veo') {
+        startVeoRecoveryPolling({
+          chatId: task.chatId,
+          userId: task.userId,
+          username: task.username,
+          modelLabel: task.modelName,
+          taskId: task.taskId,
+          cost: task.cost,
+          deductDescription: task.deductDescription,
+          deductMeta: task.deductMeta,
+          promptSnippet: task.promptSnippet,
+          captionLine: task.captionLine,
+          monitorOptions: task.monitorOptions
+        });
+        continue;
+      }
+
+      startVideoRecoveryPolling({
+        chatId: task.chatId,
+        userId: task.userId,
+        username: task.username,
+        modelKey: task.modelKey,
+        modelLabel: task.modelName,
+        taskId: task.taskId,
+        cost: task.cost,
+        deductDescription: task.deductDescription,
+        deductMeta: task.deductMeta,
+        promptSnippet: task.promptSnippet,
+        captionLine: task.captionLine,
+        isRunway: task.pollStrategy === 'runway',
+        monitorOptions: task.monitorOptions
+      });
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to resume pending KIE video tasks:', error.message);
+  }
+}
 
 function loadProviderChoice() {
   try {
@@ -602,8 +1138,152 @@ function buildMainMenuMessage(ctx, user) {
   ].join('\n');
 }
 
+function buildSectionMenuMessage(localeSource, titleKey, promptKey) {
+  const locale = resolveLocale(localeSource);
+  return `${t(locale, titleKey)}\n\n${t(locale, promptKey)}`;
+}
+
+function buildSubscriptionPlanMessage(ctx, sub, planKey, savingsPercent) {
+  const locale = resolveLocale(ctx);
+  const tokens = sub.tokensWayForPay || sub.tokens;
+  let message = `${t(locale, 'subscription.packageTitle', { planName: sub.name, priceUSD: sub.priceUSD })}\n\n`;
+  message += `${t(locale, 'subscription.accessAllModels')}\n`;
+  message += `${t(locale, 'subscription.tokensDoNotExpire')}\n`;
+  message += `${t(locale, 'subscription.mixAndMatch')}\n\n`;
+
+  if (planKey !== 'starter' && savingsPercent > 0) {
+    message += `${t(locale, 'subscription.savingsComparedStarter', { savingsPercent })}\n\n`;
+  }
+
+  message += `${t(locale, 'subscription.priceLine', { priceUSD: sub.priceUSD, tokens })}\n`;
+  message += `${t(locale, 'subscription.starsIntro')}\n`;
+  message += `${t(locale, 'subscription.starsLine', { starsPrice: sub.price, tokens: sub.tokens })}\n\n`;
+  message += `${t(locale, 'subscription.biggerValue')}\n\n`;
+  message += t(locale, 'subscription.choosePaymentMethod');
+
+  return message;
+}
+
+function isNavigationMenuText(ctx, text) {
+  if (!text) {
+    return false;
+  }
+
+  const locale = resolveLocale(ctx);
+  const navigationTexts = new Set([
+    t(locale, 'menu.assistants'),
+    t(locale, 'menu.creatives'),
+    t(locale, 'menu.video'),
+    t(locale, 'menu.images'),
+    t(locale, 'menu.profile'),
+    t(locale, 'menu.feedback'),
+    t(locale, 'menu.settings'),
+    t(locale, 'menu.help'),
+    t(locale, 'menu.topUpBalance'),
+    '🧠 Помічники',
+    '🎨 Креативи',
+    '🎬 Відео',
+    '🖼️ Зображення',
+    '👤 Профіль',
+    '⚙️ Налаштування',
+    '❓ Допомога',
+    '💰 Поповнити баланс',
+    '📝 Feedback'
+  ]);
+
+  return navigationTexts.has(text);
+}
+
+async function showSettingsMenu(ctx) {
+  const userId = ctx.from.id;
+  const currentChoice = userProviderChoice.get(userId) || 'auto';
+
+  const choiceEmoji = {
+    'kie-ai': '🔵',
+    'replicate': '🟣',
+    'auto': '🤖'
+  };
+
+  const choiceText = {
+    'kie-ai': 'KIE.AI',
+    'replicate': 'Replicate',
+    'auto': 'Автоматичний'
+  };
+
+  const settingsMenu = `⚙️ <b>Налаштування</b>
+
+<b>Поточні налаштування:</b>
+${choiceEmoji[currentChoice]} Провайдер: <b>${choiceText[currentChoice]}</b>
+
+<b>Що таке провайдер?</b>
+• 🔵 <b>KIE.AI</b> - дешевший, пріоритетний ✅
+• 🟣 <b>Replicate</b> - альтернативний (дорожчий)
+• 🤖 <b>Автоматичний</b> - спершу KIE.AI, потім Replicate
+
+✅ Якщо один провайдер не працює - автоматично перемикається на інший!
+
+Оберіть опцію нижче 👇`;
+
+  const settingsKeyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('🔧 Вибрати провайдер', 'provider_menu')],
+    [Markup.button.callback('🏠 Назад', 'main_menu')]
+  ]);
+
+  await ctx.reply(settingsMenu, {
+    parse_mode: 'HTML',
+    ...settingsKeyboard
+  });
+}
+
 async function sendMainMenu(ctx, user) {
   await ctx.reply(buildMainMenuMessage(ctx, user), keyboard.createMainMenu(resolveLocale(ctx)));
+}
+
+function isPrivateChat(ctx) {
+  return ctx.chat?.type === 'private';
+}
+
+function isExpiredCallbackQueryError(error) {
+  const description = error?.response?.description || error?.message || '';
+  return /query is too old/i.test(description) || /query ID is invalid/i.test(description);
+}
+
+async function safeAnswerCbQuery(ctx, text, extra) {
+  try {
+    await ctx.answerCbQuery(text, extra);
+  } catch (error) {
+    if (!isExpiredCallbackQueryError(error)) {
+      throw error;
+    }
+  }
+}
+
+async function requirePrivateAction(ctx, message = 'Open the bot in a private chat to continue.') {
+  if (isPrivateChat(ctx)) {
+    return true;
+  }
+
+  await safeAnswerCbQuery(ctx, message, { show_alert: true });
+  return false;
+}
+
+async function editOrReplyInlineMenu(ctx, text, options = {}) {
+  try {
+    await ctx.editMessageText(text, options);
+    return;
+  } catch (error) {
+    const errorMessage = error?.message || '';
+    const isExpectedEditFailure =
+      /message is not modified/i.test(errorMessage)
+      || /there is no text in the message to edit/i.test(errorMessage)
+      || /message can't be edited/i.test(errorMessage);
+
+    if (!isExpectedEditFailure) {
+      console.warn('Inline menu edit fallback:', errorMessage);
+    }
+  }
+
+  await ctx.reply(text, options);
 }
 
 function runBackgroundTask(task, label = 'task') {
@@ -1189,20 +1869,10 @@ bot.on('text', async (ctx, next) => {
   const currentModel = userCurrentModel.get(userId);
   const state = userState.get(userId);
   
-  const menuButtons = [
-    '🧠 Помічники',
-    '🎨 Креативи',
-    '🎬 Відео',
-    '🖼️ Зображення',
-    '👤 Профіль',
-    '💰 Поповнити баланс',
-    '📝 Feedback',
-    '❓ Допомога'
-  ];
-  
-  if (menuButtons.includes(text)) {
+  if (isNavigationMenuText(ctx, text)) {
     userCurrentModel.delete(userId);
     userState.delete(userId);
+    imageGenState.delete(userId);
   }
   
   return next();
@@ -1239,7 +1909,7 @@ const INSTRUCTION_HTML = `
 
 📝 <b>Як користуватися ботом:</b>
 
-<b>1️⃣ Базові помічники (Claude AI)</b>
+<b>1️⃣ Базові помічники (Gemini AI)</b>
 - <b>✍️ Текст:</b> напишіть запит → отримайте відповідь
 - <b>🎙️ Голос:</b> надішліть голосове → AI розпізнає і відповість
 - <b>🖼️ Аналіз фото:</b> надішліть зображення → AI опише/проаналізує
@@ -1332,6 +2002,8 @@ bot.command('help', async (ctx) => {
 🤖 Available commands:
 /start - Main menu
 /profile - Your profile
+/settings - Provider settings
+/setings - Settings alias
 /balance - Check your balance
 /history - Usage history
 /clear - Clear conversation history
@@ -1357,6 +2029,14 @@ bot.command('help', async (ctx) => {
 🔗 Company information: /info`;
 
   await ctx.reply(helpText, keyboard.createBackButton());
+});
+
+bot.command('settings', async (ctx) => {
+  await showSettingsMenu(ctx);
+});
+
+bot.hears(/^\/setings(?:@\w+)?$/i, async (ctx) => {
+  await showSettingsMenu(ctx);
 });
 
 bot.command('profile', async (ctx) => {
@@ -2137,44 +2817,47 @@ bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
 });
 
 
-bot.hears('🧠 Помічники', async (ctx) => {
+bot.hears(/^(🧠 (Помічники|Assistants))$/, async (ctx) => {
+  const locale = resolveLocale(ctx);
   await ctx.reply(
-    `🧠 Claude\n\n💎 Claude - преміум якість\n\nОберіть режим роботи 👇`,
+    buildSectionMenuMessage(locale, 'sections.assistantsTitle', 'sections.assistantsPrompt'),
     keyboard.createGPTActionsMenu(models.gpt.actions)
   );
 });
 
-bot.hears('🎬 Відео', async (ctx) => {
+bot.hears(/^(🎬 (Відео|Video))$/, async (ctx) => {
+  const locale = resolveLocale(ctx);
   await ctx.reply(
-    '🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇',
+    buildSectionMenuMessage(locale, 'sections.videoTitle', 'sections.videoPrompt'),
     keyboard.createInlineMenu(getVideoModelsForUser(ctx.from.id), 1)
   );
 });
 
-bot.hears('🖼️ Зображення', async (ctx) => {
+bot.hears(/^(🖼️ (Зображення|Images))$/, async (ctx) => {
+  const locale = resolveLocale(ctx);
   try {
     await ctx.reply(
-      '🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇',
+      buildSectionMenuMessage(locale, 'sections.imagesTitle', 'sections.imagesPrompt'),
       keyboard.createInlineMenu(getDesignModelsWithEffectiveCost(ctx.from.id), 1)
     );
   } catch (error) {
     console.error('❌ Error loading design menu:', error);
     await ctx.reply(
-      '⚠️ Помилка завантаження меню.\n\n' +
-      'Спробуйте ще раз або зверніться до адміністратора.',
+      t(locale, 'errors.menuLoad'),
       keyboard.createBackButton()
     );
   }
 });
 
-bot.hears('🎙️ Аудіо з AI', async (ctx) => {
+bot.hears(/^(🎙️ (Аудіо з AI|AI audio))$/, async (ctx) => {
+  const locale = resolveLocale(ctx);
   await ctx.reply(
-    '🎙️ Аудіо з AI\n\nВиберіть розділ для роботи з аудіо 👇',
+    buildSectionMenuMessage(locale, 'sections.audioTitle', 'sections.audioPrompt'),
     keyboard.createInlineMenu(models.audio.models, 1)
   );
 });
 
-bot.hears('👤 Профіль', async (ctx) => {
+bot.hears(/^(👤 (Профіль|Profile))$/, async (ctx) => {
   await showProfile(ctx);
 });
 
@@ -2325,51 +3008,14 @@ bot.action('provider_menu', async (ctx) => {
 });
 
 
-bot.hears('⚙️ Налаштування', async (ctx) => {
-  const userId = ctx.from.id;
-  const currentChoice = userProviderChoice.get(userId) || 'auto';
-
-  const choiceEmoji = {
-    'kie-ai': '🔵',
-    'replicate': '🟣',
-    'auto': '🤖'
-  };
-
-  const choiceText = {
-    'kie-ai': 'KIE.AI',
-    'replicate': 'Replicate',
-    'auto': 'Автоматичний'
-  };
-
-  const settingsMenu = `⚙️ <b>Налаштування</b>
-
-<b>Поточні налаштування:</b>
-${choiceEmoji[currentChoice]} Провайдер: <b>${choiceText[currentChoice]}</b>
-
-<b>Що таке провайдер?</b>
-• 🔵 <b>KIE.AI</b> - дешевший, пріоритетний ✅
-• 🟣 <b>Replicate</b> - альтернативний (дорожчий)
-• 🤖 <b>Автоматичний</b> - спершу KIE.AI, потім Replicate
-
-✅ Якщо один провайдер не працює - автоматично перемикається на інший!
-
-Оберіть опцію нижче 👇`;
-
-  const settingsKeyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('🔧 Вибрати провайдер', 'provider_menu')],
-    [Markup.button.callback('🏠 Назад', 'main_menu')]
-  ]);
-
-  await ctx.reply(settingsMenu, {
-    parse_mode: 'HTML',
-    ...settingsKeyboard
-  });
+bot.hears(/^(⚙️ (Налаштування|Settings))$/, async (ctx) => {
+  await showSettingsMenu(ctx);
 });
 
-bot.hears('❓ Допомога', async (ctx) => {
+bot.hears(/^(❓ (Допомога|Help))$/, async (ctx) => {
+  const locale = resolveLocale(ctx);
   await ctx.reply(
-    '❓ Використовуйте /help для перегляду команд\n' +
-    '📄 Інструкція: /instruction',
+    t(locale, 'help.quick'),
     keyboard.createBackButton()
   );
 });
@@ -2381,10 +3027,9 @@ bot.command('instruction', async (ctx) => {
   });
 });
 
-bot.hears('🎨 Креативи', async (ctx) => {
-  const creativesMenu = `🎨 <b>Готові креативи</b>
-
-Вибери готовий креатив - будуть згенеровані фотосесії з вшитими промптами 👇`;
+bot.hears(/^(🎨 (Креативи|Creatives))$/, async (ctx) => {
+  const locale = resolveLocale(ctx);
+  const creativesMenu = `${t(locale, 'sections.creativesTitle')}\n\n${t(locale, 'sections.creativesPrompt')}`;
 
   const creativesKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('💌 До Дня Закоханих', 'creative_love_is')],
@@ -2416,7 +3061,7 @@ bot.hears('📝 Feedback', async (ctx) => {
   await ctx.reply(feedbackMenu, { parse_mode: 'HTML', ...feedbackKeyboard });
 });
 
-bot.hears('💰 Поповнити баланс', async (ctx) => {
+bot.hears(/^(💰 (Поповнити баланс|Top up balance))$/, async (ctx) => {
   await ctx.reply(`⚡ Buy tokens\n\nChoose a package below.`, keyboard.createSubscriptionsMenu(ctx.from.id, ctx));
 });
 
@@ -2647,6 +3292,7 @@ bot.action('creative_love_is', async (ctx) => {
   const randomDetail = CUTE_DETAILS[Math.floor(Math.random() * CUTE_DETAILS.length)];
 
   userState.set(userId, {
+    action: 'creative_generation',
     creative: 'love_is',
     step: 'waiting_photo',
     model: 'nano_banana_2k',
@@ -2685,6 +3331,7 @@ bot.action('creative_hearts', async (ctx) => {
   }
 
   userState.set(userId, {
+    action: 'creative_generation',
     creative: 'hearts',
     step: 'waiting_photo',
     model: 'seedream_4k'
@@ -2716,6 +3363,7 @@ bot.action('creative_porcelain_figure', async (ctx) => {
   }
 
   userState.set(userId, {
+    action: 'creative_generation',
     creative: 'porcelain_figure',
     step: 'waiting_photo',
     model: 'seedream_4k'
@@ -2748,6 +3396,7 @@ bot.action('creative_kittens', async (ctx) => {
   }
 
   userState.set(userId, {
+    action: 'creative_generation',
     creative: 'kittens',
     step: 'waiting_photo',
     model: 'seedream_4k'
@@ -2779,6 +3428,7 @@ bot.action('creative_underwater_macro', async (ctx) => {
   }
 
   userState.set(userId, {
+    action: 'creative_generation',
     creative: 'underwater_macro',
     step: 'waiting_photo',
     model: 'seedream_4k'
@@ -2810,13 +3460,14 @@ bot.action('creative_bridgerton', async (ctx) => {
   }
 
   userState.set(userId, {
+    action: 'creative_generation',
     creative: 'bridgerton',
     step: 'waiting_photo',
     model: 'seedream_4k'
   });
 
   imageGenState.delete(userId);
-  userCurrentModel.delete(userId);
+  userCurrentModel.set(userId, 'bridgerton');
 
   await ctx.reply(
       `👑 <b>Готовий креатив: Bridgerton</b>\n\n` +
@@ -3037,7 +3688,12 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
   const username = ctx.from.username || 'unknown';
   const creativeLabel = creativeNames[creativeType] || creativeType;
 
-  userState.delete(userId);
+  userState.set(userId, {
+    ...state,
+    action: 'creative_generation',
+    creative: creativeType,
+    step: 'processing'
+  });
   userCurrentModel.delete(userId);
 
   runBackgroundTask(async () => {
@@ -3184,6 +3840,9 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
       } catch (editError) {
         await bot.telegram.sendMessage(chatId, '❌ Помилка генерації. Спробуйте ще раз.');
       }
+    } finally {
+      userState.delete(userId);
+      userCurrentModel.delete(userId);
     }
   }, `creative_${creativeType}`);
 
@@ -3193,36 +3852,42 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
 
 bot.action('gpt_text', async (ctx) => {
   await ctx.answerCbQuery();
+  const textAction = models.gpt.actions.find((action) => action.key === 'text');
   userCurrentModel.set(ctx.from.id, 'claude_text');
+  userState.set(ctx.from.id, {
+    action: 'claude_text',
+    step: 'waiting_text'
+  });
   await ctx.reply(
-    '✍️ Режим Claude активовано! 💎\n\n' +
-    'Надішліть мені ваше запитання, і я відповім текстом.\n\n' +
-    '💡 Claude Sonnet 4.5 - найкраща якість\n' +
-    '💰 Вартість: 1⚡ за запит\n' +
-    '💡 Підказка: Я запам\'ятовую контекст розмови.',
+    t(ctx, 'assistants.textActivated', { cost: textAction?.cost ?? 1 }),
     keyboard.createBackButton()
   );
 });
 
 bot.action('gpt_voice', async (ctx) => {
   await ctx.answerCbQuery();
+  const textAction = models.gpt.actions.find((action) => action.key === 'text');
   userCurrentModel.set(ctx.from.id, 'claude_voice');
+  userState.set(ctx.from.id, {
+    action: 'claude_voice',
+    step: 'waiting_voice'
+  });
   await ctx.reply(
-    '🎙️ Режим голосової розмови активовано! 🆓\n\n' +
-    'Надішліть голосове повідомлення, і я перетворю його в текст та відповім.\n\n' +
-    '💡 Groq Whisper - безкоштовна транскрипція\n' +
-    '💰 Відповідь через Claude: 1⚡',
+    t(ctx, 'assistants.voiceActivated', { cost: textAction?.cost ?? 1 }),
     keyboard.createBackButton()
   );
 });
 
 bot.action('gpt_image', async (ctx) => {
   await ctx.answerCbQuery();
+  const imageAction = models.gpt.actions.find((action) => action.key === 'image');
   userCurrentModel.set(ctx.from.id, 'claude_vision');
+  userState.set(ctx.from.id, {
+    action: 'claude_vision',
+    step: 'waiting_image'
+  });
   await ctx.reply(
-    '🖼️ Режим Claude Vision активовано! 💎\n\n' +
-    'Надішліть мені зображення з підписом (або без), і я його проаналізую.\n\n' +
-    '💰 Вартість: 3⚡ за аналіз',
+    t(ctx, 'assistants.visionActivated', { cost: imageAction?.cost ?? 1 }),
     keyboard.createBackButton()
   );
 });
@@ -3886,18 +4551,19 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
   const model = models.design.models.find(m => m.key === modelKey);
 
   if (!model) {
-    await ctx.answerCbQuery('Модель не знайдена');
+    await safeAnswerCbQuery(ctx, 'Модель не знайдена');
     return;
   }
 
   if (model.available === false) {
-    await ctx.answerCbQuery('❌ Модель тимчасово недоступна', { show_alert: true });
+    await safeAnswerCbQuery(ctx, '❌ Модель тимчасово недоступна', { show_alert: true });
     return;
   }
 
+  await safeAnswerCbQuery(ctx);
+
   const trialCheck = await checkTrialRestrictions(ctx.from.id, modelKey);
   if (!trialCheck.allowed) {
-    await ctx.answerCbQuery();
     await ctx.reply(
       trialCheck.message,
       { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu(ctx.from.id, ctx) }
@@ -3907,8 +4573,6 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
   if (trialCheck.warning) {
     await ctx.reply(trialCheck.warning, { parse_mode: 'HTML' });
   }
-
-  await ctx.answerCbQuery();
 
   if (model.googleDirect && !geminiImage.isConfigured) {
     await ctx.reply('❌ Модель тимчасово недоступна (Google API not configured).');
@@ -4063,6 +4727,21 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
       );
       return;
     }
+  }
+
+  if (modelKey === 'z_image') {
+    imageGenState.delete(ctx.from.id);
+    userCurrentModel.set(ctx.from.id, modelKey);
+
+    await ctx.reply(
+      `⚡ <b>${model.name}</b>\n\n` +
+      `🖼️ Найшвидша та найдешевша модель зображень!\n\n` +
+      `✍️ Введіть промпт (до 1000 символів)\n\n` +
+      `💰 Вартість: ${effectiveCost}⚡\n` +
+      `⏱️ Час: ~10-20 секунд`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
   }
 
   const maxPhotos = model.maxImages || 1;
@@ -4425,11 +5104,11 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
   const model = models.video.models.find(m => m.key === modelKey);
 
   if (!model) {
-    await ctx.answerCbQuery('Модель не знайдена');
+    await safeAnswerCbQuery(ctx, 'Модель не знайдена');
     return;
   }
 
-  await ctx.answerCbQuery();
+  await safeAnswerCbQuery(ctx);
 
   if (KIE_ONLY_VIDEO_MODELS.includes(modelKey) && !canSeeKieOnlyVideoModels(ctx.from.id)) {
     await ctx.reply(
@@ -4704,14 +5383,18 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     userState.set(ctx.from.id, {
       action: 'seedance_generation',
       step: 'select_resolution',
-      modelKey
+      modelKey,
+      inputType: 'no_video_input'
     });
 
     await ctx.reply(
       `<b>${model.name}</b>\n\n` +
       `🎬 Генерація відео через KIE.AI\n` +
       `⏱️ Тривалість: 4-15 секунд\n` +
-      `🔊 Аудіо: опціонально\n\n` +
+      `🎞️ Референс-відео: опціонально\n` +
+      `🎵 Референс-аудіо: опціонально\n` +
+      `🔊 AI-аудіо результату: опціонально\n\n` +
+      `💡 Стартова ціна нижче показана для <b>no video input</b>. Якщо додасте reference video, бот перерахує ціну за формулою <b>(input + output duration) × rate</b>.\n\n` +
       `📐 <b>Крок 1: Оберіть роздільну здатність</b>\n\n` +
       `480p — ${range480.min}—${range480.max}⚡\n` +
       `720p — ${range720.min}—${range720.max}⚡`,
@@ -5884,10 +6567,15 @@ bot.action(/^seedance_resolution_(480p|720p)$/, async (ctx) => {
   const durations = model?.durations || [4, 5, 6, 8, 10, 12, 15];
   const durationButtons = durations.map(d =>
     Markup.button.callback(
-      `${d} сек (${getEffectiveSeedanceCost(userId, state.modelKey, d, resolution)}⚡)`,
+      `${d} сек (${getEffectiveSeedanceCost(userId, state.modelKey, d, resolution, state)}⚡)`,
       `seedance_duration_${d}`
     )
   );
+  const durationRows = [];
+
+  for (let index = 0; index < durationButtons.length; index += 2) {
+    durationRows.push(durationButtons.slice(index, index + 2));
+  }
 
   userState.set(userId, {
     ...state,
@@ -5902,7 +6590,7 @@ bot.action(/^seedance_resolution_(480p|720p)$/, async (ctx) => {
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        durationButtons,
+        ...durationRows,
         [Markup.button.callback('← Назад', 'video_menu')]
       ])
     }
@@ -5957,31 +6645,79 @@ bot.action(/^seedance_aspect_(.+)$/, async (ctx) => {
     return;
   }
 
-  const cost = getEffectiveSeedanceCost(userId, state.modelKey, state.duration || 4, state.resolution || '480p');
+  const cost = getEffectiveSeedanceCost(userId, state.modelKey, state.duration || 4, state.resolution || '480p', state);
 
   userState.set(userId, {
     ...state,
     aspectRatio,
-    step: 'select_audio'
+    inputType: 'no_video_input',
+    referenceVideoUrls: [],
+    referenceAudioUrls: [],
+    inputVideoDuration: 0,
+    step: 'ask_reference_video'
   });
 
   await ctx.reply(
-    `<b>ByteDance Seedance</b>\n\n` +
+    `<b>${state.modelKey === 'seedance_2_fast' ? 'ByteDance Seedance 2 Fast' : 'ByteDance Seedance 2'}</b>\n\n` +
     `🖥️ ${state.resolution} | ⏱️ ${state.duration} сек | 📐 ${aspectRatio}\n` +
     `💰 Вартість: <b>${cost}⚡</b>\n\n` +
-    `🔊 <b>Крок 4: Оберіть режим аудіо</b>\n\n` +
-    `Аудіо генерується моделлю та не змінює ціну в поточному флоу.`,
+    `🎞️ <b>Референс-відео (опціонально)</b>\n\n` +
+    `Якщо додати відео-референс, ціна буде перерахована як <b>(тривалість референсу + тривалість результату) × тариф with video input</b>.`,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        [
-          Markup.button.callback(`🔊 З аудіо (${cost}⚡)`, 'seedance_audio_on'),
-          Markup.button.callback(`🔇 Без аудіо (${cost}⚡)`, 'seedance_audio_off')
-        ],
+        [Markup.button.callback('🎞️ Додати референс-відео', 'seedance_add_reference_video')],
+        [Markup.button.callback(`⏭️ Без референс-відео (${cost}⚡)`, 'seedance_skip_reference_video')],
         [Markup.button.callback('← Назад', 'video_menu')]
       ])
     }
   );
+});
+
+bot.action('seedance_add_reference_video', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_reference_video'
+  });
+
+  await ctx.reply(
+    `🎞️ <b>Надішліть референс-відео</b>\n\n` +
+    `Підійде короткий кліп, який задає рух, темп або камеру.\n\n` +
+    `⚠️ Надішліть саме як <b>відео</b>, не як документ — так бот зможе правильно порахувати тривалість для ціни.\n\n` +
+    `💡 Після завантаження бот перерахує ціну з урахуванням <b>input video duration</b>.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+bot.action('seedance_skip_reference_video', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const nextState = {
+    ...state,
+    inputType: 'no_video_input',
+    referenceVideoUrls: [],
+    inputVideoDuration: 0,
+    step: 'select_audio'
+  };
+
+  userState.set(userId, nextState);
+  await promptSeedanceAudioStep(ctx, nextState);
 });
 
 bot.action(/^seedance_audio_(on|off)$/, async (ctx) => {
@@ -5995,25 +6731,63 @@ bot.action(/^seedance_audio_(on|off)$/, async (ctx) => {
     return;
   }
 
-  const model = models.video.models.find(m => m.key === state.modelKey);
-  const cost = getEffectiveSeedanceCost(userId, state.modelKey, state.duration || 4, state.resolution || '480p');
+  const cost = getEffectiveSeedanceCost(userId, state.modelKey, state.duration || 4, state.resolution || '480p', state);
 
   userState.set(userId, {
     ...state,
     generateAudio,
     seedanceCost: cost,
-    step: 'waiting_prompt'
+    step: 'ask_reference_audio'
+  });
+
+  await promptSeedanceReferenceAudioStep(ctx, {
+    ...state,
+    generateAudio,
+    seedanceCost: cost
+  });
+});
+
+bot.action('seedance_add_reference_audio', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_reference_audio'
   });
 
   await ctx.reply(
-    `<b>${model?.name || 'Seedance'}</b>\n\n` +
-    `🖥️ ${state.resolution} | ⏱️ ${state.duration} сек | 📐 ${state.aspectRatio}\n` +
-    `🔊 Аудіо: <b>${generateAudio ? 'Так' : 'Ні'}</b>\n` +
-    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
-    `✍️ <b>Крок 5: Введіть промпт</b>\n\n` +
-    `Опишіть детально, що має відбуватися у відео.`,
+    `🎵 <b>Надішліть референс-аудіо</b>\n\n` +
+    `Підтримувані формати: MP3, WAV, OGG, AAC, M4A/MP4.\n\n` +
+    `💡 Це не змінює ціну, але буде передано в Seedance як reference audio.`,
     { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
   );
+});
+
+bot.action('seedance_skip_reference_audio', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const nextState = {
+    ...state,
+    referenceAudioUrls: [],
+    step: 'waiting_prompt'
+  };
+
+  userState.set(userId, nextState);
+  await promptSeedancePromptStep(ctx, nextState);
 });
 
 // ==================== KLING v2.5 CALLBACKS ====================
@@ -7089,84 +7863,215 @@ async function startVideoRecoveryPolling({
   const maxAttempts = 720; 
   const interval = 5000;
   let attempts = 0;
+  const pendingTask = buildPendingVideoTaskPayload({
+    chatId,
+    userId,
+    username,
+    modelKey,
+    modelLabel,
+    taskId,
+    cost,
+    deductDescription,
+    deductMeta,
+    promptSnippet,
+    captionLine,
+    isRunway,
+    monitorOptions
+  });
+
+  if (activeKieRecoveryTasks.has(taskId)) {
+    console.log(`ℹ️ [Recovery] ${modelLabel} task ${taskId} already active, skipping duplicate start`);
+    return;
+  }
+
+  activeKieRecoveryTasks.add(taskId);
+  await persistPendingVideoTask(pendingTask);
 
   console.log(`🔄 [Recovery] Starting for ${modelLabel} task ${taskId}, user ${userId}`);
 
-  while (attempts < maxAttempts) {
-    try {
-      await new Promise(r => setTimeout(r, interval));
-      attempts++;
-
-      let job;
-      let state;
-      let videoUrl;
-
-      if (isRunway) {
-        job = await kieAI.fetchRunwayTaskInfoExported(taskId);
-        state = job?.state || '';
-        videoUrl = job?.videoInfo?.videoUrl || null;
-      } else {
-        job = await kieAI.fetchTaskRecordInfoExported(taskId);
-        state = (job?.state || job?.status || '').toLowerCase();
-        videoUrl = kieAI.extractVideoUrlExported(job);
-      }
-
-      if (!job) continue;
-
-      console.log(`🔄 [Recovery] ${modelLabel} (${attempts}): taskId=${taskId} state=${state}`);
-
-      if (state === 'success' || state === 'completed') {
-        if (!videoUrl) {
-          await bot.telegram.sendMessage(chatId,
-            `❌ ${modelLabel}: відео згенеровано, але URL не знайдено.\nTaskId: <code>${taskId}</code>\nЗверніться до підтримки.`,
-            { parse_mode: 'HTML' }
-          );
+  try {
+    while (attempts < maxAttempts) {
+      try {
+        if (kieCallbackDelivered.has(taskId)) {
+          console.log(`ℹ️ [Recovery] ${modelLabel} task ${taskId} already delivered via callback`);
           return;
         }
 
-        await userBalance.deductTokens(userId, cost, deductDescription, deductMeta);
-        const isTrial = await isTrialUser(userId);
-        await monitoringLoggers.logUsageEvent({
-          userId, modelKey, success: true, isTrial, isFree: isTrial, ...monitorOptions
+        await new Promise(r => setTimeout(r, interval));
+        attempts++;
+
+        const { job, state } = await fetchPendingTaskJob(pendingTask);
+        if (!job) continue;
+
+        await updatePendingVideoTask(taskId, {
+          lastState: state,
+          lastCheckedAt: new Date()
         });
 
-        await bot.telegram.sendMessage(chatId,
-          `✅ <b>${modelLabel} готово!</b>\n\n` +
-          `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
-          `${promptSnippet}\n💰 Витрачено: ${cost}⚡`,
-          { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
-        );
-        await safeSendVideo(chatId, videoUrl, {
-          caption: `${captionLine}\n\n💰 Витрачено: ${cost}⚡`,
-          ...keyboard.createBackButton('video_menu')
-        });
-        return;
-      }
+        console.log(`🔄 [Recovery] ${modelLabel} (${attempts}): taskId=${taskId} state=${state}`);
 
-      if (state === 'fail' || state === 'failed' || state === 'error') {
-        const errMsg = job.failMsg || job.failCode || 'Unknown error';
-        console.error(`❌ [Recovery] ${modelLabel} task ${taskId} failed: ${errMsg}`);
-        await bot.telegram.sendMessage(chatId,
-          `❌ ${modelLabel}: генерація не вдалась.\n${errMsg}\n\nТокени НЕ списано.`
-        );
-        return;
+        if (state === 'success' || state === 'completed') {
+          const videoUrl = await extractPendingTaskVideoUrl(taskId, job, pendingTask.pollStrategy);
+          if (!videoUrl) {
+            await bot.telegram.sendMessage(chatId,
+              `❌ ${modelLabel}: відео згенеровано, але URL не знайдено.\nTaskId: <code>${taskId}</code>\nЗверніться до підтримки.`,
+              { parse_mode: 'HTML' }
+            );
+            await updatePendingVideoTask(taskId, {
+              lastState: state,
+              failureMessage: 'Video URL not found after successful task completion',
+              lastCheckedAt: new Date()
+            });
+            return;
+          }
+
+          await deliverPendingVideoTask(pendingTask, videoUrl, 'recovery');
+          return;
+        }
+
+        if (state === 'fail' || state === 'failed' || state === 'error') {
+          const errMsg = job.failMsg || job.failCode || 'Unknown error';
+          await failPendingVideoTask(pendingTask, errMsg, 'recovery');
+          return;
+        }
+      } catch (e) {
+        console.error(`⚠️ [Recovery] ${modelLabel} poll error (${attempts}):`, e.message);
       }
-    } catch (e) {
-      console.error(`⚠️ [Recovery] ${modelLabel} poll error (${attempts}):`, e.message);
     }
+
+    console.error(`❌ [Recovery] ${modelLabel} task ${taskId} never completed`);
+    await bot.telegram.sendMessage(chatId,
+      `❌ <b>${modelLabel}: Генерація не завершилась</b>\n\n` +
+      `Ваші токени НЕ були списані.\n` +
+      `TaskId: <code>${taskId}</code>\n\n` +
+      `Зверніться до підтримки.`,
+      { parse_mode: 'HTML' }
+    );
+    await updatePendingVideoTask(taskId, {
+      status: 'failed',
+      failureMessage: 'Recovery exhausted before completion',
+      lastState: 'timeout',
+      lastCheckedAt: new Date()
+    });
+    await adminNotifier.notifyAdmin(bot, new Error(`Recovery exhausted: ${modelLabel} ${taskId}`), {
+      userId, username, action: `${modelKey}_recovery`, taskId
+    });
+  } finally {
+    activeKieRecoveryTasks.delete(taskId);
+  }
+}
+
+async function startVeoRecoveryPolling({
+  chatId,
+  userId,
+  username,
+  modelLabel,
+  taskId,
+  cost,
+  deductDescription,
+  deductMeta,
+  promptSnippet,
+  captionLine,
+  monitorOptions = {}
+}) {
+  const pendingTask = buildPendingVideoTaskPayload({
+    chatId,
+    userId,
+    username,
+    modelKey: 'veo',
+    modelLabel,
+    taskId,
+    cost,
+    deductDescription,
+    deductMeta,
+    promptSnippet,
+    captionLine,
+    pollStrategy: 'veo',
+    monitorOptions
+  });
+
+  if (activeKieRecoveryTasks.has(taskId)) {
+    console.log(`ℹ️ [Recovery] Veo task ${taskId} already active, skipping duplicate start`);
+    return;
   }
 
-  console.error(`❌ [Recovery] ${modelLabel} task ${taskId} never completed`);
-  await bot.telegram.sendMessage(chatId,
-    `❌ <b>${modelLabel}: Генерація не завершилась</b>\n\n` +
-    `Ваші токени НЕ були списані.\n` +
-    `TaskId: <code>${taskId}</code>\n\n` +
-    `Зверніться до підтримки.`,
-    { parse_mode: 'HTML' }
-  );
-  await adminNotifier.notifyAdmin(bot, new Error(`Recovery exhausted: ${modelLabel} ${taskId}`), {
-    userId, username, action: `${modelKey}_recovery`, taskId
-  });
+  activeKieRecoveryTasks.add(taskId);
+  await persistPendingVideoTask(pendingTask);
+
+  const maxRecoveryAttempts = 2160;
+  const recoveryInterval = 5000;
+  let recoveryAttempts = 0;
+
+  try {
+    while (recoveryAttempts < maxRecoveryAttempts) {
+      try {
+        if (kieCallbackDelivered.has(taskId)) {
+          console.log(`ℹ️ [Recovery] Veo task ${taskId} already delivered via callback`);
+          return;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, recoveryInterval));
+        recoveryAttempts++;
+
+        const { job, state } = await fetchPendingTaskJob(pendingTask);
+        if (!job) continue;
+
+        await updatePendingVideoTask(taskId, {
+          lastState: state,
+          lastCheckedAt: new Date()
+        });
+
+        if (recoveryAttempts % 12 === 0) {
+          console.log(`🔄 Veo recovery poll (${recoveryAttempts}/${maxRecoveryAttempts}): taskId=${taskId} state=${state}`);
+        }
+
+        if (state === 'success' || state === 'completed') {
+          const videoUrl = await extractPendingTaskVideoUrl(taskId, job, 'veo');
+          if (!videoUrl) {
+            console.error(`❌ Veo recovery: no URL after all methods for taskId=${taskId}`);
+            await updatePendingVideoTask(taskId, {
+              lastState: state,
+              failureMessage: 'Video URL not found after successful task completion',
+              lastCheckedAt: new Date()
+            });
+            await bot.telegram.sendMessage(chatId, `❌ ${modelLabel}: відео згенеровано, але URL не знайдено. Зверніться до підтримки. TaskId: ${taskId}`);
+            return;
+          }
+
+          await deliverPendingVideoTask(pendingTask, videoUrl, 'recovery');
+          return;
+        }
+
+        if (state === 'fail' || state === 'failed' || state === 'error') {
+          const errMsg = job.failMsg || job.failCode || 'Unknown error';
+          await failPendingVideoTask(pendingTask, errMsg, 'recovery');
+          return;
+        }
+      } catch (error) {
+        console.error(`⚠️ Veo recovery poll error (${recoveryAttempts}):`, error.message);
+      }
+    }
+
+    console.error(`❌ Veo recovery: task ${taskId} never completed after extended wait`);
+    await bot.telegram.sendMessage(chatId,
+      `❌ <b>${modelLabel}: Генерація не завершилась</b>\n\n` +
+      `Ваші токени НЕ були списані.\n` +
+      `TaskId: <code>${taskId}</code>\n\n` +
+      `Зверніться до підтримки якщо відео існує на kie.ai`,
+      { parse_mode: 'HTML' }
+    );
+    await updatePendingVideoTask(taskId, {
+      status: 'failed',
+      failureMessage: 'Recovery exhausted before completion',
+      lastState: 'timeout',
+      lastCheckedAt: new Date()
+    });
+    await adminNotifier.notifyAdmin(bot, new Error(`Veo recovery exhausted: ${taskId}`), {
+      userId, username, action: 'veo_generation_recovery', taskId
+    });
+  } finally {
+    activeKieRecoveryTasks.delete(taskId);
+  }
 }
 
 // ==================== KLING MOTION GENERATION FUNCTION ====================
@@ -7237,7 +8142,29 @@ async function generateKlingMotionVideo(ctx, state) {
             generationData.imageUrl,
             generationData.videoUrl,
             generationData.mode === 'pro' ? '1080p' : '720p',
-            generationData.orientation
+            generationData.orientation,
+            {
+              onTaskCreated: (taskId) => persistPendingVideoTask(buildPendingVideoTaskPayload({
+                chatId,
+                userId,
+                username,
+                modelKey: 'kling_motion',
+                modelLabel: 'Kling Motion',
+                taskId,
+                cost: motionCost,
+                deductDescription: `${modelName} generation`,
+                deductMeta: {
+                  modelKey: 'kling_motion',
+                  modelName,
+                  apiCost,
+                  mode: generationData.mode,
+                  orientation: generationData.orientation
+                },
+                promptSnippet: `⚙️ ${generationData.mode.toUpperCase()} | ${generationData.orientation}`,
+                captionLine: `🔥 Kling Motion\n⚙️ ${generationData.mode?.toUpperCase()} | ${generationData.orientation}`,
+                monitorOptions: { options: { mode: generationData.mode, orientation: generationData.orientation }, provider: 'kie' }
+              }))
+            }
           )
         : await replicate.generateVideoWithKlingMotion(
             generationData.imageUrl,
@@ -8289,7 +9216,32 @@ async function generateKlingVideo(ctx, state) {
           duration,
           generationData.aspectRatio || '16:9',
           enableSound,
-          version
+          version,
+          {
+            onTaskCreated: (taskId) => persistPendingVideoTask(buildPendingVideoTaskPayload({
+              chatId,
+              userId,
+              username,
+              modelKey,
+              modelLabel: model.name,
+              taskId,
+              cost: klingCost,
+              deductDescription: `${model.name} generation`,
+              deductMeta: {
+                modelKey,
+                modelName: model.name,
+                apiCost,
+                prompt: generationData.prompt,
+                duration,
+                hasStartImage,
+                hasEndImage,
+                generateAudio: generationData.generateAudio === true
+              },
+              promptSnippet: `⏱️ ${duration} сек | 📐 ${generationData.aspectRatio || '16:9'}`,
+              captionLine: `${model.name}\n⏱️ ${duration}сек | 📐 ${generationData.aspectRatio || '16:9'}`,
+              monitorOptions: { options: { duration, generateAudio: generationData.generateAudio === true }, provider: useKieAI ? 'kie' : 'replicate' }
+            }))
+          }
         );
       } else {
         // Replicate
@@ -8505,7 +9457,29 @@ async function generateKling3Video(ctx, state) {
         sound: generationData.generateAudio,
         multiShots: generationData.multiShots || false,
         multiPrompt: generationData.multiShots ? generationData.multiPrompt : undefined,
-        klingElements: generationData.klingElements?.length ? generationData.klingElements : undefined
+        klingElements: generationData.klingElements?.length ? generationData.klingElements : undefined,
+        onTaskCreated: (taskId) => persistPendingVideoTask(buildPendingVideoTaskPayload({
+          chatId,
+          userId,
+          username,
+          modelKey: 'kling_3',
+          modelLabel: 'Kling 3.0 Pro 💎',
+          taskId,
+          cost: kling3Cost,
+          deductDescription: `${model.name} generation`,
+          deductMeta: {
+            modelKey: 'kling_3',
+            modelName: model.name,
+            apiCost: generationData.duration * (generationData.generateAudio ? model.apiCostPerSecondAudio : model.apiCostPerSecondNoAudio),
+            prompt: generationData.prompt,
+            duration: generationData.duration,
+            hasStartImage: generationData.imageUrls?.length > 0,
+            generateAudio: generationData.generateAudio
+          },
+          promptSnippet: `⏱️ ${generationData.duration} сек | 📐 ${generationData.aspectRatio} | ${generationData.generateAudio ? '🔊' : '🔇'}`,
+          captionLine: `🎭 Kling 3.0 Pro 💎\n⏱️ ${generationData.duration}сек | 📐 ${generationData.aspectRatio} | ${generationData.generateAudio ? '🔊' : '🔇'}`,
+          monitorOptions: { options: { duration: generationData.duration, mode: generationData.mode, generateAudio: generationData.generateAudio }, provider: 'kie' }
+        }))
       });
 
       if (!result.success && result.pending && result.taskId) {
@@ -8664,7 +9638,31 @@ async function generateRunwayTurboVideo(ctx, state) {
             imageUrl: generationData.startImage || null,
             duration,
             quality: '720p',
-            aspectRatio
+            aspectRatio,
+            onTaskCreated: (taskId) => persistPendingVideoTask(buildPendingVideoTaskPayload({
+              chatId,
+              userId,
+              username,
+              modelKey: 'runway_turbo',
+              modelLabel: model.name,
+              taskId,
+              cost: runwayCost,
+              deductDescription: `${model.name} generation`,
+              deductMeta: {
+                modelKey: 'runway_turbo',
+                modelName: model.name,
+                apiCost,
+                prompt: generationData.prompt,
+                duration,
+                aspectRatio,
+                hasStartImage: true,
+                provider: providerKey
+              },
+              promptSnippet: `⏱️ ${duration} сек | 📐 ${aspectRatio}`,
+              captionLine: `🎬 Runway Turbo\n⏱️ ${duration}сек | 📐 ${aspectRatio}`,
+              isRunway: true,
+              monitorOptions: { options: { duration, aspectRatio }, provider: providerKey }
+            }))
           })
         : await replicate.generateVideoWithRunwayTurbo(
             generationData.prompt,
@@ -8902,17 +9900,42 @@ async function generateVeoVideo(ctx, state) {
               generateAudio: generateAudio,
               onTaskCreated: (taskId) => {
                 console.log(`📋 Veo: registering taskId=${taskId} in kieCallbackMap BEFORE polling`);
-                kieCallbackMap.set(taskId, {
-                  chatId, userId, username,
-                  model: 'veo', modelName: model.name,
-                  prompt: generationData.prompt,
-                  aspectRatio: generationData.aspectRatio,
-                  duration, generateAudio,
-                  veoCost, apiCost,
-                  hasStartImage, hasLastFrame,
-                  references: generationData.references?.length || 0,
-                  statusMsgId: statusMsg.message_id,
-                  createdAt: Date.now()
+                const pendingVeoTask = buildPendingVideoTaskPayload({
+                  chatId,
+                  userId,
+                  username,
+                  modelKey: 'veo',
+                  modelLabel: model.name,
+                  taskId,
+                  cost: veoCost,
+                  deductDescription: `${model.name} generation`,
+                  deductMeta: {
+                    modelKey: 'veo',
+                    modelName: model.name,
+                    apiCost,
+                    prompt: generationData.prompt,
+                    aspectRatio: generationData.aspectRatio,
+                    duration,
+                    generateAudio,
+                    hasStartImage,
+                    hasLastFrame,
+                    references: generationData.references?.length || 0,
+                    provider: providerKey
+                  },
+                  promptSnippet:
+                    `🔌 Провайдер: ${providerName}\n` +
+                    `📐 Пропорції: ${generationData.aspectRatio}\n` +
+                    `⏱️ Тривалість: ${duration} сек\n` +
+                    `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
+                    `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...`,
+                  captionLine: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...`,
+                  pollStrategy: 'veo',
+                  monitorOptions: { options: { duration, generateAudio }, provider: providerKey }
+                });
+
+                kieCallbackMap.set(taskId, buildCallbackMapEntryFromTask(pendingVeoTask));
+                persistPendingVideoTask(pendingVeoTask).catch((error) => {
+                  console.warn(`⚠️ Failed to persist Veo task ${taskId}:`, error.message);
                 });
               }
             })
@@ -8932,17 +9955,41 @@ async function generateVeoVideo(ctx, state) {
       if (!result.success && result.pending && result.taskId) {
         console.log(`⏱️ Veo task ${result.taskId} pending — starting background recovery for user ${userId}`);
 
-        kieCallbackMap.set(result.taskId, {
-          chatId, userId, username,
-          model: 'veo', modelName: model.name,
-          prompt: generationData.prompt,
-          aspectRatio: generationData.aspectRatio,
-          duration, generateAudio,
-          veoCost, apiCost,
-          hasStartImage, hasLastFrame,
-          references: generationData.references?.length || 0,
-          createdAt: Date.now()
+        const pendingVeoTask = buildPendingVideoTaskPayload({
+          chatId,
+          userId,
+          username,
+          modelKey: 'veo',
+          modelLabel: model.name,
+          taskId: result.taskId,
+          cost: veoCost,
+          deductDescription: `${model.name} generation`,
+          deductMeta: {
+            modelKey: 'veo',
+            modelName: model.name,
+            apiCost,
+            prompt: generationData.prompt,
+            aspectRatio: generationData.aspectRatio,
+            duration,
+            generateAudio,
+            hasStartImage,
+            references: generationData.references?.length || 0,
+            hasLastFrame,
+            provider: providerKey
+          },
+          promptSnippet:
+            `🔌 Провайдер: ${providerName}\n` +
+            `📐 Пропорції: ${generationData.aspectRatio}\n` +
+            `⏱️ Тривалість: ${duration} сек\n` +
+            `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
+            `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...`,
+          captionLine: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...`,
+          pollStrategy: 'veo',
+          monitorOptions: { options: { duration, generateAudio }, provider: providerKey }
         });
+
+        kieCallbackMap.set(result.taskId, buildCallbackMapEntryFromTask(pendingVeoTask));
+        await persistPendingVideoTask(pendingVeoTask);
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
           `⏳ <b>Google Veo 3.1 ще генерується...</b>\n\n` +
@@ -8952,100 +9999,19 @@ async function generateVeoVideo(ctx, state) {
           { parse_mode: 'HTML' }
         );
 
-        const recoveryTaskId = result.taskId;
-        (async () => {
-          const maxRecoveryAttempts = 2160; 
-          const recoveryInterval = 5000;
-          let recoveryAttempts = 0;
-          while (recoveryAttempts < maxRecoveryAttempts) {
-            try {
-              await new Promise(r => setTimeout(r, recoveryInterval));
-              recoveryAttempts++;
-              const job = await kieAI.fetchVeoTaskInfoExported(recoveryTaskId);
-              if (!job) continue;
-              const jobState = (job.state || job.status || '').toLowerCase();
-              if (recoveryAttempts % 12 === 0) { 
-                console.log(`🔄 Veo recovery poll (${recoveryAttempts}/${maxRecoveryAttempts}): taskId=${recoveryTaskId} state=${jobState}`);
-              }
-              if (jobState === 'success' || jobState === 'completed') {
-                let videoUrl = kieAI.extractVideoUrlExported(job);
-                console.log(`📹 Veo recovery extracted URL: ${videoUrl ? videoUrl.substring(0, 100) : 'NULL'}`);
-                // Fallback: /veo/get-1080p-video
-                if (!videoUrl) {
-                  console.log(`🔄 Veo recovery: trying get-1080p-video fallback...`);
-                  videoUrl = await kieAI.fetchVeo1080pUrlExported(recoveryTaskId);
-                  if (!videoUrl) {
-                    await new Promise(r => setTimeout(r, 90000));
-                    videoUrl = await kieAI.fetchVeo1080pUrlExported(recoveryTaskId);
-                  }
-                }
-                if (!videoUrl) {
-                  console.error(`❌ Veo recovery: no URL after all methods. Job keys: ${Object.keys(job).join(',')}`);
-                  if (job.info) console.error(`❌ Veo recovery info: ${JSON.stringify(job.info).substring(0, 500)}`);
-                  if (job.response) console.error(`❌ Veo recovery response: ${JSON.stringify(job.response).substring(0, 500)}`);
-                  if (job.resultJson) console.error(`❌ Veo recovery resultJson: ${String(job.resultJson).substring(0, 500)}`);
-                  await bot.telegram.sendMessage(chatId, `❌ Veo 3.1: відео згенеровано, але URL не знайдено. Зверніться до підтримки. TaskId: ${recoveryTaskId}`);
-                  return;
-                }
-                await userBalance.deductTokens(userId, veoCost, `${model.name} generation`, {
-                  modelKey: 'veo', modelName: model.name, apiCost: apiCost,
-                  prompt: generationData.prompt, aspectRatio: generationData.aspectRatio,
-                  duration: duration, generateAudio: generateAudio,
-                  hasStartImage: hasStartImage,
-                  references: generationData.references?.length || 0,
-                  hasLastFrame: hasLastFrame,
-                  provider: providerKey
-                });
-                const isTrialVeo = await isTrialUser(userId);
-                await monitoringLoggers.logUsageEvent({
-                  userId, modelKey: 'veo', success: true,
-                  options: { duration, generateAudio }, isTrial: isTrialVeo, isFree: isTrialVeo, provider: providerKey
-                });
-                await bot.telegram.sendMessage(
-                  chatId,
-                  `✅ <b>Google Veo 3.1 готово!</b>\n\n` +
-                  `🔌 Провайдер: ${providerName}\n` +
-                  `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
-                  `📐 Пропорції: ${generationData.aspectRatio}\n` +
-                  `⏱️ Тривалість: ${duration} сек\n` +
-                  `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
-                  `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
-                  `💾 <b>Як зберегти:</b>\n` +
-                  `1️⃣ Натисніть на відео нижче\n` +
-                  `2️⃣ Натисніть ⋮ → "Зберегти"\n\n` +
-                  `💰 Витрачено: ${veoCost}⚡`,
-                  { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
-                );
-                await safeSendVideo(chatId, videoUrl, {
-                  caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${veoCost}⚡`,
-                  ...keyboard.createBackButton('video_menu')
-                });
-                kieCallbackMap.delete(recoveryTaskId);
-                return;
-              }
-              if (jobState === 'fail' || jobState === 'failed' || jobState === 'error') {
-                const errMsg = job.failMsg || job.failCode || 'Unknown error';
-                console.error(`❌ Veo recovery: task ${recoveryTaskId} failed: ${errMsg}`);
-                await bot.telegram.sendMessage(chatId, `❌ Veo 3.1: генерація не вдалась.\n${errMsg}`);
-                kieCallbackMap.delete(recoveryTaskId);
-                return;
-              }
-            } catch (e) {
-              console.error(`⚠️ Veo recovery poll error (${recoveryAttempts}):`, e.message);
-            }
-          }
-          console.error(`❌ Veo recovery: task ${recoveryTaskId} never completed after extended wait`);
-          await bot.telegram.sendMessage(chatId,
-            `❌ <b>Google Veo 3.1: Генерація не завершилась</b>\n\n` +
-            `Ваші токени НЕ були списані.\n` +
-            `TaskId: <code>${recoveryTaskId}</code>\n\n` +
-            `Зверніться до підтримки якщо відео існує на kie.ai`,
-            { parse_mode: 'HTML' }
-          );
-          await adminNotifier.notifyAdmin(bot, new Error(`Veo recovery exhausted: ${recoveryTaskId}`), {
-            userId, username, action: 'veo_generation_recovery', taskId: recoveryTaskId
-          });
-        })();
+        startVeoRecoveryPolling({
+          chatId,
+          userId,
+          username,
+          modelLabel: model.name,
+          taskId: result.taskId,
+          cost: veoCost,
+          deductDescription: `${model.name} generation`,
+          deductMeta: pendingVeoTask.deductMeta,
+          promptSnippet: pendingVeoTask.promptSnippet,
+          captionLine: pendingVeoTask.captionLine,
+          monitorOptions: pendingVeoTask.monitorOptions
+        });
         return;
       }
 
@@ -9229,7 +10195,31 @@ async function generateSoraVideo(ctx, state) {
         ? await kieAI.generateSora2KieAI(generationData.prompt, {
             imageUrl: generationData.inputReference || null,
             duration,
-            aspectRatio
+            aspectRatio,
+            onTaskCreated: (taskId) => persistPendingVideoTask(buildPendingVideoTaskPayload({
+              chatId,
+              userId,
+              username,
+              modelKey: 'sora_2',
+              modelLabel: 'OpenAI Sora 2',
+              taskId,
+              cost: soraCost,
+              deductDescription: `${model.name} generation`,
+              deductMeta: {
+                modelKey: 'sora_2',
+                modelName: model.name,
+                apiCost,
+                prompt: generationData.prompt,
+                duration,
+                aspectRatio,
+                hasStartImage: hasReference,
+                provider: providerKey,
+                soraType
+              },
+              promptSnippet: `📐 ${aspectRatio} | ⏱️ ${duration} сек`,
+              captionLine: `${model.name}\n📐 ${aspectRatio} | ⏱️ ${duration}сек`,
+              monitorOptions: { options: { duration, aspectRatio }, provider: providerKey }
+            }))
           })
         : await replicate.generateVideoWithSora2(
             generationData.prompt,
@@ -9381,7 +10371,8 @@ bot.action(/^(suno|udio|elevenlabs)$/, async (ctx) => {
 
 // Navigation
 bot.action('welcome_start', async (ctx) => {
-  await ctx.answerCbQuery();
+  if (!(await requirePrivateAction(ctx))) return;
+  await safeAnswerCbQuery(ctx);
   try {
     await ctx.editMessageReplyMarkup();
   } catch (error) {
@@ -9392,42 +10383,66 @@ bot.action('welcome_start', async (ctx) => {
 });
 
 bot.action('audio_menu', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.reply('🎙️ AI audio\n\nChoose an audio workflow below.', keyboard.createInlineMenu(models.audio.models, 2));
+  if (!(await requirePrivateAction(ctx))) return;
+  await safeAnswerCbQuery(ctx);
+  await editOrReplyInlineMenu(
+    ctx,
+    buildSectionMenuMessage(ctx, 'sections.audioTitle', 'sections.audioPrompt'),
+    keyboard.createInlineMenu(models.audio.models, 2)
+  );
 });
 
 bot.action('main_menu', async (ctx) => {
-  await ctx.answerCbQuery();
+  if (!(await requirePrivateAction(ctx))) return;
+  await safeAnswerCbQuery(ctx);
   const userId = ctx.from.id;
   userState.delete(userId);
   userCurrentModel.delete(userId);
   imageGenState.delete(userId);
-  await ctx.reply('🏠 Main menu', keyboard.createMainMenu());
+  const user = await userBalance.getUser(ctx.from.id, ctx.from);
+  await sendMainMenu(ctx, user);
 });
 
 bot.action('design_menu', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.reply('🎨 AI design\n\nChoose an image workflow below.', keyboard.createInlineMenu(getDesignModelsWithEffectiveCost(ctx.from.id), 1));
+  if (!(await requirePrivateAction(ctx))) return;
+  await safeAnswerCbQuery(ctx);
+  await editOrReplyInlineMenu(
+    ctx,
+    buildSectionMenuMessage(ctx, 'sections.imagesTitle', 'sections.imagesPrompt'),
+    keyboard.createInlineMenu(getDesignModelsWithEffectiveCost(ctx.from.id), 1)
+  );
 });
 
 bot.action('video_menu', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.reply('🎬 Video creation\n\nChoose a video workflow below.', keyboard.createInlineMenu(getVideoModelsForUser(ctx.from.id), 1));
+  if (!(await requirePrivateAction(ctx))) return;
+  await safeAnswerCbQuery(ctx);
+  await editOrReplyInlineMenu(
+    ctx,
+    buildSectionMenuMessage(ctx, 'sections.videoTitle', 'sections.videoPrompt'),
+    keyboard.createInlineMenu(getVideoModelsForUser(ctx.from.id), 1)
+  );
 });
 
 bot.action('profile_menu', async (ctx) => {
-  await ctx.answerCbQuery();
+  if (!(await requirePrivateAction(ctx))) return;
+  await safeAnswerCbQuery(ctx);
   await showProfile(ctx);
 });
 
 // Tokens purchase
 bot.action('buy_subscription', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.reply(`⚡ Buy tokens\n\nChoose a package below.`, keyboard.createSubscriptionsMenu(ctx.from.id, ctx));
+  if (!(await requirePrivateAction(ctx))) return;
+  await safeAnswerCbQuery(ctx);
+  await editOrReplyInlineMenu(
+    ctx,
+    t(ctx, 'subscription.title'),
+    keyboard.createSubscriptionsMenu(ctx.from.id, ctx)
+  );
 });
 
 bot.action('community', async (ctx) => {
-  await ctx.answerCbQuery();
+  if (!(await requirePrivateAction(ctx))) return;
+  await safeAnswerCbQuery(ctx);
   const message = `👥 <b>Community</b>
 
 This open-source bot does not ship with personal social links.
@@ -9436,25 +10451,26 @@ For support, contact: ${SUPPORT_USERNAME}
 
 You can add your own community links in the bot flow before publishing.`;
 
-  await ctx.reply(message, { parse_mode: 'HTML', disable_web_page_preview: false, ...keyboard.createBackButton() });
+  await editOrReplyInlineMenu(ctx, message, {
+    parse_mode: 'HTML',
+    disable_web_page_preview: false,
+    ...keyboard.createBackButton()
+  });
 });
 
 bot.action('legal_info', async (ctx) => {
-  await ctx.answerCbQuery();
-  const message = `📋 <b>Юридична інформація</b>
+  if (!(await requirePrivateAction(ctx))) return;
+  await safeAnswerCbQuery(ctx);
+  const message = `${t(ctx, 'legalInfo.title')}\n\n${t(ctx, 'legalInfo.prompt')}`;
 
-Перед оплатою будь ласка ознайомтесь з нашими юридичними документами:
-
-📋 <b>Угода користувача</b> - регулює взаємовідносини між мерчантом та власником картки
-🔒 <b>Політика приватності</b> - описує як ми обробляємо вашу персональну інформацію
-
-Натисніть на кнопку нижче щоб ознайомитися з повним текстом документів:`;
-
-  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createLegalMenu(ctx) });
+  await editOrReplyInlineMenu(ctx, message, {
+    parse_mode: 'HTML',
+    ...keyboard.createLegalMenu(ctx)
+  });
 });
 
 bot.action(/^sub_(starter|basic|pro|premium|starter_test)$/, async (ctx) => {
-  await ctx.answerCbQuery();
+  await safeAnswerCbQuery(ctx);
 
   const planKey = ctx.match[1];
   const sub = models.subscriptions[planKey];
@@ -9462,12 +10478,12 @@ bot.action(/^sub_(starter|basic|pro|premium|starter_test)$/, async (ctx) => {
   const telegramId = ctx.from.id;
 
   if (!sub) {
-    await ctx.reply('❌ План не знайдено');
+    await ctx.reply(t(ctx, 'errors.planNotFound'));
     return;
   }
 
   if (sub.adminOnly && userId !== getAdminTelegramId()) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
 
@@ -9480,21 +10496,7 @@ bot.action(/^sub_(starter|basic|pro|premium|starter_test)$/, async (ctx) => {
     ? Math.round((1 - pricePerToken / starterPricePerToken) * 100)
     : 0;
 
-  let message = `⚡ <b>Пакет ${sub.name}</b> — $${sub.priceUSD}\n\n`;
-  message += `💎 Доступ до всіх моделей\n`;
-  message += `⏰ Токени НЕ згорають\n`;
-  message += `✨ Комбінуйте як завгодно!\n\n`;
-
-  if (planKey !== 'starter' && savingsPercent > 0) {
-    message += `🔥 <b>Економія ${savingsPercent}%</b> порівняно зі STARTER!\n\n`;
-  }
-
-  message += `💰 <b>Вартість:</b> $${sub.priceUSD} — ${sub.tokensWayForPay || sub.tokens}⚡ токенів\n`;
-  message += `<i>Також можна розрахуватись Telegram Stars:</i>\n`;
-  message += `⭐ ${sub.price}⭐ — ${sub.tokens}⚡ токенів\n\n`;
-  message += `💡 <i>Чим більший пакет — тим вигідніше!</i>\n\n`;
-  message += `📱 Оберіть спосіб оплати 👇`;
-
+  const message = buildSubscriptionPlanMessage(ctx, sub, planKey, savingsPercent);
   await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createPaymentMenu(sub.price, planKey, userId, telegramId, ctx) });
 });
 
@@ -9625,6 +10627,17 @@ bot.on('text', async (ctx) => {
   let text = ctx.message.text;  
 
   if (text.startsWith('/')) return;
+  if (isNavigationMenuText(ctx, text)) return;
+
+  if (currentModel === 'claude_text' || state?.action === 'claude_text') {
+    runBackgroundTask(() => handleClaudeText(ctx, text), 'claude_text_direct');
+    return;
+  }
+
+  if (currentModel === 'claude_voice' || state?.action === 'claude_voice') {
+    runBackgroundTask(() => handleClaudeText(ctx, text), 'claude_voice_text_fallback');
+    return;
+  }
 
   if (state?.action === 'veo_generation' && (state?.step === 'waiting_start_image' || state?.step === 'ask_start_image' || state?.step === 'ask_last_frame' || state?.step === 'waiting_last_frame')) {
     if (!text || text.length < 5) {
@@ -9718,7 +10731,25 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  if (state?.action === 'seedance_generation' && state?.step === 'waiting_prompt') {
+  if (state?.action === 'seedance_generation' && state?.step === 'waiting_reference_video') {
+    await ctx.reply(
+      '🎞️ Для цього кроку потрібно надіслати референс-відео як відео-повідомлення або повернутись назад.\n\n' +
+      'Якщо відео не потрібне, натисніть "Без референс-відео".',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (state?.action === 'seedance_generation' && state?.step === 'waiting_reference_audio') {
+    await ctx.reply(
+      '🎵 Для цього кроку потрібно завантажити референс-аудіо або пропустити його.\n\n' +
+      'Якщо аудіо не потрібне, натисніть "Без референс-аудіо".',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (isSeedanceWaitingForPrompt(state, currentModel)) {
     if (!text || text.length < 5) {
       await ctx.reply(
         '⚠️ Промпт занадто короткий!\n\n' +
@@ -9728,14 +10759,21 @@ bot.on('text', async (ctx) => {
       return;
     }
 
+    const seedanceState = {
+      ...(state || {}),
+      action: 'seedance_generation',
+      modelKey: state?.modelKey || currentModel || 'seedance_2'
+    };
+
+    userCurrentModel.set(userId, seedanceState.modelKey);
     userState.set(userId, {
-      ...state,
+      ...seedanceState,
       prompt: text,
       step: 'ready_to_generate'
     });
 
     await ctx.reply('🚀 Промпт збережено! Починаємо генерацію Seedance...');
-    runBackgroundTask(() => generateSeedanceVideo(ctx, { ...state, prompt: text }), 'seedance_generate_text');
+    runBackgroundTask(() => generateSeedanceVideo(ctx, { ...seedanceState, prompt: text }), 'seedance_generate_text');
     return;
   }
 
@@ -10041,8 +11079,8 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  if (!currentModel && !state?.action) {
-    await ctx.reply('Будь ласка, спочатку виберіть модель з меню 👇', keyboard.createMainMenu());
+  if (!currentModel && !state?.action && !state?.step) {
+    await ctx.reply(t(ctx, 'errors.selectModelFirst'), keyboard.createMainMenu(resolveLocale(ctx)));
     return;
   }
 
@@ -10463,6 +11501,7 @@ bot.on('text', async (ctx) => {
     seedream_4k: () => handleImageGeneration(ctx, text, 'seedream_4k'),
     seedream_5_lite: () => handleImageGeneration(ctx, text, 'seedream_5_lite'),
     ideogram: () => handleImageGeneration(ctx, text, 'ideogram'),
+    z_image: () => handleImageGeneration(ctx, text, 'z_image'),
     kling: () => handleVideoGeneration(ctx, text, 'kling'),
     kling_v2_6: () => handleVideoGeneration(ctx, text, 'kling_v2_6'),
     runway_gen4: () => handleVideoGeneration(ctx, text, 'runway_gen4'),
@@ -10478,32 +11517,76 @@ bot.on('text', async (ctx) => {
   }
 });
 
+bot.on(['audio', 'document'], async (ctx, next) => {
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (state?.action === 'seedance_generation' && state?.step === 'waiting_reference_video') {
+    await ctx.reply(
+      '❌ Для Seedance reference video надішліть файл саме як відео-повідомлення, не як document.',
+      keyboard.createBackButton('video_menu')
+    );
+    return;
+  }
+
+  if (state?.action === 'seedance_generation' && state?.step === 'waiting_reference_audio') {
+    const audioUrl = await getAudioUrl(ctx);
+    if (!audioUrl) {
+      await ctx.reply(
+        '❌ Надішліть аудіо-файл у форматі MP3, WAV, OGG, AAC або M4A/MP4.',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const nextState = {
+      ...state,
+      referenceAudioUrls: [audioUrl],
+      step: 'waiting_prompt'
+    };
+
+    userState.set(userId, nextState);
+    await promptSeedancePromptStep(ctx, nextState);
+    return;
+  }
+
+  return next();
+});
+
 bot.on('voice', async (ctx) => {
   const userId = ctx.from.id;
   const currentModel = userCurrentModel.get(userId);
 
   if (currentModel !== 'claude_voice') {
-    await ctx.reply('Спочатку активуйте голосовий режим через "💡 Базові помічники" → 🎙️ Говоріть');
+    await ctx.reply(t(ctx, 'assistants.activateVoiceFirst'));
     return;
   }
 
-  const statusMsg = await ctx.reply('🎙️ Розпізнаю голос...');
+  const statusMsg = await ctx.reply('🎙️ Transcribing voice...');
 
   try {
     const fileLink = await ctx.telegram.getFileLink(ctx.message.voice.file_id);
     const transcription = await groqWhisper.transcribeVoice(fileLink.href);
 
     if (!transcription.success) {
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка розпізнавання: ${transcription.error}`);
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Transcription failed: ${transcription.error}`);
       return;
     }
 
-    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `📝 Розпізнано: "${transcription.text}"\n\n🤔 Думаю...`);
-    runBackgroundTask(() => handleClaudeText(ctx, transcription.text), 'claude_voice');
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      statusMsg.message_id,
+      null,
+      `📝 Recognized: "${transcription.text}"\n\n${t(ctx, 'assistants.thinking')}`
+    );
+    runBackgroundTask(
+      () => handleClaudeText(ctx, transcription.text, { statusMessageId: statusMsg.message_id }),
+      'claude_voice'
+    );
 
   } catch (error) {
     console.error('Voice processing error:', error);
-    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Помилка обробки голосу. Спробуйте ще раз.');
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Voice processing failed. Please try again.');
   }
 });
 
@@ -10520,7 +11603,12 @@ bot.on('photo', async (ctx) => {
     hasState: !!state
   });
 
-  if (state?.action === 'seedance_generation' && state?.step === 'waiting_prompt') {
+  if (currentModel === 'claude_vision' || state?.action === 'claude_vision') {
+    runBackgroundTask(() => handleClaudeVision(ctx), 'claude_vision_photo');
+    return;
+  }
+
+  if (isSeedanceWaitingForPrompt(state, currentModel)) {
     await ctx.reply(
       '✍️ Для Seedance зараз потрібен текстовий промпт.\n\n' +
       'Надішліть опис сцени текстом.',
@@ -10908,6 +11996,10 @@ bot.on('photo', async (ctx) => {
   }
 
 
+  if (state?.action === 'creative_generation' && state?.step === 'processing') {
+    return;
+  }
+
   if (state?.creative && state?.step === 'waiting_photo') {
     const imageUrl = await getImageUrl(ctx);
     const handled = await handleCreativePhoto(ctx, imageUrl);
@@ -11065,7 +12157,7 @@ bot.on('photo', async (ctx) => {
   }
 
   if (currentModel === 'image') {
-    console.log(`🖼️ Image analysis mode selected, redirecting to Claude vision`);
+    console.log('🖼️ Image analysis mode selected, redirecting to Gemini vision');
     runBackgroundTask(() => handleClaudeVision(ctx), 'claude_vision_image_mode');
     return;
   }
@@ -11217,7 +12309,7 @@ bot.on('photo', async (ctx) => {
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
   } else {
-    await ctx.reply('Для аналізу зображень виберіть режим "💡 Claude" → "🖼️ Завантажте зображення"', keyboard.createGPTActionsMenu(models.gpt.actions));
+    await ctx.reply(t(ctx, 'assistants.imageModeHint'), keyboard.createGPTActionsMenu(models.gpt.actions));
   }
 });
 
@@ -11232,6 +12324,26 @@ bot.on('video', async (ctx) => {
     step: state?.step,
     hasImageUrl: !!state?.imageUrl
   });
+
+  if (state?.action === 'seedance_generation' && state?.step === 'waiting_reference_video') {
+    const videoUrl = await getVideoUrl(ctx);
+    if (!videoUrl) {
+      await ctx.reply('❌ Не вдалося отримати reference video. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    const nextState = {
+      ...state,
+      referenceVideoUrls: [videoUrl],
+      inputVideoDuration: Math.max(0, Number(ctx.message?.video?.duration || 0)),
+      inputType: 'with_video_input',
+      step: 'select_audio'
+    };
+
+    userState.set(userId, nextState);
+    await promptSeedanceAudioStep(ctx, nextState);
+    return;
+  }
 
   if (state?.action === 'kling_3_generation' && state?.step === 'waiting_element_media' && state?.currentElement) {
     const videoUrl = await getVideoUrl(ctx);
@@ -11470,18 +12582,53 @@ async function handleMediaGroup(ctx, group) {
   }
 }
 
-async function getImageUrl(ctx) {
+function buildTelegramFileAccessUrl(filePath, access = 'proxy') {
+  return access === 'direct'
+    ? getTelegramFileUrl(filePath)
+    : buildTelegramFileProxyUrl(filePath);
+}
+
+async function getImageUrl(ctx, access = 'proxy') {
   if (!ctx.message?.photo) return null;
   const photo = ctx.message.photo[ctx.message.photo.length - 1];
   const file = await ctx.telegram.getFile(photo.file_id);
-  return buildTelegramFileProxyUrl(file.file_path);
+  return buildTelegramFileAccessUrl(file.file_path, access);
 }
 
+function isSupportedVideoDocument(document) {
+  if (!document) return false;
+  const mimeType = String(document.mime_type || '').toLowerCase();
+  const fileName = String(document.file_name || '').toLowerCase();
+  return mimeType.startsWith('video/') || /\.(mp4|mov|mkv|webm)$/i.test(fileName);
+}
 
-async function getVideoUrl(ctx) {
-  if (!ctx.message?.video) return null;
-  const file = await ctx.telegram.getFile(ctx.message.video.file_id);
-  return buildTelegramFileProxyUrl(file.file_path);
+async function getVideoUrl(ctx, access = 'proxy') {
+  const fileId = ctx.message?.video?.file_id
+    || (isSupportedVideoDocument(ctx.message?.document) ? ctx.message.document.file_id : null);
+
+  if (!fileId) return null;
+
+  const file = await ctx.telegram.getFile(fileId);
+  return buildTelegramFileAccessUrl(file.file_path, access);
+}
+
+function isSupportedAudioDocument(document) {
+  if (!document) return false;
+  const mimeType = String(document.mime_type || '').toLowerCase();
+  const fileName = String(document.file_name || '').toLowerCase();
+
+  return mimeType.startsWith('audio/')
+    || /\.(mp3|wav|ogg|oga|aac|m4a|mp4)$/i.test(fileName);
+}
+
+async function getAudioUrl(ctx, access = 'proxy') {
+  const fileId = ctx.message?.audio?.file_id
+    || (isSupportedAudioDocument(ctx.message?.document) ? ctx.message.document.file_id : null);
+
+  if (!fileId) return null;
+
+  const file = await ctx.telegram.getFile(fileId);
+  return buildTelegramFileAccessUrl(file.file_path, access);
 }
 
 
@@ -12441,8 +13588,8 @@ async function generateSeedanceVideo(ctx, state) {
   const resolution = state.resolution || '480p';
   const aspectRatio = state.aspectRatio || '16:9';
   const generateAudio = state.generateAudio === true;
-  const seedanceCost = state.seedanceCost || getEffectiveSeedanceCost(userId, modelKey, duration, resolution);
-  const apiCost = getSeedanceApiCostUSD(userId, modelKey, duration, resolution);
+  const seedanceCost = state.seedanceCost || getEffectiveSeedanceCost(userId, modelKey, duration, resolution, state);
+  const apiCost = getSeedanceApiCostUSD(userId, modelKey, duration, resolution, state);
 
   if (!(await userBalance.hasTokens(userId, seedanceCost))) {
     await showInsufficientTokens(ctx, seedanceCost);
@@ -12474,7 +13621,34 @@ async function generateSeedanceVideo(ctx, state) {
         resolution,
         aspectRatio,
         duration,
-        generateAudio
+        generateAudio,
+        referenceImageUrls: generationData.referenceImageUrls || generationData.imageUrls || [],
+        referenceVideoUrls: generationData.referenceVideoUrls || [],
+        referenceAudioUrls: generationData.referenceAudioUrls || [],
+        onTaskCreated: (taskId) => persistPendingVideoTask(buildPendingVideoTaskPayload({
+          chatId,
+          userId,
+          username,
+          modelKey,
+          modelLabel: model.name,
+          taskId,
+          cost: seedanceCost,
+          deductDescription: `${model.name} generation`,
+          deductMeta: {
+            modelKey,
+            modelName: model.name,
+            apiCost,
+            prompt: generationData.prompt,
+            duration,
+            resolution,
+            aspectRatio,
+            generateAudio,
+            provider: 'kie'
+          },
+          promptSnippet: `🖥️ ${resolution} | ⏱️ ${duration} сек | 📐 ${aspectRatio}`,
+          captionLine: `${model.name}\n🖥️ ${resolution} | ⏱️ ${duration}сек | 📐 ${aspectRatio}`,
+          monitorOptions: { options: { duration, resolution, aspectRatio, generateAudio }, provider: 'kie' }
+        }))
       });
 
       if (!result.success && result.pending && result.taskId) {
@@ -12613,9 +13787,11 @@ async function generateSeedanceVideo(ctx, state) {
 
 // ==================== SPECIFIC HANDLERS ====================
 
-async function handleClaudeText(ctx, text) {
+async function handleClaudeText(ctx, text, options = {}) {
   const userId = ctx.from.id;
   const textModel = models.gpt.actions.find(a => a.key === 'text');
+  const statusMessageId = options.statusMessageId || null;
+  let statusMsg = statusMessageId ? { message_id: statusMessageId } : null;
   
   if (!textModel || !(await userBalance.hasTokens(userId, textModel.cost))) {
     await showInsufficientTokens(ctx, textModel.cost);
@@ -12623,22 +13799,36 @@ async function handleClaudeText(ctx, text) {
   }
   
   try {
-    const statusMsg = await ctx.reply('🤔 Думаю...');
+    if (!statusMsg) {
+      statusMsg = await ctx.reply(t(ctx, 'assistants.thinking'));
+    }
     const history = await userBalance.getConversationHistory(userId);
     const response = await claude.continueConversation(text, history);
     
     if (response.success) {
       await userBalance.saveConversationMessage(userId, 'user', text);
       await userBalance.saveConversationMessage(userId, 'assistant', response.text);
-      await userBalance.deductTokens(userId, textModel.cost, 'Claude текстова генерація', { modelKey: 'claude_text', modelName: 'Claude Sonnet 4.5', apiCost: textModel.apiCost });
+      await userBalance.deductTokens(userId, textModel.cost, 'Gemini text response', {
+        modelKey: 'claude_text',
+        modelName: response.modelLabel || 'Gemini',
+        apiCost: textModel.apiCost
+      });
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       await ctx.reply(response.text);
     } else {
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка: ${response.error}`);
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Error: ${response.error}`);
     }
   } catch (error) {
-    console.error('Claude text error:', error);
-    await ctx.reply('❌ Сталася помилка. Спробуйте ще раз.');
+    console.error('Gemini assistant text error:', error);
+    if (statusMsg?.message_id) {
+      try {
+        await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, t(ctx, 'errors.generic'));
+        return;
+      } catch (editError) {
+        console.error('Gemini assistant status update error:', editError);
+      }
+    }
+    await ctx.reply(t(ctx, 'errors.generic'));
   }
 }
 
@@ -12652,25 +13842,29 @@ async function handleClaudeVision(ctx) {
   }
 
   try {
-    const statusMsg = await ctx.reply('👀 Аналізую зображення...');
-    const imageUrl = await getImageUrl(ctx);
+    const statusMsg = await ctx.reply(t(ctx, 'assistants.analyzingImage'));
+    const imageUrl = await getImageUrl(ctx, 'direct');
     const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBase64 = Buffer.from(imageResponse.data).toString('base64');
-    const prompt = ctx.message.caption || 'Опишіть це зображення детально.';
+    const prompt = ctx.message.caption || 'Describe this image in detail.';
     const response = await claude.analyzeImageWithClaude(imageBase64, prompt, 'image/jpeg');
 
     if (response.success) {
-      await userBalance.saveConversationMessage(userId, 'user', `[Зображення] ${prompt}`);
+      await userBalance.saveConversationMessage(userId, 'user', `[Image] ${prompt}`);
       await userBalance.saveConversationMessage(userId, 'assistant', response.text);
-      await userBalance.deductTokens(userId, model.cost, 'Claude аналіз зображення', { modelKey: 'claude_vision', modelName: 'Claude Vision', apiCost: model.apiCost });
+      await userBalance.deductTokens(userId, model.cost, 'Gemini image analysis', {
+        modelKey: 'claude_vision',
+        modelName: response.modelLabel || 'Gemini',
+        apiCost: model.apiCost
+      });
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       await ctx.reply(response.text);
     } else {
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка: ${response.error}`);
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Error: ${response.error}`);
     }
   } catch (error) {
-    console.error('Claude vision error:', error);
-    await ctx.reply('❌ Помилка при аналізі зображення.');
+    console.error('Gemini vision error:', error);
+    await ctx.reply('❌ Image analysis failed. Please try again.');
   }
 }
 
@@ -13629,8 +14823,10 @@ async function startBot() {
       next();
     });
 
-    app.get('/telegram/file/:filePath', async (req, res) => {
-      const filePath = req.params.filePath;
+    app.get('/telegram/file/*filePath', async (req, res) => {
+      const rawFilePath = req.params.filePath;
+      const joinedPath = Array.isArray(rawFilePath) ? rawFilePath.join('/') : rawFilePath;
+      const filePath = joinedPath ? decodeURIComponent(joinedPath) : '';
       const { expires, signature } = req.query;
 
       if (!filePath || isExpired(expires) || !verifyProxySignature(filePath, expires, signature)) {
@@ -13680,8 +14876,8 @@ async function startBot() {
     const wayforpayWebhook = createWayForPayRouter(bot);
     app.use('/webhook', wayforpayWebhook);
 
-    // ==================== KIE.AI WEBHOOK (Veo 3.1 callback) ====================
-    app.post('/webhook/kie-ai', express.json(), async (req, res) => {
+    // ==================== KIE.AI WEBHOOKS ====================
+    const handleKieWebhook = async (req, res) => {
       try {
         const body = req.body;
         const taskId = body?.data?.taskId;
@@ -13695,6 +14891,36 @@ async function startBot() {
 
         if (!taskId) {
           console.warn('⚠️ KIE.AI webhook: no taskId in body');
+          return res.status(200).json({ ok: true });
+        }
+
+        const persistedTask = await getPendingVideoTask(taskId);
+        if (persistedTask && persistedTask.status !== 'pending') {
+          return res.status(200).json({ ok: true });
+        }
+
+        if (persistedTask?.status === 'pending') {
+          if (code !== 200) {
+            await failPendingVideoTask(persistedTask, msg || body?.data?.failMsg || 'Unknown error', 'webhook');
+            return res.status(200).json({ ok: true });
+          }
+
+          let videoUrl = await extractPendingTaskVideoUrl(taskId, body?.data, persistedTask.pollStrategy);
+          if (!videoUrl) {
+            const { job, state } = await fetchPendingTaskJob(persistedTask);
+            videoUrl = await extractPendingTaskVideoUrl(taskId, job, persistedTask.pollStrategy);
+            await updatePendingVideoTask(taskId, {
+              lastState: state,
+              lastCheckedAt: new Date()
+            });
+          }
+
+          if (!videoUrl) {
+            console.error(`❌ KIE.AI webhook: no video URL for persisted task ${taskId}`);
+            return res.status(200).json({ ok: true });
+          }
+
+          await deliverPendingVideoTask(persistedTask, videoUrl, 'webhook');
           return res.status(200).json({ ok: true });
         }
 
@@ -13780,7 +15006,10 @@ async function startBot() {
         console.error('❌ KIE.AI webhook error:', error.message);
         return res.status(200).json({ ok: true });
       }
-    });
+    };
+
+    app.post('/webhook/kie-ai', express.json(), handleKieWebhook);
+    app.post('/webhook/kie-ai-runway', express.json(), handleKieWebhook);
 
     // ✅ Admin routes (protected by ADMIN_TOKEN)
     app.use('/admin', adminRoutes);
@@ -13795,7 +15024,7 @@ async function startBot() {
     // ==================== PAGES ====================
 
     // ✅ Stripe checkout page
-    app.get('/pay/stripe', (req, res) => {
+    app.get('/pay/stripe', async (req, res) => {
       const plan = req.query.plan;
 
       console.log(`📄 Stripe checkout page requested: plan=${plan}`);
@@ -13804,9 +15033,8 @@ async function startBot() {
         return res.status(400).send('План не обрано');
       }
 
-      const filePath = __dirname + '/public/stripe-checkout.html';
-      console.log(`📂 Sending file: ${filePath}`);
-      res.sendFile(filePath);
+      console.log('📂 Sending templated file: public/stripe-checkout.html');
+      await sendTemplatedPublicHtml(res, 'public/stripe-checkout.html');
     });
 
     // ✅ Stripe checkout route
@@ -13875,7 +15103,7 @@ async function startBot() {
     });
 
     // ✅ LiqPay checkout page
-    app.get('/pay/liqpay', (req, res) => {
+    app.get('/pay/liqpay', async (req, res) => {
       const plan = req.query.plan;
 
       console.log(`📄 LiqPay checkout page requested: plan=${plan}`);
@@ -13884,9 +15112,8 @@ async function startBot() {
         return res.status(400).send('План не обрано');
       }
 
-      const filePath = __dirname + '/public/liqpay-checkout.html';
-      console.log(`📂 Sending file: ${filePath}`);
-      res.sendFile(filePath);
+      console.log('📂 Sending templated file: public/liqpay-checkout.html');
+      await sendTemplatedPublicHtml(res, 'public/liqpay-checkout.html');
     });
 
     // ✅ LiqPay checkout API
@@ -13980,7 +15207,7 @@ async function startBot() {
     });
 
     // ✅ WayForPay checkout page
-    app.get('/pay/wayforpay', (req, res) => {
+    app.get('/pay/wayforpay', async (req, res) => {
       const plan = req.query.plan;
 
       console.log(`📄 WayForPay checkout page requested: plan=${plan}`);
@@ -13989,9 +15216,8 @@ async function startBot() {
         return res.status(400).send('План не обрано');
       }
 
-      const filePath = __dirname + '/public/wayforpay-checkout.html';
-      console.log(`📂 Sending file: ${filePath}`);
-      res.sendFile(filePath);
+      console.log('📂 Sending templated file: public/wayforpay-checkout.html');
+      await sendTemplatedPublicHtml(res, 'public/wayforpay-checkout.html');
     });
 
     // ✅ WayForPay checkout API
@@ -15169,7 +16395,7 @@ async function startBot() {
       }
     });
 
-    const botUsername = process.env.BOT_USERNAME || 'neuro_lab_ai_bot';
+    const botUsername = getBotUsername();
     const botRedirectUrl = `https://t.me/${botUsername}`;
 
     app.all('/payment/success', (req, res) => {
@@ -15239,6 +16465,10 @@ async function startBot() {
     // ==================== START BOT ====================
     await bot.launch();
 
+    if (dbConnected) {
+      await resumePendingKieVideoTasks();
+    }
+
     process.once('SIGINT', async () => {
       console.log('\n🛑 Stopping bot...');
       await db.disconnect();
@@ -15264,6 +16494,10 @@ bot.catch((err, ctx) => {
     return;
   }
 
+  if (isExpiredCallbackQueryError(err)) {
+    return;
+  }
+
   console.error('Bot error:', err);
-  ctx.reply(`❌ Сталася помилка. Спробуйте ще раз або зверніться до підтримки. ${SUPPORT_USERNAME}`);
+  ctx.reply(t(ctx, 'errors.genericSupport', { supportUsername: SUPPORT_USERNAME }));
 });

@@ -99,7 +99,7 @@
     const params = new URLSearchParams(window.location.search);
     const planKey = params.get('plan');
     const userId = params.get('userId') || params.get('tg_id');
-    const botUsername = window.BOT_USERNAME || 'your_bot_username';
+    const botUsername = String(window.BOT_USERNAME || '').replace(/^@/, '');
     let plans = {};
 
     function showError(message) {
@@ -188,6 +188,11 @@
 
       if (window.history.length > 1) {
         window.history.back();
+        return;
+      }
+
+      if (!botUsername) {
+        showError('Bot username is not configured. Open the bot manually in Telegram.');
         return;
       }
 

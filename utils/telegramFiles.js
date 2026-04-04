@@ -23,6 +23,40 @@ function getFileProxySecret() {
   return process.env.FILE_PROXY_SECRET || getTelegramBotToken();
 }
 
+function extractTelegramFilePathFromProxyUrl(fileUrl) {
+  if (!fileUrl || typeof fileUrl !== 'string') {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(fileUrl);
+    const marker = '/telegram/file/';
+    const pathIndex = parsed.pathname.indexOf(marker);
+
+    if (pathIndex === -1) {
+      return null;
+    }
+
+    const encodedPath = parsed.pathname.slice(pathIndex + marker.length);
+    if (!encodedPath) {
+      return null;
+    }
+
+    return decodeURIComponent(encodedPath);
+  } catch (error) {
+    return null;
+  }
+}
+
+function resolveServerSideTelegramFileUrl(fileUrl) {
+  const filePath = extractTelegramFilePathFromProxyUrl(fileUrl);
+  if (!filePath) {
+    return fileUrl;
+  }
+
+  return getTelegramFileUrl(filePath);
+}
+
 function signProxyPayload(filePath, expiresAt) {
   const secret = getFileProxySecret();
   return crypto
@@ -75,8 +109,10 @@ function isExpired(expiresAt) {
 module.exports = {
   DEFAULT_PROXY_TTL_SECONDS,
   buildTelegramFileProxyUrl,
+  extractTelegramFilePathFromProxyUrl,
   getTelegramBotToken,
   getTelegramFileUrl,
   isExpired,
+  resolveServerSideTelegramFileUrl,
   verifyProxySignature
 };

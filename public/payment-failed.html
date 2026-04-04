@@ -91,8 +91,12 @@
   </main>
 
   <script>
-    const botUsername = window.BOT_USERNAME || 'your_bot_username';
+    const botUsername = String(window.BOT_USERNAME || '').replace(/^@/, '');
     function goToBot() {
+      if (!botUsername) {
+        return;
+      }
+
       window.location.href = `https://t.me/${botUsername}`;
     }
   </script>

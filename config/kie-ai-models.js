@@ -322,7 +322,7 @@ module.exports = {
         '720p': { usd_per_sec: 0.205, credits_per_sec: 41 }
       },
       with_video_input: {
-        '480p': { usd_per_sec: 0.057, credits_per_sec: 11.5 },
+        '480p': { usd_per_sec: 0.0575, credits_per_sec: 11.5 },
         '720p': { usd_per_sec: 0.125, credits_per_sec: 25 }
       }
     },
@@ -336,7 +336,7 @@ module.exports = {
       supports_reference_audio: true,
       supports_last_frame: true
     },
-    notes: 'KIE.AI only. Telegram flow currently uses text-to-video / no-video-input pricing.'
+    notes: 'KIE.AI only. Telegram flow defaults to no-video-input pricing unless reference video URLs are attached.'
   },
 
   /**
@@ -549,4 +549,3 @@ module.exports = {
     important: '⚠️ KIE.AI is often cheaper than Replicate. KIE.AI is recommended when available.'
   }
 };
-

@@ -50,6 +50,102 @@ async function hasTokens(userId, amount) {
   }
 }
 
+async function getUserStats(userId) {
+  try {
+    const user = await User.findById(userId).lean();
+    if (!user) {
+      return null;
+    }
+
+    let generationCount = user.stats?.totalGenerations;
+    let totalSpent = user.totalTokensSpent;
+
+    // Older user documents may not have the denormalized counters populated.
+    if (generationCount == null || totalSpent == null) {
+      const [aggregate] = await Transaction.aggregate([
+        { $match: { userId } },
+        {
+          $group: {
+            _id: null,
+            totalSpent: {
+              $sum: {
+                $cond: [{ $eq: ['$type', 'deduction'] }, '$amount', 0]
+              }
+            },
+            generationCount: {
+              $sum: {
+                $cond: [{ $eq: ['$category', 'generation'] }, 1, 0]
+              }
+            }
+          }
+        }
+      ]);
+
+      generationCount = generationCount ?? aggregate?.generationCount ?? 0;
+      totalSpent = totalSpent ?? aggregate?.totalSpent ?? 0;
+    }
+
+    return {
+      currentBalance: Number(user.tokens || 0),
+      generationCount: Number(generationCount || 0),
+      totalSpent: Number(totalSpent || 0),
+      memberSince: user.createdAt ? new Date(user.createdAt) : new Date()
+    };
+  } catch (error) {
+    console.error('Error in getUserStats:', error);
+    return null;
+  }
+}
+
+async function getConversationHistory(userId, limit = 20) {
+  try {
+    const user = await User.findById(userId).select('conversationHistory').lean();
+    if (!user?.conversationHistory?.length) {
+      return [];
+    }
+
+    return user.conversationHistory
+      .slice(-limit)
+      .map(({ role, content }) => ({ role, content }));
+  } catch (error) {
+    console.error('Error in getConversationHistory:', error);
+    return [];
+  }
+}
+
+async function saveConversationMessage(userId, role, content) {
+  try {
+    const user = await getUser(userId);
+    user.conversationHistory.push({ role, content, timestamp: new Date() });
+
+    if (user.conversationHistory.length > 20) {
+      user.conversationHistory = user.conversationHistory.slice(-20);
+    }
+
+    await user.save();
+    return true;
+  } catch (error) {
+    console.error('Error in saveConversationMessage:', error);
+    return false;
+  }
+}
+
+async function clearConversationHistory(userId) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      return false;
+    }
+
+    user.conversationHistory = [];
+    await user.save();
+    return true;
+  } catch (error) {
+    console.error('Error in clearConversationHistory:', error);
+    return false;
+  }
+}
+
 async function deductTokens(userId, amount, action, details = {}) {
   try {
     const user = await User.findById(userId);
@@ -200,8 +296,12 @@ async function removeTokens(userId, amount, reason = 'refund', metadata = {}) {
 
 module.exports = {
   addTokens,
+  clearConversationHistory,
   deductTokens,
+  getConversationHistory,
   getUser,
+  getUserStats,
   hasTokens,
-  removeTokens
+  removeTokens,
+  saveConversationMessage
 };

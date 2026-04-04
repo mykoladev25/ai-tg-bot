@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 const axios = require('axios');
 const { GoogleGenAI } = require('@google/genai');
+const { resolveServerSideTelegramFileUrl } = require('../utils/telegramFiles');
 
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
 
@@ -34,14 +35,15 @@ function detectMimeType(headers, url, data) {
 }
 
 async function downloadImageAsGeminiImage(imageUrl) {
-  const response = await axios.get(imageUrl, {
+  const sourceUrl = resolveServerSideTelegramFileUrl(imageUrl);
+  const response = await axios.get(sourceUrl, {
     responseType: 'arraybuffer',
     timeout: 45000
   });
 
   return {
     imageBytes: Buffer.from(response.data).toString('base64'),
-    mimeType: detectMimeType(response.headers || {}, imageUrl, response.data)
+    mimeType: detectMimeType(response.headers || {}, sourceUrl, response.data)
   };
 }
 

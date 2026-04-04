@@ -1167,7 +1167,7 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
 // ==================== VIDEO GENERATION ====================
 
 
-async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p', characterOrientation = 'image') {
+async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p', characterOrientation = 'image', options = {}) {
   try {
     if (!KIE_API_KEY) {
       throw new Error('KIE_AI_API_KEY is not set in .env');
@@ -1223,6 +1223,14 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
+    if (typeof options.onTaskCreated === 'function') {
+      try {
+        await options.onTaskCreated(taskId);
+      } catch (e) {
+        console.warn(`⚠️ onTaskCreated callback error: ${e.message}`);
+      }
+    }
+
     const result = await pollJobStatus(taskId, 600, 5000, 'Kling Motion (KIE.AI)');
 
     if (result && result._timeout) {
@@ -1268,7 +1276,8 @@ async function generateKling3VideoKieAI(options = {}) {
       mode = 'pro',             
       multiShots = false,       // Multi-shot mode
       multiPrompt = [],         
-      klingElements = []        // Element references
+      klingElements = [],       // Element references
+      onTaskCreated = null
     } = options;
 
     if (!multiShots && !prompt) {
@@ -1412,6 +1421,14 @@ async function generateKling3VideoKieAI(options = {}) {
     console.log(`✅ KIE.AI Kling 3.0 task created`);
     console.log(`📋 Task ID for KIE.AI support: ${taskId}`);
 
+    if (typeof onTaskCreated === 'function') {
+      try {
+        await onTaskCreated(taskId);
+      } catch (e) {
+        console.warn(`⚠️ onTaskCreated callback error: ${e.message}`);
+      }
+    }
+
     const result = await pollJobStatus(taskId, 600, 5000, 'Kling 3.0 (KIE.AI)');
 
     if (result && result._timeout) {
@@ -1467,7 +1484,7 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
     }
 
     const isImage2Video = !!imageUrl;
-    const { tailImageUrl = '', negativePrompt = '', cfgScale = 0.5 } = options;
+    const { tailImageUrl = '', negativePrompt = '', cfgScale = 0.5, onTaskCreated = null } = options;
 
     let modelName;
     if (version === 'v2.5') {
@@ -1551,6 +1568,14 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
+    if (typeof onTaskCreated === 'function') {
+      try {
+        await onTaskCreated(taskId);
+      } catch (e) {
+        console.warn(`⚠️ onTaskCreated callback error: ${e.message}`);
+      }
+    }
+
     const result = await pollJobStatus(taskId, 600, 5000, `Kling ${version} (KIE.AI)`);
 
     if (result && result._timeout) {
@@ -1627,7 +1652,8 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
       quality = '720p',        
       aspectRatio = '16:9',    // '16:9', '9:16', '1:1', '4:3', '3:4'
       waterMark = '',          
-      callBackUrl = null       // callback URL
+      callBackUrl = null,      // callback URL
+      onTaskCreated = null
     } = options;
 
     if (quality === '1080p' && duration !== 5) {
@@ -1691,6 +1717,14 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Runway task created: ${taskId}`);
+
+    if (typeof onTaskCreated === 'function') {
+      try {
+        await onTaskCreated(taskId);
+      } catch (e) {
+        console.warn(`⚠️ onTaskCreated callback error: ${e.message}`);
+      }
+    }
 
     const result = await pollRunwayStatus(taskId, 600, 5000, 'Runway (KIE.AI)');
 
@@ -1802,7 +1836,8 @@ async function generateSora2KieAI(prompt, options = {}) {
     const {
       imageUrl = null,           
       duration = null,           
-      aspectRatio = 'landscape'  
+      aspectRatio = 'landscape',
+      onTaskCreated = null
     } = options;
 
     const isImageToVideo = !!imageUrl;
@@ -1866,6 +1901,14 @@ async function generateSora2KieAI(prompt, options = {}) {
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Sora 2 task created: ${taskId}`);
 
+    if (typeof onTaskCreated === 'function') {
+      try {
+        await onTaskCreated(taskId);
+      } catch (e) {
+        console.warn(`⚠️ onTaskCreated callback error: ${e.message}`);
+      }
+    }
+
     const result = await pollJobStatus(taskId, 120, 5000, 'Sora 2 (KIE.AI)');
 
     if (result && result._timeout) {
@@ -1927,7 +1970,8 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
       resolution = '480p',
       aspectRatio = '16:9',
       duration = 4,
-      webSearch = false
+      webSearch = false,
+      onTaskCreated = null
     } = options;
 
     const apiModel = modelKey === 'seedance_2_fast'
@@ -2014,6 +2058,14 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Seedance task created: ${taskId}`);
+
+    if (typeof onTaskCreated === 'function') {
+      try {
+        await onTaskCreated(taskId);
+      } catch (e) {
+        console.warn(`⚠️ onTaskCreated callback error: ${e.message}`);
+      }
+    }
 
     const result = await pollJobStatus(taskId, 720, 5000, `${modelKey} (KIE.AI)`);
 
