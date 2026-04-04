@@ -1494,13 +1494,13 @@ const ASPECT_RATIO_LABELS = {
   '2:3': '🖼️ 2:3 (Classic Portrait)',
   '21:9': '🎬 21:9 (Ultrawide)',
   '9:21': '📱 9:21 (Vertical)',
-  'match_input_image': 'Авто'
+  'match_input_image': 'Auto'
 };
 
 const RATIO_NOTES = {
-  '9:16': 'Вертикальний формат для Instagram Stories/Reels та TikTok.',
-  '21:9': 'Ультраширокі кадри, добре для кінематографічних сцен.',
-  '16:9': 'Горизонтальний widescreen (YouTube, презентації).'
+  '9:16': 'Vertical format for Instagram Stories/Reels and TikTok.',
+  '21:9': 'Ultra-wide framing that works well for cinematic scenes.',
+  '16:9': 'Horizontal widescreen for YouTube and presentations.'
 };
 
 const TEXT_ASPECT_RATIO_MODELS = new Set([
@@ -1598,8 +1598,20 @@ function buildAspectRatioKeyboard(modelKey, hasImageInput = true) {
   const buttons = ratios.map(ratio => [
     Markup.button.callback(ASPECT_RATIO_LABELS[ratio] || ratio, `aspect_ratio_${modelKey}_${ratio}`)
   ]);
-  buttons.push([Markup.button.callback('🔙 Назад', 'design_menu')]);
+  buttons.push([Markup.button.callback('🔙 Back', 'design_menu')]);
   return { keyboard: Markup.inlineKeyboard(buttons), ratios };
+}
+
+function formatPromptPreview(promptText, maxLength = 100) {
+  return promptText.length > maxLength ? `${promptText.substring(0, maxLength)}...` : promptText;
+}
+
+function buildPromptSavedAndStartingMessage(promptText) {
+  return (
+    `✅ <b>Prompt saved!</b>\n\n` +
+    `📝 "${formatPromptPreview(promptText)}"\n\n` +
+    `🚀 Starting generation...`
+  );
 }
 
 async function promptAspectRatioSelection(ctx, { modelKey, promptText, hasReferences = false, referencesCount = 0 }) {
@@ -1608,22 +1620,22 @@ async function promptAspectRatioSelection(ctx, { modelKey, promptText, hasRefere
     .map(ratio => RATIO_NOTES[ratio])
     .filter(Boolean);
   const notesBlock = ratioNotes.length
-    ? `\n\nПримітки:\n${ratioNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}`
+    ? `\n\nNotes:\n${ratioNotes.map((note, index) => `${index + 1}. ${note}`).join('\n')}`
     : '';
   const referenceLine = hasReferences
-    ? `\n📸 Референси: ${referencesCount} фото\n`
+    ? `\n📸 References: ${referencesCount} image${referencesCount === 1 ? '' : 's'}\n`
     : '';
-  const promptPreview = promptText.length > 100 ? promptText.substring(0, 100) + '...' : promptText;
+  const promptPreview = formatPromptPreview(promptText);
 
   await ctx.reply(
-    `✅ <b>Промпт збережено!</b>\n\n` +
+    `✅ <b>Prompt saved!</b>\n\n` +
     `📝 "${promptPreview}"\n\n` +
-    `📐 <b>Оберіть пропорції зображення (Aspect Ratio)</b>\n\n` +
-    `📝 Крок 1: ваша ідея/промпт\n` +
-    `📐 Крок 2: вибір пропорцій\n` +
-    `✍️ Крок 3: генерація запускається одразу після вибору\n\n` +
+    `📐 <b>Choose the image aspect ratio</b>\n\n` +
+    `📝 Step 1: your idea / prompt\n` +
+    `📐 Step 2: choose the aspect ratio\n` +
+    `✍️ Step 3: generation starts immediately after selection\n\n` +
     `${referenceLine}` +
-    `Доступні формати: ${validRatios.join(', ')}${notesBlock}`,
+    `Available formats: ${validRatios.join(', ')}${notesBlock}`,
     { parse_mode: 'HTML', ...aspectRatioMenu }
   );
 }
@@ -4735,10 +4747,10 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
 
     await ctx.reply(
       `⚡ <b>${model.name}</b>\n\n` +
-      `🖼️ Найшвидша та найдешевша модель зображень!\n\n` +
-      `✍️ Введіть промпт (до 1000 символів)\n\n` +
-      `💰 Вартість: ${effectiveCost}⚡\n` +
-      `⏱️ Час: ~10-20 секунд`,
+      `🖼️ Fast and low-cost image generation.\n\n` +
+      `✍️ Enter a prompt (up to 1000 characters)\n\n` +
+      `💰 Cost: ${effectiveCost}⚡\n` +
+      `⏱️ Time: ~10-20 seconds`,
       { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
     );
     return;
@@ -4752,74 +4764,74 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
     photos: []
   });
 
-  const refsStep = `📝 <b>Крок 1:</b> Надішліть референс-зображення (опціонально)\n` +
-    `💡 Можна до ${maxPhotos} фото\n\n` +
-    `✍️ <b>Крок 2:</b> Введіть промпт\n\n` +
-    `Натисніть <b>"Далі до промпту"</b> якщо без референсів.\n\n`;
+  const refsStep = `📝 <b>Step 1:</b> Send reference images (optional)\n` +
+    `💡 Up to ${maxPhotos} image${maxPhotos === 1 ? '' : 's'}\n\n` +
+    `✍️ <b>Step 2:</b> Enter your prompt\n\n` +
+    `Press <b>"Continue to prompt"</b> if you want to skip references.\n\n`;
 
   const messages = {
     clarity: `✨ <b>${model.name}</b>\n\n` +
-      `🔮 Покращення якості зображень\n\n` +
+      `🔮 Image quality enhancement\n\n` +
       refsStep +
-      `💬 Можете додати опис для кращого результату\n\n` +
-      `💰 Вартість: ${effectiveCost}⚡\n` +
-      `⏱️ Час: ~30-60 секунд`,
+      `💬 You can add a short prompt for a better result\n\n` +
+      `💰 Cost: ${effectiveCost}⚡\n` +
+      `⏱️ Time: ~30-60 seconds`,
     recraft_upscale: `✨ <b>${model.name}</b>\n\n` +
-      `🔎 Розроблений для підвищення чіткості та чистоти зображень, Crisp Upscale покращує загальну якість, роблячи візуальні елементи придатними для використання в Інтернеті або друку.\n\n` +
-      `📝 <b>Крок 1:</b> Надішліть зображення\n` +
-      `✍️ <b>Крок 2:</b> (опціонально) короткий опис\n\n` +
-      `Натисніть <b>"Далі до промпту"</b> після фото.\n\n` +
-      `💰 Вартість: ${effectiveCost}⚡\n` +
-      `⏱️ Час: ~20-40 секунд`,
+      `🔎 Designed to improve sharpness and image cleanliness for web or print use.\n\n` +
+      `📝 <b>Step 1:</b> Send an image\n` +
+      `✍️ <b>Step 2:</b> Optional short prompt\n\n` +
+      `Press <b>"Continue to prompt"</b> after uploading the image.\n\n` +
+      `💰 Cost: ${effectiveCost}⚡\n` +
+      `⏱️ Time: ~20-40 seconds`,
 
     stable_diffusion: `🌀 <b>${model.name}</b>\n\n` +
       refsStep +
-      `Опишіть детально що хочете згенерувати.\n\n` +
-      `💡 Приклад: "A beautiful sunset over mountains, photorealistic, 8k"\n\n` +
-      `💰 Вартість: ${effectiveCost}⚡\n` +
-      `⏱️ Час: ~30-40 секунд`,
+      `Describe in detail what you want to generate.\n\n` +
+      `💡 Example: "A beautiful sunset over mountains, photorealistic, 8k"\n\n` +
+      `💰 Cost: ${effectiveCost}⚡\n` +
+      `⏱️ Time: ~30-40 seconds`,
 
     ideogram: `✏️ <b>${model.name}</b>\n\n` +
       refsStep +
-      `Опишіть детально що хочете згенерувати.\n` +
-      `💡 Ideogram чудово працює з текстом на зображеннях!\n\n` +
-      `💰 Вартість: ${effectiveCost}⚡\n` +
-      `⏱️ Час: ~30-40 секунд`,
+      `Describe in detail what you want to generate.\n` +
+      `💡 Ideogram works especially well with text inside images.\n\n` +
+      `💰 Cost: ${effectiveCost}⚡\n` +
+      `⏱️ Time: ~30-40 seconds`,
 
     nano_banana: `🍌 <b>${model.name}</b>\n\n` +
       refsStep +
-      `Опишіть детально що хочете згенерувати.\n` +
-      `💰 Вартість: ${effectiveCost}⚡\n` +
-      `⏱️ Час: ~20-30 секунд`,
+      `Describe in detail what you want to generate.\n` +
+      `💰 Cost: ${effectiveCost}⚡\n` +
+      `⏱️ Time: ~20-30 seconds`,
 
     nano_banana_2: `🍌 <b>${model.name}</b>\n\n` +
       refsStep +
-      `Нова Gemini модель для швидкої генерації та редагування.\n` +
-      `💡 Підтримує: 0.5K / 1K / 2K / 4K, Search Grounding, розширені пропорції.\n\n` +
-      `💰 Вартість: ${effectiveCost}⚡\n` +
-      `⏱️ Час: ~10-25 секунд`,
+      `New Gemini image model for fast generation and editing.\n` +
+      `💡 Supports: 0.5K / 1K / 2K / 4K, Search Grounding, and extended aspect ratios.\n\n` +
+      `💰 Cost: ${effectiveCost}⚡\n` +
+      `⏱️ Time: ~10-25 seconds`,
 
     nano_banana_free: `🍌🎁 <b>Nano Banana FREE</b>\n\n` +
-      `🆓 Безкоштовна генерація зображень!\n` +
-      `📊 Ліміт: ${geminiImage.FREE_GENERATIONS_LIMIT} генерацій на користувача\n` +
-      `🤖 Доступні моделі: Nano Banana / Nano Banana 2 / Nano Banana PRO\n\n` +
+      `🆓 Free image generation.\n` +
+      `📊 Limit: ${geminiImage.FREE_GENERATIONS_LIMIT} generations per user\n` +
+      `🤖 Available models: Nano Banana / Nano Banana 2 / Nano Banana PRO\n\n` +
       refsStep +
-      `Опишіть детально що хочете згенерувати.\n` +
-      `💡 До ${geminiImage.MAX_REFERENCE_IMAGES} референс-зображень!\n\n` +
-      `💰 Вартість: БЕЗКОШТОВНО 🎁\n` +
-      `⏱️ Час: ~15-40 секунд`,
+      `Describe in detail what you want to generate.\n` +
+      `💡 Up to ${geminiImage.MAX_REFERENCE_IMAGES} reference images.\n\n` +
+      `💰 Cost: FREE 🎁\n` +
+      `⏱️ Time: ~15-40 seconds`,
 
     seedream: `🌊 <b>${model.name}</b>\n\n` +
       refsStep +
-      `Опишіть детально що хочете згенерувати.\n` +
-      `💰 Вартість: ${effectiveCost}⚡\n` +
-      `⏱️ Час: ~20-40 секунд`,
+      `Describe in detail what you want to generate.\n` +
+      `💰 Cost: ${effectiveCost}⚡\n` +
+      `⏱️ Time: ~20-40 seconds`,
 
     z_image: `⚡ <b>${model.name}</b>\n\n` +
-      `🖼️ Найшвидша та найдешевша модель зображень!\n\n` +
-      `✍️ Введіть промпт (до 1000 символів)\n\n` +
-      `💰 Вартість: ${effectiveCost}⚡\n` +
-      `⏱️ Час: ~10-20 секунд`
+      `🖼️ Fast and low-cost image generation.\n\n` +
+      `✍️ Enter a prompt (up to 1000 characters)\n\n` +
+      `💰 Cost: ${effectiveCost}⚡\n` +
+      `⏱️ Time: ~10-20 seconds`
   };
 
   let messageKey = modelKey;
@@ -4830,16 +4842,16 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
 
   const defaultMessage = `🎨 <b>${model.name}</b>\n\n` +
     refsStep +
-    `Опишіть що хочете згенерувати.\n\n` +
-    `💰 Вартість: ${effectiveCost}⚡`;
+    `Describe what you want to generate.\n\n` +
+    `💰 Cost: ${effectiveCost}⚡`;
 
   await ctx.reply(
     messages[messageKey] || defaultMessage,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
-        [Markup.button.callback('← Назад', 'design_menu')]
+        [Markup.button.callback('⏭️ Continue to prompt', `img_gen_start_${modelKey}`)],
+        [Markup.button.callback('← Back', 'design_menu')]
       ])
     }
   );
@@ -4867,7 +4879,7 @@ bot.action(/^img_free_model_(nano_banana|nano_banana_2|nano_banana_pro)$/, async
   }
 
   if (!selectedConfig || !selectedModel) {
-    await ctx.reply('❌ Помилка. Модель не знайдена.', keyboard.createBackButton('design_menu'));
+    await ctx.reply('❌ Error. Model not found.', keyboard.createBackButton('design_menu'));
     return;
   }
 
@@ -4896,22 +4908,22 @@ bot.action(/^img_free_model_(nano_banana|nano_banana_2|nano_banana_pro)$/, async
 
   userCurrentModel.set(userId, selectedKey);
 
-  const refsStep = `📝 <b>Крок 2:</b> Надішліть референс-зображення (опціонально)\n` +
-    `💡 Можна до ${maxPhotos} фото\n\n` +
-    `✍️ <b>Крок 3:</b> Введіть промпт\n\n` +
-    `Натисніть <b>"Далі до промпту"</b> якщо без референсів.\n\n`;
+  const refsStep = `📝 <b>Step 2:</b> Send reference images (optional)\n` +
+    `💡 Up to ${maxPhotos} image${maxPhotos === 1 ? '' : 's'}\n\n` +
+    `✍️ <b>Step 3:</b> Enter your prompt\n\n` +
+    `Press <b>"Continue to prompt"</b> if you want to skip references.\n\n`;
 
   await ctx.reply(
     `✅ <b>${selectedConfig.label}</b>\n\n` +
-    `🆓 Безкоштовна генерація ${freeUsed + 1} з ${freeLimit}\n` +
+    `🆓 Free generation ${freeUsed + 1} of ${freeLimit}\n` +
     `🤖 Gemini model: <code>${selectedConfig.googleModel}</code>\n` +
-    `🖼️ Стандартна якість: <b>${selectedConfig.imageSize}</b>\n\n` +
+    `🖼️ Default quality: <b>${selectedConfig.imageSize}</b>\n\n` +
     refsStep,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${selectedKey}`)],
-        [Markup.button.callback('← Назад', 'design_menu')]
+        [Markup.button.callback('⏭️ Continue to prompt', `img_gen_start_${selectedKey}`)],
+        [Markup.button.callback('← Back', 'design_menu')]
       ])
     }
   );
@@ -4927,12 +4939,12 @@ bot.action(/^img_quality_(nano_banana_2|nano_banana_pro)_(0\.5K|1K|2K|4K)$/, asy
   const model = models.design.models.find(m => m.key === modelKey);
 
   if (!model || !IMAGE_SIZE_OPTIONS[modelKey]) {
-    await ctx.reply('❌ Помилка. Модель не знайдена.', keyboard.createBackButton('design_menu'));
+    await ctx.reply('❌ Error. Model not found.', keyboard.createBackButton('design_menu'));
     return;
   }
 
   if (!IMAGE_SIZE_OPTIONS[modelKey].includes(imageSize)) {
-    await ctx.reply('❌ Цей розмір недоступний для обраної моделі.', keyboard.createBackButton('design_menu'));
+    await ctx.reply('❌ This size is not available for the selected model.', keyboard.createBackButton('design_menu'));
     return;
   }
 
@@ -4965,21 +4977,21 @@ bot.action(/^img_quality_(nano_banana_2|nano_banana_pro)_(0\.5K|1K|2K|4K)$/, asy
 
   userCurrentModel.set(userId, modelKey);
 
-  const refsStep = `📝 <b>Крок 2:</b> Надішліть референс-зображення (опціонально)\n` +
-    `💡 Можна до ${maxPhotos} фото\n\n` +
-    `✍️ <b>Крок 3:</b> Введіть промпт\n\n` +
-    `Натисніть <b>"Далі до промпту"</b> якщо без референсів.\n\n`;
+  const refsStep = `📝 <b>Step 2:</b> Send reference images (optional)\n` +
+    `💡 Up to ${maxPhotos} image${maxPhotos === 1 ? '' : 's'}\n\n` +
+    `✍️ <b>Step 3:</b> Enter your prompt\n\n` +
+    `Press <b>"Continue to prompt"</b> if you want to skip references.\n\n`;
 
   await ctx.reply(
     `✅ <b>${model.name}</b>\n\n` +
-    `🎯 Якість: <b>${imageSize}</b>\n` +
-    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `🎯 Quality: <b>${imageSize}</b>\n` +
+    `💰 Cost: <b>${cost}⚡</b>\n\n` +
     refsStep,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
-        [Markup.button.callback('← Назад', 'design_menu')]
+        [Markup.button.callback('⏭️ Continue to prompt', `img_gen_start_${modelKey}`)],
+        [Markup.button.callback('← Back', 'design_menu')]
       ])
     }
   );
@@ -4993,7 +5005,7 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   if (!imgState) {
-    await ctx.reply('❌ Помилка: стан не знайдено. Почніть заново.', keyboard.createBackButton('design_menu'));
+    await ctx.reply('❌ Error: state not found. Please start again.', keyboard.createBackButton('design_menu'));
     imageGenState.delete(userId);
     return;
   }
@@ -5042,9 +5054,9 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
     imageGenState.set(userId, { ...imgState, step: 'prompt' });
 
     await ctx.reply(
-      `✍️ <b>Крок 2: Введіть промпт</b>\n\n` +
-      `Опишіть що хочете згенерувати.\n\n` +
-      `💡 Можете детально описати стиль, сцену, об'єкти.`,
+      `✍️ <b>Step 2: Enter your prompt</b>\n\n` +
+      `Describe what you want to generate.\n\n` +
+      `💡 You can describe the style, scene, mood, and objects in detail.`,
       { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
     );
     return;
@@ -5084,14 +5096,14 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
   const maxPhotos = model?.maxImages || 1;
 
   await ctx.reply(
-    `📷 <b>Завантажте референс-зображення</b>\n\n` +
-    `💡 Можна до ${maxPhotos} фото\n` +
-    `✅ Натисніть "Далі до промпту" коли завершите`,
+    `📷 <b>Upload reference images</b>\n\n` +
+    `💡 Up to ${maxPhotos} image${maxPhotos === 1 ? '' : 's'}\n` +
+    `✅ Press "Continue to prompt" when you are done`,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
-        [Markup.button.callback('← Назад', 'design_menu')]
+        [Markup.button.callback('⏭️ Continue to prompt', `img_gen_start_${modelKey}`)],
+        [Markup.button.callback('← Back', 'design_menu')]
       ])
     }
   );
@@ -11234,9 +11246,7 @@ bot.on('text', async (ctx) => {
       imageGenState.delete(userId);
 
       await ctx.reply(
-        `✅ <b>Промпт збережено!</b>\n\n` +
-        `📝 "${text.length > 100 ? text.substring(0, 100) + '...' : text}"\n\n` +
-        `🚀 Починаємо генерацію...`,
+        buildPromptSavedAndStartingMessage(text),
         { parse_mode: 'HTML' }
       );
 
@@ -11256,8 +11266,8 @@ bot.on('text', async (ctx) => {
       if (activeImageModel === 'stable_diffusion' && hasReferences) {
         imageGenState.delete(userId);
         await ctx.reply(
-          'ℹ️ Для Stable Diffusion 3.5 з референсом пропорції беруться з самого фото.\n' +
-          'Формат обирати не потрібно — запускаю генерацію.',
+          'ℹ️ For Stable Diffusion 3.5 with a reference image, the aspect ratio is taken from the image itself.\n' +
+          'No format selection is needed. Starting generation now.',
           { parse_mode: 'HTML' }
         );
         runBackgroundTask(
@@ -11294,9 +11304,7 @@ bot.on('text', async (ctx) => {
       imageGenState.delete(userId);
 
       await ctx.reply(
-        `✅ <b>Промпт збережено!</b>\n\n` +
-        `📝 "${text.length > 100 ? text.substring(0, 100) + '...' : text}"\n\n` +
-        `🚀 Починаємо генерацію...`,
+        buildPromptSavedAndStartingMessage(text),
         { parse_mode: 'HTML' }
       );
 
@@ -12080,8 +12088,8 @@ bot.on('photo', async (ctx) => {
         }
 
         await ctx.reply(
-          `✅ <b>Референси отримано</b> (${limited.length}/${maxPhotos})\n\n` +
-          `✍️ <b>Крок 2: Введіть промпт</b>`,
+          `✅ <b>References received</b> (${limited.length}/${maxPhotos})\n\n` +
+          `✍️ <b>Step 2: Enter your prompt</b>`,
           { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
         );
       }, 500);
@@ -12094,13 +12102,13 @@ bot.on('photo', async (ctx) => {
 
     if (imgState.photos.length >= maxPhotos) {
       await ctx.reply(
-        `⚠️ Досягнуто максимум ${maxPhotos} референсів.\n\n` +
-        `✍️ Натисніть "Далі до промпту" для продовження.`,
+        `⚠️ You have reached the maximum of ${maxPhotos} reference images.\n\n` +
+        `✍️ Press "Continue to prompt" to proceed.`,
         {
           parse_mode: 'HTML',
           ...Markup.inlineKeyboard([
-            [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
-            [Markup.button.callback('← Назад', 'design_menu')]
+            [Markup.button.callback('⏭️ Continue to prompt', `img_gen_start_${modelKey}`)],
+            [Markup.button.callback('← Back', 'design_menu')]
           ])
         }
       );
@@ -12127,19 +12135,19 @@ bot.on('photo', async (ctx) => {
     if (reachedLimit) {
       imageGenState.set(userId, { ...imgState, step: 'prompt' });
       await ctx.reply(
-        `✅ Референсів: ${count}/${maxPhotos}\n\n` +
-        `✍️ <b>Крок 2: Введіть промпт</b>`,
+        `✅ References: ${count}/${maxPhotos}\n\n` +
+        `✍️ <b>Step 2: Enter your prompt</b>`,
         { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
       );
     } else {
       await ctx.reply(
-        `✅ Референс ${count}/${maxPhotos} завантажено!\n\n` +
-        `📤 Надішліть ще фото або натисніть "Далі до промпту".`,
+        `✅ Reference ${count}/${maxPhotos} uploaded.\n\n` +
+        `📤 Send another image or press "Continue to prompt".`,
         {
           parse_mode: 'HTML',
           ...Markup.inlineKeyboard([
-            [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
-            [Markup.button.callback('← Назад', 'design_menu')]
+            [Markup.button.callback('⏭️ Continue to prompt', `img_gen_start_${modelKey}`)],
+            [Markup.button.callback('← Back', 'design_menu')]
           ])
         }
       );
@@ -16398,14 +16406,16 @@ async function startBot() {
     const botUsername = getBotUsername();
     const botRedirectUrl = `https://t.me/${botUsername}`;
 
-    app.all('/payment/success', (req, res) => {
-      console.log(`✅ Payment success redirect via ${req.method}`);
+    app.all(['/payment/success', '/wayforpay/return'], (req, res) => {
+      const orderId = req.query.order_id || req.body?.order_id || req.body?.orderReference || req.query.orderReference;
+      console.log(`✅ Payment success redirect via ${req.method} on ${req.path}${orderId ? ` (order: ${orderId})` : ''}`);
       res.redirect(botRedirectUrl);
     });
 
     // ✅ Payment failed page (for declined WayForPay payments)
-    app.all('/payment/failed', (req, res) => {
-      console.log(`❌ Payment failed redirect via ${req.method}`);
+    app.all(['/payment/failed', '/wayforpay/decline'], (req, res) => {
+      const orderId = req.query.order_id || req.body?.order_id || req.body?.orderReference || req.query.orderReference;
+      console.log(`❌ Payment failed redirect via ${req.method} on ${req.path}${orderId ? ` (order: ${orderId})` : ''}`);
       res.redirect(botRedirectUrl);
     });
 
