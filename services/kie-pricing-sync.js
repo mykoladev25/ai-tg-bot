@@ -1,7 +1,4 @@
-/**
- * Автоматичне оновлення цін з KIE.AI API
- * Запускається раз на день через cron
- */
+
 
 const axios = require('axios');
 const fs = require('fs').promises;
@@ -9,11 +6,9 @@ const path = require('path');
 
 const KIE_PRICING_API = 'https://api.kie.ai/client/v1/model-pricing/page';
 const CACHE_FILE = path.join(__dirname, '../config/kie-ai-pricing-cache.json');
-const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // 24 години
+const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; 
 
-/**
- * Отримати ціни з KIE.AI API
- */
+
 async function fetchKieAIPricing() {
   try {
     console.log('📊 Fetching pricing from KIE.AI API...');
@@ -59,9 +54,7 @@ async function fetchKieAIPricing() {
   }
 }
 
-/**
- * Парсити ціни для наших моделей
- */
+
 function parseOurModels(pricing) {
   const ourModels = {
     // IMAGE
@@ -90,9 +83,7 @@ function parseOurModels(pricing) {
   return ourModels;
 }
 
-/**
- * Знайти модель за назвою
- */
+
 function findModel(records, ...keywords) {
   return records.find(r =>
     keywords.every(kw =>
@@ -101,19 +92,14 @@ function findModel(records, ...keywords) {
   );
 }
 
-/**
- * Знайти всі варіанти моделі
- */
+
 function findModels(records, keyword) {
   return records.filter(r =>
     r.modelDescription.toLowerCase().includes(keyword.toLowerCase())
   );
 }
 
-/**
- * Seedream 5.0 Lite може приходити як text-to-image або image-to-image.
- * Беремо перший збіг для визначення ціни за генерацію.
- */
+
 function findSeedream5LiteModel(records = []) {
   return records.find(r => {
     const desc = (r.modelDescription || '').toLowerCase();
@@ -123,10 +109,7 @@ function findSeedream5LiteModel(records = []) {
   }) || null;
 }
 
-/**
- * Seedance 2 / Seedance 2 Fast.
- * Розділяємо стандартну та fast версії, бо обидві містять "seedance-2".
- */
+
 function findSeedanceModels(records = [], isFast = false) {
   return records.filter(r => {
     const desc = (r.modelDescription || '').toLowerCase();
@@ -136,9 +119,7 @@ function findSeedanceModels(records = [], isFast = false) {
   });
 }
 
-/**
- * Зберегти кеш
- */
+
 async function savePricingCache(pricing) {
   const cache = {
     timestamp: Date.now(),
@@ -153,9 +134,7 @@ async function savePricingCache(pricing) {
   return cache;
 }
 
-/**
- * Завантажити кеш
- */
+
 async function loadPricingCache() {
   try {
     const data = await fs.readFile(CACHE_FILE, 'utf-8');
@@ -173,10 +152,7 @@ async function loadPricingCache() {
   }
 }
 
-/**
- * Перевірити чи parsed секція кешу містить всі потрібні моделі.
- * Якщо ні — перепарсити з існуючих pricing даних (без повторного fetch з API).
- */
+
 function ensureParsedComplete(cache) {
   if (!cache || !cache.pricing) return cache;
   const parsed = cache.parsed || {};
@@ -195,7 +171,6 @@ function ensureParsedComplete(cache) {
   console.log(`🔄 Re-parsing pricing cache (missing: ${missing.join(', ')})`);
   cache.parsed = parseOurModels(cache.pricing);
 
-  // Зберігаємо оновлений кеш синхронно
   try {
     const fsSync = require('fs');
     fsSync.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), 'utf-8');
@@ -207,15 +182,11 @@ function ensureParsedComplete(cache) {
   return cache;
 }
 
-/**
- * Оновити ціни якщо потрібно
- */
+
 async function updatePricingIfNeeded() {
   let cache = await loadPricingCache();
 
-  // Перевіряємо чи потрібно оновлювати
   if (cache) {
-    // Перепарсити якщо parsed неповний (нові моделі додані в parseOurModels)
     cache = ensureParsedComplete(cache);
 
     const age = Date.now() - cache.timestamp;
@@ -226,15 +197,12 @@ async function updatePricingIfNeeded() {
     }
   }
 
-  // Оновлюємо
   console.log('🔄 Updating pricing from KIE.AI...');
   const pricing = await fetchKieAIPricing();
   return await savePricingCache(pricing);
 }
 
-/**
- * Отримати актуальні ціни
- */
+
 async function getCurrentPricing() {
   let cache = await loadPricingCache();
 
@@ -247,21 +215,17 @@ async function getCurrentPricing() {
   return cache;
 }
 
-/**
- * Форсувати оновлення
- */
+
 async function forceUpdate() {
   console.log('🔄 Force updating pricing from KIE.AI...');
   const pricing = await fetchKieAIPricing();
   return await savePricingCache(pricing);
 }
 
-/**
- * Отримати ціну для моделі з актуального кешу
- */
+
 function getModelPrice(cache, modelKey, options = {}) {
   const { duration, audio, resolution } = options;
-  const quality = options.quality || '720p';  // Додано для Runway
+  const quality = options.quality || '720p';  
 
   try {
     const parsed = cache.parsed;
@@ -276,9 +240,6 @@ function getModelPrice(cache, modelKey, options = {}) {
       case 'nano_banana_4k':
         return parsed.nano_banana_4k?.usdPrice || '0.12';
 
-      // Seedream: KIE support підтвердив що немає API для отримання ціни (19.02.2026)
-      // Офіційна ціна: 6.5 credits = $0.032 per image
-      // Повертаємо null щоб використовувався fallback з kie-ai-models.js
       case 'seedream_2k':
       case 'seedream_4k':
         return parsed.seedream_4k?.usdPrice || null;
@@ -296,8 +257,6 @@ function getModelPrice(cache, modelKey, options = {}) {
         return parsed.z_image?.usdPrice || null;
 
       case 'ideogram': {
-        // Ideogram: використовуємо TURBO режим (найдешевший для text-to-image)
-        // Шукаємо "ideogram v3, text-to-image, TURBO"
         const ideogram = parsed.ideogram?.find(m => {
           const desc = m.modelDescription.toLowerCase();
           return desc.includes('text-to-image') && desc.includes('turbo');
@@ -324,7 +283,6 @@ function getModelPrice(cache, modelKey, options = {}) {
         return kling30 ? parseFloat(kling30.usdPrice) : null;
 
       case 'kling':
-        // Kling 2.5: per video, є 5.0s та 10.0s
         const kling25 = parsed.kling_2_5?.find(m => {
           const desc = m.modelDescription.toLowerCase();
           return desc.includes(`${duration}s`) || desc.includes(`${duration}.0s`);
@@ -372,17 +330,12 @@ function getModelPrice(cache, modelKey, options = {}) {
   }
 }
 
-/**
- * Той самий множник що в config/models.js (30% прибутку).
- * Вартість у токенах рахується в config/kie-ai-models.js (usdToTokens, getKling3TokenCostPerSecond).
- */
+
 const kieAiModels = require('../config/kie-ai-models');
 const TOKEN_USD = kieAiModels.TOKEN_USD;
 const PRICING_MULTIPLIER = kieAiModels.PRICING_MULTIPLIER;
 
-/**
- * Отримати актуальну ціну для моделі в USD (синхронна версія для швидкого доступу)
- */
+
 function getModelPriceSync(modelKey, options = {}) {
   try {
     const fs = require('fs');
@@ -391,17 +344,12 @@ function getModelPriceSync(modelKey, options = {}) {
     cache = ensureParsedComplete(cache);
     return getModelPrice(cache, modelKey, options);
   } catch (error) {
-    // Якщо кеш недоступний - повертаємо fallback ціни
     console.warn(`⚠️ KIE.AI pricing cache unavailable, using fallback prices`);
     return null;
   }
 }
 
-/**
- * Вартість Kling 3.0 у токенах за секунду. USD беруться з кешу (якщо є), переведення в токени — у kie-ai-models.js.
- * @param {Object} options - { mode: 'pro'|'std' }
- * @returns {{ costPerSecondAudio: number, costPerSecondNoAudio: number } | null}
- */
+
 function getKling3TokenCostPerSecondSync(options = {}) {
   const { mode = 'pro' } = options;
   const resolution = mode === 'pro' ? '1080p' : '720p';
@@ -417,17 +365,13 @@ function getKling3TokenCostPerSecondSync(options = {}) {
   }
 }
 
-/** Моделі зображень, для яких є KIE-ціна в кеші */
+
 const KIE_IMAGE_MODELS = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'seedream_5_lite', 'ideogram', 'recraft_upscale', 'z_image'];
 
-/** Опорна тривалість для переведення Veo "per video" → "per second" (мін. тривалість у боті). */
+
 const VEO_REF_DURATION_SEC = 4;
 
-/**
- * Veo: flat вартість у токенах за відео з KIE-кешу.
- * В кеші ціни "per video" (Fast $0.30, Quality $1.25).
- * @returns {{ costFast: number, costQuality: number, apiCostFast: number, apiCostQuality: number, costPerSecondNoAudio: number, costPerSecondAudio: number } | null}
- */
+
 function getVeoFlatCostSync() {
   try {
     const fs = require('fs');
@@ -450,7 +394,6 @@ function getVeoFlatCostSync() {
       costQuality: kieAiModels.usdToTokens(usdQuality),
       apiCostFast: usdFast,
       apiCostQuality: usdQuality,
-      // Legacy per-second (для сумісності з /api/plans)
       costPerSecondNoAudio: kieAiModels.usdToTokens(usdFast / VEO_REF_DURATION_SEC),
       costPerSecondAudio: kieAiModels.usdToTokens(usdQuality / VEO_REF_DURATION_SEC)
     };
@@ -459,48 +402,35 @@ function getVeoFlatCostSync() {
   }
 }
 
-/**
- * Вартість у токенах при виборі провайдера KIE (для показу та списання).
- * Тільки для користувачів з userProviderChoice === 'kie-ai'. Replicate не змінюється.
- * @param {string} modelKey - ключ моделі
- * @param {Object} options - для відео: duration, audio, mode, orientation тощо
- * @returns {number | { costPerSecond, costPerSecondAudio, costPerSecondNoAudio } | { cost } | null} null = використовувати Replicate
- */
+
 function getKieTokenCostSync(modelKey, options = {}) {
   try {
     const { duration, audio, resolution } = options;
 
-    // Зображення: одна ціна за генерацію
     if (KIE_IMAGE_MODELS.includes(modelKey)) {
       let usd = getModelPriceSync(modelKey);
 
-      // Fallback для Seedream: KIE support підтвердив що немає API (19.02.2026)
-      // Використовуємо hardcoded ціну з kie-ai-models.js
       if (usd == null && (modelKey === 'seedream_2k' || modelKey === 'seedream_4k' || modelKey === 'seedream_5_lite')) {
         usd = kieAiModels.getReplicatePrice(modelKey);
         const creditLabel = modelKey === 'seedream_5_lite' ? '5.5 credits' : '6.5 credits';
         console.log(`💡 Using hardcoded ${modelKey} price: $${usd} (${creditLabel})`);
       }
 
-      // Fallback для Nano Banana base: $0.02 (4 credits)
       if (usd == null && modelKey === 'nano_banana') {
         usd = 0.02;  // KIE.AI: 4.0 credits × $0.005 = $0.02
         console.log(`💡 Using hardcoded Nano Banana price: $${usd} (4.0 credits)`);
       }
 
-      // Fallback для Recraft Crisp Upscale: $0.0025 (0.5 credits)
       if (usd == null && modelKey === 'recraft_upscale') {
         usd = 0.0025;  // KIE.AI: 0.5 credits × $0.005 = $0.0025
         console.log(`💡 Using hardcoded Recraft Upscale price: $${usd} (0.5 credits)`);
       }
 
-      // Fallback для Ideogram: $0.0175 (3.5 credits TURBO)
       if (usd == null && modelKey === 'ideogram') {
         usd = kieAiModels.getReplicatePrice(modelKey);
         console.log(`💡 Using hardcoded Ideogram TURBO price: $${usd} (3.5 credits)`);
       }
 
-      // Fallback для Z-Image: $0.004 (0.8 credits)
       if (usd == null && modelKey === 'z_image') {
         usd = 0.004;  // KIE.AI: 0.8 credits × $0.005 = $0.004
         console.log(`💡 Using hardcoded Z-Image price: $${usd} (0.8 credits)`);
@@ -512,7 +442,6 @@ function getKieTokenCostSync(modelKey, options = {}) {
       return kieAiModels.usdToTokens(n);
     }
 
-    // Kling 2.6: за секунду (з кешу за 5s/10s)
     if (modelKey === 'kling_v2_6') {
       const usd5No = getModelPriceSync('kling_v2_6', { duration: 5, audio: false });
       const usd5Aud = getModelPriceSync('kling_v2_6', { duration: 5, audio: true });
@@ -525,7 +454,6 @@ function getKieTokenCostSync(modelKey, options = {}) {
       };
     }
 
-    // Kling 2.5: per video у кеші (5.0s, 10.0s) → переводимо в costPerSecond
     if (modelKey === 'kling') {
       const usd5 = getModelPriceSync('kling', { duration: 5 });
       if (usd5 == null) return null;
@@ -535,7 +463,6 @@ function getKieTokenCostSync(modelKey, options = {}) {
       return { costPerSecond: kieAiModels.usdToTokens(perSec) };
     }
 
-    // Runway Turbo: per video за тривалістю (5s, 10s)
     if (modelKey === 'runway_turbo') {
       const d = options.duration || 5;
       const usd = getModelPriceSync('runway_turbo', { duration: d });
@@ -545,7 +472,6 @@ function getKieTokenCostSync(modelKey, options = {}) {
       return { cost: kieAiModels.usdToTokens(u), costPerSecond: kieAiModels.usdToTokens(u / d), apiCost: u };
     }
 
-    // Kling Motion: 720P (std) та 1080P (pro) за секунду; конвенція image 5s, video 10s
     if (modelKey === 'kling_motion') {
       const usd720 = getModelPriceSync('kling_motion', { resolution: '720p' });
       const usd1080 = getModelPriceSync('kling_motion', { resolution: '1080p' });
@@ -568,7 +494,6 @@ function getKieTokenCostSync(modelKey, options = {}) {
       return veoRates;
     }
 
-    // Sora 2: фіксована вартість за відео (з kie-ai-models)
     if (modelKey === 'sora_2') {
       const type = options.soraType || 'text_to_video_15s';
       const usd = kieAiModels.getKieAIPrice.call(kieAiModels, 'sora_2', { type });
@@ -611,9 +536,7 @@ function getKieTokenCostSync(modelKey, options = {}) {
   }
 }
 
-/**
- * Логувати порівняння ціни KIE.AI vs Replicate
- */
+
 async function logPriceComparison(modelKey, options = {}) {
   try {
     const cache = await getCurrentPricing();
@@ -630,9 +553,7 @@ async function logPriceComparison(modelKey, options = {}) {
   }
 }
 
-/**
- * Показати звіт про ціни
- */
+
 async function showPricingReport() {
   const cache = await getCurrentPricing();
   const parsed = cache.parsed;
@@ -691,7 +612,6 @@ module.exports = {
   TOKEN_USD
 };
 
-// CLI команди
 if (require.main === module) {
   const command = process.argv[2];
 

@@ -3,20 +3,15 @@ const FormData = require('form-data');
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-/**
- * Транскрибувати голос через OpenAI Whisper API
- */
+
 async function transcribeVoice(audioUrl) {
     try {
-        // Завантажити аудіо файл
         const audioResponse = await axios.get(audioUrl, {
             responseType: 'arraybuffer'
         });
 
         const audioBuffer = Buffer.from(audioResponse.data);
 
-        // Відправити в Whisper API (через Replicate або OpenAI)
-        // Варіант 1: Через Replicate (якщо вже є ключ)
         const result = await transcribeWithReplicate(audioBuffer);
 
         return {
@@ -33,18 +28,14 @@ async function transcribeVoice(audioUrl) {
     }
 }
 
-/**
- * Використати Replicate для транскрипції
- */
+
 async function transcribeWithReplicate(audioBuffer) {
     const axios = require('axios');
     const REPLICATE_API_KEY = process.env.REPLICATE_API_KEY;
 
-    // Конвертувати в base64
     const base64Audio = audioBuffer.toString('base64');
     const dataUri = `data:audio/ogg;base64,${base64Audio}`;
 
-    // Whisper model на Replicate
     const response = await axios.post(
         'https://api.replicate.com/v1/predictions',
         {
@@ -65,7 +56,6 @@ async function transcribeWithReplicate(audioBuffer) {
 
     const predictionId = response.data.id;
 
-    // Polling для результату
     let result = null;
     let attempts = 0;
 

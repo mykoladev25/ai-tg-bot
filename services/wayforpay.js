@@ -4,12 +4,14 @@ class WayForPayService {
     constructor() {
         this.merchantAccount = process.env.WAYFORPAY_MERCHANT_ACCOUNT;
         this.merchantSecretKey = process.env.WAYFORPAY_MERCHANT_KEY;
-        this.merchantDomainName = process.env.WAYFORPAY_DOMAIN || 'neurolab.fun';
+        this.merchantDomainName = process.env.WAYFORPAY_DOMAIN
+            || process.env.APP_URL?.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+            || 'example.com';
         this.checkoutUrl = 'https://secure.wayforpay.com/pay';
     }
 
     /**
-     * Генерація HMAC_MD5 підпису для WayForPay
+     * Generate the HMAC_MD5 signature required by WayForPay.
      */
     createSignature(params) {
         const signatureParts = [
@@ -26,9 +28,6 @@ class WayForPayService {
 
         const signatureString = signatureParts.join(';');
 
-        // ⚠️ SECURITY: Не логуємо signature string - може містити чутливі дані
-        // console.log('📝 Signature string:', signatureString);
-
         return crypto
             .createHmac('md5', this.merchantSecretKey)
             .update(signatureString, 'utf8')
@@ -36,7 +35,7 @@ class WayForPayService {
     }
 
     /**
-     * Верифікація підпису callback від WayForPay
+     * Verify a WayForPay callback signature.
      */
     verifySignature(data) {
         try {
@@ -86,20 +85,16 @@ class WayForPayService {
     }
 
     /**
-     * Верифікація статусу платежу через WayForPay API
-     * Підпис для CHECK_STATUS: HMAC_MD5(merchantSecretKey, merchantAccount;orderReference)
-     * ⚠️ БЕЗ timestamp! Згідно офіційної документації WayForPay
+     * Verify payment status through the WayForPay API.
      */
     async checkPaymentStatus(orderReference) {
         try {
             if (!this.merchantAccount) {
-                throw new Error('WAYFORPAY_MERCHANT_ACCOUNT не встановлена');
+                throw new Error('WAYFORPAY_MERCHANT_ACCOUNT is not configured');
             }
 
             console.log(`🔍 Checking payment status for order: ${orderReference}`);
 
-            // ✅ ПРАВИЛЬНИЙ ФОРМАТ підпису для CHECK_STATUS:
-            // За документацією WayForPay: merchantAccount;orderReference (БЕЗ timestamp!)
             const signatureString = [
                 this.merchantAccount,
                 orderReference
@@ -110,12 +105,6 @@ class WayForPayService {
                 .update(signatureString, 'utf8')
                 .digest('hex');
 
-            // ⚠️ SECURITY: Не логуємо signature string
-            // console.log(`📝 Status check signature string: ${signatureString}`);
-            // ⚠️ SECURITY: Не логуємо signatures
-            // console.log(`📝 Generated signature: ${signature}`);
-
-            // Робимо запит до WayForPay API
             const axios = require('axios');
             const response = await axios.post(
                 'https://api.wayforpay.com/api',
@@ -147,7 +136,7 @@ class WayForPayService {
     }
 
     /**
-     * Генерація підпису для відповіді на callback
+     * Generate a signature for callback acknowledgements.
      */
     createResponseSignature(orderReference, status, time) {
         const signatureString = [orderReference, status, time].join(';');
@@ -160,10 +149,10 @@ class WayForPayService {
     async createCheckout(params) {
         try {
             if (!this.merchantAccount) {
-                throw new Error('WAYFORPAY_MERCHANT_ACCOUNT не встановлена');
+                throw new Error('WAYFORPAY_MERCHANT_ACCOUNT is not configured');
             }
             if (!this.merchantSecretKey) {
-                throw new Error('WAYFORPAY_MERCHANT_KEY не встановлена');
+                throw new Error('WAYFORPAY_MERCHANT_KEY is not configured');
             }
 
             const {
@@ -171,8 +160,8 @@ class WayForPayService {
                 amount,
                 currency = 'UAH',
                 description,
-                result_url,  // success URL
-                decline_url, // failure URL
+                result_url,
+                decline_url,
                 server_url
             } = params;
 
@@ -203,7 +192,7 @@ class WayForPayService {
                 productCount: productCount,
                 productPrice: productPrice,
                 returnUrl: result_url,
-                declineUrl: decline_url,  // ✅ Добавляємо URL для відхилених платежів
+                declineUrl: decline_url,
                 serviceUrl: server_url,
                 language: 'UK'
             };

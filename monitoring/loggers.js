@@ -1,12 +1,4 @@
-/**
- * Monitoring Loggers - логування генерацій та платежів
- *
- * СЛОВНИК:
- * - COGS (Cost of Goods Sold) = Собівартість = скільки ми платимо API за генерацію
- * - Revenue = Дохід = скільки клієнт заплатив нам
- * - Gross Margin = Валовий прибуток = Revenue - COGS (наш заробіток)
- * - Trial Burn = "Згоріло на безкоштовних" = COGS для trial користувачів (ми платимо, вони - ні)
- */
+
 
 const crypto = require('crypto');
 const UsageEvent = require('../database/models/UsageEvent');
@@ -14,8 +6,6 @@ const PaymentEvent = require('../database/models/PaymentEvent');
 const models = require('../config/models');
 const { WORST_CASE_TOKEN_USD } = require('../config/constants');
 
-// Ціна 1 токена в USD (worst-case з premium плану)
-// Потрібна для розрахунку Revenue
 const TOKEN_PRICE_USD = WORST_CASE_TOKEN_USD ?? (110 / 4760);
 
 /**
@@ -181,7 +171,7 @@ async function logUsageEvent(payload) {
       requestId = generateRequestId(),
       chatId,
       metadata = {},
-      provider  // Optional: можна явно передати провайдера
+      provider  
     } = payload;
 
     const modelConfig = getModelConfig(modelKey);
@@ -191,18 +181,12 @@ async function logUsageEvent(payload) {
     // Revenue = 0 for trial/free users
     const estimatedRevenueUSD = (isTrial || isFree) ? 0 : tokensSpent * TOKEN_PRICE_USD;
 
-    // ✅ АВТОМАТИЧНЕ ВИЗНАЧЕННЯ ПРОВАЙДЕРА
-    // Якщо провайдер не переданий явно, визначаємо автоматично
     let detectedProvider = provider || 'replicate';
 
-    // Перевіряємо чи це KIE.AI модель
     if (!provider && modelConfig) {
-      // KIE.AI ONLY моделі (недоступні на Replicate) - завжди KIE
       if (modelConfig.kieAIOnly) {
         detectedProvider = 'kie';
       }
-      // Моделі які є на обох провайдерах - НЕ визначаємо автоматично!
-      // Провайдер має бути переданий явно з metadata.provider або options.provider
     }
 
     const event = new UsageEvent({
@@ -230,26 +214,25 @@ async function logUsageEvent(payload) {
 
     await event.save();
 
-    // 📊 Логуємо простими словами
-    const trialLabel = isTrial ? '🆓 TRIAL (безкоштовно)' : '💰 PAID (платний)';
+    const trialLabel = isTrial ? '🆓 TRIAL (free)' : '💰 PAID';
     const successLabel = success ? '✅' : '❌';
     const providerLabel = detectedProvider === 'kie' ? '🔥 KIE.AI' : '🔄 Replicate';
     console.log(`
 📊 ═══════════════════════════════════════
-   ГЕНЕРАЦІЯ ${successLabel}
-   ├─ 🤖 Модель: ${modelConfig?.name || modelKey}
-   ├─ 🌐 Провайдер: ${providerLabel}
-   ├─ 👤 Користувач: ${userId} ${trialLabel}
-   ├─ ⚡ Токенів списано: ${tokensSpent}
-   ├─ 💵 Собівартість (COGS): $${apiCost.toFixed(4)}
-   ├─ 💰 Наш дохід: $${estimatedRevenueUSD.toFixed(4)}
-   └─ 📈 Прибуток: $${(estimatedRevenueUSD - apiCost).toFixed(4)}
+   GENERATION ${successLabel}
+   ├─ 🤖 Model: ${modelConfig?.name || modelKey}
+   ├─ 🌐 Provider: ${providerLabel}
+   ├─ 👤 User: ${userId} ${trialLabel}
+   ├─ ⚡ Tokens spent: ${tokensSpent}
+   ├─ 💵 COGS: $${apiCost.toFixed(4)}
+   ├─ 💰 Revenue: $${estimatedRevenueUSD.toFixed(4)}
+   └─ 📈 Profit: $${(estimatedRevenueUSD - apiCost).toFixed(4)}
 ═══════════════════════════════════════
 `);
 
     return { success: true, requestId, event };
   } catch (error) {
-    console.error('❌ [Monitor] Помилка логування генерації:', error.message);
+    console.error('❌ [Monitor] Generation logging error:', error.message);
     return { success: false, error: error.message };
   }
 }
@@ -304,9 +287,8 @@ async function logPaymentEvent(payload) {
     });
 
     if (result.isNew) {
-      // 💰 Логуємо платіж простими словами
       const providerName = {
-        'wayforpay': '💳 WayForPay (картка)',
+        'wayforpay': '💳 WayForPay (card)',
         'stars': '⭐ Telegram Stars',
         'liqpay': '💳 LiqPay',
         'stripe': '💳 Stripe'
@@ -314,17 +296,17 @@ async function logPaymentEvent(payload) {
 
       console.log(`
 💰 ═══════════════════════════════════════
-   НОВИЙ ПЛАТІЖ ✅
-   ├─ 👤 Користувач: ${userId}
-   ├─ 📦 Пакет: ${planName}
-   ├─ 💵 Сума: $${amountUSD || 0} / ${amountUAH || 0} грн
-   ├─ ⚡ Токенів нараховано: ${tokensGranted}
-   ├─ 🏦 Спосіб: ${providerName}
-   └─ 🔖 ID платежу: ${providerPaymentId}
+   NEW PAYMENT ✅
+   ├─ 👤 User: ${userId}
+   ├─ 📦 Plan: ${planName}
+   ├─ 💵 Amount: $${amountUSD || 0} / ${amountUAH || 0} UAH
+   ├─ ⚡ Tokens credited: ${tokensGranted}
+   ├─ 🏦 Method: ${providerName}
+   └─ 🔖 Payment ID: ${providerPaymentId}
 ═══════════════════════════════════════
 `);
     } else {
-      console.log(`⚠️ [Monitor] Платіж вже існує: ${provider}/${providerPaymentId}`);
+      console.log(`⚠️ [Monitor] Payment already exists: ${provider}/${providerPaymentId}`);
     }
 
     return result;

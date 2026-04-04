@@ -1,33 +1,14 @@
-/**
- * Replicate Pricing Service
- *
- * Replicate не має публічного API для отримання цін моделей.
- * АЛЕ можна:
- * 1. Парсити ціни зі сторінки моделі (ненадійно)
- * 2. Рахувати реальну вартість з metrics відповіді
- * 3. Вручну оновлювати pricing з офіційних сторінок
- *
- * Цей сервіс допомагає відстежувати реальні витрати та
- * порівнювати з нашими apiCost в models.js
- */
+
 
 const axios = require('axios');
 const models = require('../config/models');
 
-// Кеш для pricing (оновлюється раз на день)
 let pricingCache = null;
 let lastPricingUpdate = 0;
-const PRICING_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 години
+const PRICING_CACHE_TTL = 24 * 60 * 60 * 1000; 
 
-/**
- * Офіційні ціни Replicate (станом на 2026-01)
- * Джерело: https://replicate.com/pricing
- *
- * ⚠️ ВАЖЛИВО: Перевіряйте ці ціни регулярно!
- * Replicate може змінювати pricing без попередження.
- */
+
 const OFFICIAL_PRICING = {
-  // === ЗОБРАЖЕННЯ ===
   'stability-ai/stable-diffusion-3.5-large': {
     pricePerRun: 0.065,  // Fixed price per run
     model: 'stable_diffusion',
@@ -35,7 +16,6 @@ const OFFICIAL_PRICING = {
     source: 'https://replicate.com/stability-ai/stable-diffusion-3.5-large'
   },
 
-  // Nano Banana - ціна залежить від resolution!
   'google/nano-banana': {
     pricePerRun: 0.039,  // $0.039 per image
     model: 'nano_banana',
@@ -43,7 +23,7 @@ const OFFICIAL_PRICING = {
     source: 'https://replicate.com/google/nano-banana'
   },
   'google/nano-banana-pro-2k': {
-    pricePerRun: 0.15,  // 1K та 2K = $0.15
+    pricePerRun: 0.15,  
     model: 'nano_banana_2k',
     lastChecked: '2026-01-25',
     source: 'https://replicate.com/google/nano-banana-pro'
@@ -56,7 +36,7 @@ const OFFICIAL_PRICING = {
   },
 
   'bytedance/seedream-4.5-4k': {
-    pricePerRun: 0.04,  // Replicate: $0.04 per image (KIE.AI дешевше: $0.032)
+    pricePerRun: 0.04,  
     model: 'seedream_4k',
     lastChecked: '2026-01-25',
     source: 'https://replicate.com/bytedance/seedream-4.5'
@@ -82,7 +62,6 @@ const OFFICIAL_PRICING = {
     source: 'https://replicate.com/recraft-ai/recraft-crisp-upscale'
   },
 
-  // === ВІДЕО ===
   'kwaivgi/kling-v2.5-turbo-pro': {
     pricePerSecond: 0.07,
     model: 'kling',
@@ -131,9 +110,7 @@ const OFFICIAL_PRICING = {
   }
 };
 
-/**
- * Мапінг наших моделей до Replicate моделей
- */
+
 const MODEL_MAPPING = {
   'stable_diffusion': 'stability-ai/stable-diffusion-3.5-large',
   'nano_banana': 'google/nano-banana',
@@ -151,9 +128,7 @@ const MODEL_MAPPING = {
   'runway_turbo': 'runway/gen-4-turbo'
 };
 
-/**
- * Отримати офіційну ціну для моделі
- */
+
 function getOfficialPrice(modelKey) {
   const replicateModel = MODEL_MAPPING[modelKey];
   if (!replicateModel) return null;
@@ -161,21 +136,17 @@ function getOfficialPrice(modelKey) {
   return OFFICIAL_PRICING[replicateModel] || null;
 }
 
-/**
- * Порівняти наші ціни з офіційними
- * @returns {Array} Список розбіжностей
- */
+
 function comparePrices() {
   const discrepancies = [];
 
-  // Перевіряємо design models
   for (const model of models.design.models) {
     const official = getOfficialPrice(model.key);
     if (official && official.pricePerRun) {
       const diff = Math.abs(model.apiCost - official.pricePerRun);
       const diffPercent = (diff / official.pricePerRun) * 100;
 
-      if (diffPercent > 10) { // Різниця > 10%
+      if (diffPercent > 10) { 
         discrepancies.push({
           model: model.key,
           modelName: model.name,
@@ -190,7 +161,6 @@ function comparePrices() {
     }
   }
 
-  // Перевіряємо video models
   for (const model of models.video.models) {
     const official = getOfficialPrice(model.key);
     if (!official) continue;
@@ -257,17 +227,11 @@ function comparePrices() {
   return discrepancies;
 }
 
-/**
- * Розрахувати реальну вартість з metrics відповіді Replicate
- * @param {string} modelKey - Ключ нашої моделі
- * @param {object} metrics - metrics з відповіді Replicate
- * @param {object} options - Додаткові опції (duration, audio, etc.)
- */
+
 function calculateActualCost(modelKey, metrics, options = {}) {
   const official = getOfficialPrice(modelKey);
   if (!official) return null;
 
-  // Для моделей з фіксованою ціною за run
   if (official.pricePerRun) {
     return {
       estimatedCost: official.pricePerRun,
@@ -276,7 +240,6 @@ function calculateActualCost(modelKey, metrics, options = {}) {
     };
   }
 
-  // Для моделей з ціною за секунду (відео)
   if (official.pricePerSecond) {
     const duration = options.duration || 5;
     return {
@@ -287,7 +250,6 @@ function calculateActualCost(modelKey, metrics, options = {}) {
     };
   }
 
-  // Для Veo з audio/no-audio
   if (official.pricePerSecondAudio) {
     const duration = options.duration || 8;
     const hasAudio = options.generateAudio !== false;
@@ -305,53 +267,46 @@ function calculateActualCost(modelKey, metrics, options = {}) {
   return null;
 }
 
-/**
- * Логування для порівняння цін (викликати при старті бота)
- */
+
 function logPriceComparison() {
   console.log('\n📊 ═══════════════════════════════════════');
-  console.log('   ПЕРЕВІРКА ЦІН REPLICATE');
+  console.log('   REPLICATE PRICE CHECK');
   console.log('═══════════════════════════════════════\n');
 
   const discrepancies = comparePrices();
 
   if (discrepancies.length === 0) {
-    console.log('✅ Всі ціни актуальні! Розбіжностей немає.\n');
+    console.log('✅ All prices are up to date. No discrepancies found.\n');
     return;
   }
 
-  console.log(`⚠️ Знайдено ${discrepancies.length} розбіжностей:\n`);
+  console.log(`⚠️ Found ${discrepancies.length} discrepancies:\n`);
 
   for (const d of discrepancies) {
     console.log(`🔴 ${d.modelName} (${d.model})`);
-    console.log(`   Наша ціна: $${d.ourPrice || d.ourPricePerSec}/run`);
-    console.log(`   Офіційна:  $${d.officialPrice || d.officialPricePerSec}/run`);
-    console.log(`   Різниця:   ${d.differencePercent}`);
-    console.log(`   Джерело:   ${d.source}`);
-    console.log(`   Перевірено: ${d.lastChecked}\n`);
+    console.log(`   Our price: $${d.ourPrice || d.ourPricePerSec}/run`);
+    console.log(`   Official:  $${d.officialPrice || d.officialPricePerSec}/run`);
+    console.log(`   Difference: ${d.differencePercent}`);
+    console.log(`   Source:    ${d.source}`);
+    console.log(`   Checked:   ${d.lastChecked}\n`);
   }
 
-  console.log('💡 Оновіть apiCost в config/models.js!\n');
+  console.log('💡 Update apiCost in config/models.js.\n');
   console.log('═══════════════════════════════════════\n');
 }
 
-/**
- * Отримати всі офіційні ціни
- */
+
 function getAllOfficialPrices() {
   return OFFICIAL_PRICING;
 }
 
-/**
- * Отримати рекомендовані оновлення для models.js
- */
+
 function getSuggestedUpdates() {
   const updates = [];
 
   for (const [replicateModel, pricing] of Object.entries(OFFICIAL_PRICING)) {
     const modelKey = pricing.model;
 
-    // Знаходимо модель в нашому конфігу
     let ourModel = models.design.models.find(m => m.key === modelKey);
     if (!ourModel) {
       ourModel = models.video.models.find(m => m.key === modelKey);

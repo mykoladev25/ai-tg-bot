@@ -33,18 +33,15 @@ const StarsWithdrawal = mongoose.models.StarsWithdrawal
 class TelegramStarsService {
   constructor() {
     this.botToken = process.env.BOT_TOKEN;
-    this.cacheExpirationMs = 3600000; // Кешуємо на 1 годину
+    this.cacheExpirationMs = 3600000; 
     this.lastUpdateTime = 0;
-    this.cachedRate = DEFAULT_WITHDRAW_RATE; // Дефолтний withdraw курс
+    this.cachedRate = DEFAULT_WITHDRAW_RATE; 
     this.cachedPurchaseRate = DEFAULT_PURCHASE_RATE;
     this.cachedPayoutFactor = DEFAULT_PAYOUT_FACTOR;
     this.warnedNoDb = false;
   }
 
-  /**
-   * Отримати курс Telegram Stars для PURCHASE/DISPLAY (USD per Star)
-   * ENV override: TELEGRAM_STARS_PURCHASE_RATE
-   */
+  
   async getPurchaseStarRate() {
     const envRate = parseEnvFloat('TELEGRAM_STARS_PURCHASE_RATE');
     if (Number.isFinite(envRate)) {
@@ -55,11 +52,7 @@ class TelegramStarsService {
     return this.cachedPurchaseRate || DEFAULT_PURCHASE_RATE;
   }
 
-  /**
-   * Отримати payout factor на основі фактичних withdrawals
-   * payoutFactor = (usdReceived / starsWithdrawn) / purchaseRateAtThatTime
-   * ENV override: TELEGRAM_STARS_PAYOUT_FACTOR
-   */
+  
   async getPayoutFactor() {
     const envFactor = parseEnvFloat('TELEGRAM_STARS_PAYOUT_FACTOR');
     const envFactorClamped = clampIfOutOfBounds(envFactor, PAYOUT_FACTOR_BOUNDS);
@@ -95,11 +88,7 @@ class TelegramStarsService {
     return this.cachedPayoutFactor || DEFAULT_PAYOUT_FACTOR;
   }
 
-  /**
-   * Отримати курс Telegram Stars для WITHDRAW (USD per Star)
-   * withdrawRate = purchaseRate * payoutFactor
-   * ENV override: TELEGRAM_STARS_WITHDRAW_RATE
-   */
+  
   async getStarRate() {
     const now = Date.now();
 
@@ -134,22 +123,13 @@ class TelegramStarsService {
     return this.cachedRate;
   }
 
-  /**
-   * Отримати курс TG Stars в UAH
-   * @param {number} uahRate - курс USD/UAH
-   * @returns {Promise<number>} курс TG Star в UAH
-   */
+  
   async getStarRateUAH(uahRate) {
     const starRate = await this.getStarRate();
     return starRate * uahRate;
   }
 
-  /**
-   * Записати факт withdrawal для автокалібрування
-   * @param {number} starsWithdrawn
-   * @param {number} usdReceived
-   * @param {number} [purchaseRateAtThatTime]
-   */
+  
   async recordWithdrawal(starsWithdrawn, usdReceived, purchaseRateAtThatTime = null) {
     try {
       const purchaseRate = purchaseRateAtThatTime || await this.getPurchaseStarRate();
@@ -191,30 +171,19 @@ class TelegramStarsService {
     return stars * rate;
   }
 
-  /**
-   * Розрахувати кількість зірок для суми в USD
-   * @param {number} usdAmount - сума в доларах
-   * @returns {Promise<number>} кількість зірок (округлено)
-   */
+  
   async calculateStarsForUSD(usdAmount) {
     return this.usdToStars(usdAmount);
   }
 
-  /**
-   * Встановити кастомний курс (для тестування)
-   * @param {number} rate - курс 1 Star = ? USD
-   */
+  
   setCustomRate(rate) {
     this.cachedRate = rate;
     this.lastUpdateTime = Date.now();
     console.log(`⭐ Custom Telegram Stars rate set: 1 Star = $${rate.toFixed(4)}`);
   }
 
-  /**
-   * Отримати розраховані ціни Telegram Stars на основі USD
-   * @param {Object} usdPrices - об'єкт з цінами в USD
-   * @returns {Promise<Object>} об'єкт з цінами в TG Stars
-   */
+  
   async calculateStarsPrices(usdPrices) {
     const result = {};
 

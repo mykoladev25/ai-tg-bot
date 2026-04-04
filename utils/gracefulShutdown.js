@@ -1,26 +1,11 @@
-/**
- * Graceful Shutdown Handler
- *
- * Відстежує активні генерації та забезпечує коректне завершення
- * при рестарті/зупинці бота (pm2 restart, SIGTERM, etc.)
- */
+const activeGenerations = new Map();
 
-// Зберігаємо активні генерації
-const activeGenerations = new Map(); // requestId -> { userId, chatId, model, startTime }
-
-// Статус shutdown
 let isShuttingDown = false;
-let shutdownTimeout = null;
+const SHUTDOWN_TIMEOUT_MS = 30 * 1000;
 
-// Час очікування завершення генерацій (30 секунд)
-const SHUTDOWN_TIMEOUT = 30 * 1000;
-
-/**
- * Реєструє нову генерацію
- */
 function registerGeneration(requestId, data) {
   if (isShuttingDown) {
-    console.log(`⚠️ [Shutdown] Відхилено нову генерацію під час shutdown: ${requestId}`);
+    console.log(`[Shutdown] Rejected new generation during shutdown: ${requestId}`);
     return false;
   }
 
@@ -29,135 +14,101 @@ function registerGeneration(requestId, data) {
     startTime: Date.now()
   });
 
-  console.log(`📝 [Generation] Registered: ${requestId} | Model: ${data.model} | User: ${data.userId}`);
-  console.log(`📊 [Generation] Active: ${activeGenerations.size}`);
-
+  console.log(`[Generation] Registered ${requestId}. Active: ${activeGenerations.size}`);
   return true;
 }
 
-/**
- * Завершує генерацію (успіх або помилка)
- */
 function completeGeneration(requestId, success = true) {
-  const gen = activeGenerations.get(requestId);
-  if (gen) {
-    const duration = ((Date.now() - gen.startTime) / 1000).toFixed(1);
-    console.log(`${success ? '✅' : '❌'} [Generation] Completed: ${requestId} | ${duration}s | Active: ${activeGenerations.size - 1}`);
-    activeGenerations.delete(requestId);
+  const generation = activeGenerations.get(requestId);
+  if (!generation) {
+    return;
   }
+
+  const durationSeconds = ((Date.now() - generation.startTime) / 1000).toFixed(1);
+  console.log(`[Generation] ${success ? 'Completed' : 'Failed'} ${requestId} in ${durationSeconds}s. Active: ${activeGenerations.size - 1}`);
+  activeGenerations.delete(requestId);
 }
 
-/**
- * Отримати кількість активних генерацій
- */
 function getActiveCount() {
   return activeGenerations.size;
 }
 
-/**
- * Отримати всі активні генерації
- */
 function getActiveGenerations() {
-  return Array.from(activeGenerations.entries()).map(([id, data]) => ({
-    requestId: id,
+  return Array.from(activeGenerations.entries()).map(([requestId, data]) => ({
+    requestId,
     ...data,
     runningTime: Math.round((Date.now() - data.startTime) / 1000)
   }));
 }
 
-/**
- * Перевірити чи йде shutdown
- */
 function isInShutdown() {
   return isShuttingDown;
 }
 
-/**
- * Ініціалізує graceful shutdown handlers
- * @param {Telegraf} bot - інстанс бота для надсилання повідомлень
- */
+function generateRequestId() {
+  return `gen_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+}
+
 function initShutdownHandlers(bot) {
   const shutdown = async (signal) => {
     if (isShuttingDown) {
-      console.log(`⚠️ [Shutdown] Already in progress...`);
+      console.log('[Shutdown] Already in progress');
       return;
     }
 
     isShuttingDown = true;
-    console.log(`\n🛑 [Shutdown] Received ${signal}, starting graceful shutdown...`);
-    console.log(`📊 [Shutdown] Active generations: ${activeGenerations.size}`);
+    console.log(`[Shutdown] Received ${signal}. Active generations: ${activeGenerations.size}`);
 
-    // Повідомляємо користувачів з активними генераціями
     if (activeGenerations.size > 0) {
-      console.log(`📨 [Shutdown] Notifying users about pending generations...`);
-
       for (const [requestId, data] of activeGenerations) {
         try {
           await bot.telegram.sendMessage(
             data.chatId || data.userId,
-            `⚠️ <b>Технічне оновлення</b>\n\n` +
-            `Бот перезавантажується для оновлення.\n\n` +
-            `🔄 Ваша генерація (<b>${data.model}</b>) могла не завершитись.\n` +
-            `💡 Якщо ви не отримали результат — спробуйте ще раз через 1-2 хвилини.\n\n` +
-            `Вибачте за незручності! 🙏`,
+            [
+              '⚠️ <b>Maintenance update</b>',
+              '',
+              'The bot is restarting and your generation may not complete.',
+              `Model: <b>${data.model}</b>`,
+              'If you do not receive a result, retry in a minute.'
+            ].join('\n'),
             { parse_mode: 'HTML' }
           );
-          console.log(`📨 [Shutdown] Notified user ${data.userId} about ${requestId}`);
-        } catch (err) {
-          console.error(`❌ [Shutdown] Failed to notify user ${data.userId}:`, err.message);
+          console.log(`[Shutdown] Notified user ${data.userId} about ${requestId}`);
+        } catch (error) {
+          console.error(`[Shutdown] Failed to notify user ${data.userId}:`, error.message);
         }
       }
     }
 
-    // Чекаємо завершення активних генерацій (макс SHUTDOWN_TIMEOUT)
     if (activeGenerations.size > 0) {
-      console.log(`⏳ [Shutdown] Waiting for ${activeGenerations.size} generations to complete (max ${SHUTDOWN_TIMEOUT/1000}s)...`);
-
-      const startWait = Date.now();
-      while (activeGenerations.size > 0 && (Date.now() - startWait) < SHUTDOWN_TIMEOUT) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log(`⏳ [Shutdown] Still waiting... Active: ${activeGenerations.size}`);
-      }
-
-      if (activeGenerations.size > 0) {
-        console.log(`⚠️ [Shutdown] Timeout! ${activeGenerations.size} generations were interrupted.`);
+      const startedWaitingAt = Date.now();
+      while (activeGenerations.size > 0 && (Date.now() - startedWaitingAt) < SHUTDOWN_TIMEOUT_MS) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
-    console.log(`✅ [Shutdown] Graceful shutdown complete. Exiting...`);
-
-    // Зупиняємо бота
     try {
       await bot.stop(signal);
-    } catch (err) {
-      console.error('Error stopping bot:', err.message);
+    } catch (error) {
+      console.error('Error stopping bot:', error.message);
     }
 
     process.exit(0);
   };
 
-  // Обробники сигналів
-  process.once('SIGINT', () => shutdown('SIGINT'));   // Ctrl+C
-  process.once('SIGTERM', () => shutdown('SIGTERM')); // pm2 stop/restart
-  process.once('SIGUSR2', () => shutdown('SIGUSR2')); // nodemon restart
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGUSR2', () => shutdown('SIGUSR2'));
 
-  console.log('✅ [Shutdown] Graceful shutdown handlers initialized');
-}
-
-/**
- * Генерує унікальний ID для генерації
- */
-function generateRequestId() {
-  return `gen_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  console.log('Graceful shutdown handlers initialized');
 }
 
 module.exports = {
-  registerGeneration,
   completeGeneration,
+  generateRequestId,
   getActiveCount,
   getActiveGenerations,
-  isInShutdown,
   initShutdownHandlers,
-  generateRequestId
+  isInShutdown,
+  registerGeneration
 };
-

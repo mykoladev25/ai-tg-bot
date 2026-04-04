@@ -1,29 +1,24 @@
-const User = require('../database/models/User');
-const Transaction = require('../database/models/Transaction');
 const { TRIAL_TOKENS } = require('../config/constants');
+const Transaction = require('../database/models/Transaction');
+const User = require('../database/models/User');
 
-/**
- * Отримати або створити користувача
- */
 async function getUser(userId, userInfo = {}) {
   try {
     let user = await User.findById(userId);
-    
+
     if (!user) {
-      // Створюємо нового користувача
       user = new User({
         _id: userId,
         username: userInfo.username,
         firstName: userInfo.first_name,
         lastName: userInfo.last_name,
-        languageCode: userInfo.language_code || 'uk',
-        tokens: TRIAL_TOKENS,  // Початковий баланс
+        languageCode: userInfo.language_code || 'en',
+        tokens: TRIAL_TOKENS,
         totalTokensEarned: TRIAL_TOKENS
       });
 
       await user.save();
-      
-      // Додаємо початкову транзакцію
+
       await Transaction.create({
         userId,
         type: 'bonus',
@@ -31,14 +26,13 @@ async function getUser(userId, userInfo = {}) {
         amount: TRIAL_TOKENS,
         balanceBefore: 0,
         balanceAfter: TRIAL_TOKENS,
-        description: 'Початковий бонус при реєстрації'
+        description: 'Initial signup bonus'
       });
     } else {
-      // Оновлюємо останню активність
       user.lastActivityAt = new Date();
       await user.save();
     }
-    
+
     return user;
   } catch (error) {
     console.error('Error in getUser:', error);
@@ -46,9 +40,6 @@ async function getUser(userId, userInfo = {}) {
   }
 }
 
-/**
- * Перевірити чи достатньо токенів
- */
 async function hasTokens(userId, amount) {
   try {
     const user = await User.findById(userId);
@@ -59,27 +50,22 @@ async function hasTokens(userId, amount) {
   }
 }
 
-/**
- * Відняти токени
- */
 async function deductTokens(userId, amount, action, details = {}) {
   try {
     const user = await User.findById(userId);
-    
+
     if (!user || user.tokens < amount) {
       return false;
     }
-    
+
     const balanceBefore = user.tokens;
     user.tokens -= amount;
     user.totalTokensSpent += amount;
     const balanceAfter = user.tokens;
-    
-    // Оновлюємо статистику
+
     if (details.modelKey) {
       user.stats.totalGenerations += 1;
-      
-      // Визначаємо тип генерації
+
       if (details.modelKey.includes('text') || details.modelKey.includes('claude')) {
         user.stats.textRequests += 1;
       } else if (details.modelKey.includes('vision') || details.modelKey.includes('image')) {
@@ -94,10 +80,9 @@ async function deductTokens(userId, amount, action, details = {}) {
         user.stats.audioRequests += 1;
       }
     }
-    
+
     await user.save();
-    
-    // Створюємо транзакцію
+
     await Transaction.create({
       userId,
       type: 'deduction',
@@ -106,15 +91,17 @@ async function deductTokens(userId, amount, action, details = {}) {
       balanceBefore,
       balanceAfter,
       description: action,
-      model: details.modelKey ? {
-        key: details.modelKey,
-        name: details.modelName,
-        cost: amount,
-        apiCost: details.apiCost
-      } : undefined,
+      model: details.modelKey
+        ? {
+            key: details.modelKey,
+            name: details.modelName,
+            cost: amount,
+            apiCost: details.apiCost
+          }
+        : undefined,
       metadata: details
     });
-    
+
     return true;
   } catch (error) {
     console.error('Error in deductTokens:', error);
@@ -122,27 +109,25 @@ async function deductTokens(userId, amount, action, details = {}) {
   }
 }
 
-/**
- * Додати токени
- */
 async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
   try {
     const user = await User.findById(userId);
-    if (!user) return null;
-    
+    if (!user) {
+      return null;
+    }
+
     const balanceBefore = user.tokens;
     user.tokens += amount;
     const balanceAfter = user.tokens;
-    
+
     const isPaidPurchase = /purchase|payment|liqpay|wayforpay/i.test(reason);
     if (isPaidPurchase) {
       user.totalTokensPurchased += amount;
     }
     user.totalTokensEarned += amount;
-    
+
     await user.save();
-    
-    // Визначаємо категорію
+
     let category = 'bonus';
     if (reason.includes('subscription') || reason.includes('purchase') || reason.includes('stripe')) {
       category = 'subscription';
@@ -152,7 +137,6 @@ async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
       category = 'referral';
     }
 
-    // Створюємо транзакцію
     const transactionData = {
       userId,
       type: 'addition',
@@ -164,7 +148,6 @@ async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
       metadata
     };
 
-    // Додаємо sessionId якщо це Stripe платіж
     if (metadata.sessionId) {
       transactionData.sessionId = metadata.sessionId;
     }
@@ -178,19 +161,17 @@ async function addTokens(userId, amount, reason = 'purchase', metadata = {}) {
   }
 }
 
-/**
- * Забрати токени (для повернень платежів)
- */
 async function removeTokens(userId, amount, reason = 'refund', metadata = {}) {
   try {
     const user = await User.findById(userId);
-    if (!user) return null;
+    if (!user) {
+      return null;
+    }
 
     const balanceBefore = user.tokens;
     const tokensToRemove = Math.min(amount, user.tokens);
     user.tokens -= tokensToRemove;
 
-    // Якщо це повернення, віднімаємо від придбаних токенів
     if (reason.includes('refund')) {
       user.totalTokensPurchased = Math.max(0, user.totalTokensPurchased - tokensToRemove);
     }
@@ -199,7 +180,6 @@ async function removeTokens(userId, amount, reason = 'refund', metadata = {}) {
 
     await user.save();
 
-    // Створюємо транзакцію
     await Transaction.create({
       userId,
       type: 'removal',
@@ -218,168 +198,10 @@ async function removeTokens(userId, amount, reason = 'refund', metadata = {}) {
   }
 }
 
-/**
- * Встановити підписку
- */
-async function setSubscription(userId, subscriptionType, durationDays = 30) {
-  try {
-    const user = await User.findById(userId);
-    if (!user) return null;
-    
-    const startedAt = new Date();
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + durationDays);
-    
-    user.subscription = {
-      type: subscriptionType,
-      startedAt,
-      expiresAt,
-      isActive: true
-    };
-    
-    await user.save();
-    return user;
-  } catch (error) {
-    console.error('Error in setSubscription:', error);
-    return null;
-  }
-}
-
-/**
- * Зберегти контекст розмови
- */
-async function saveConversationMessage(userId, role, content) {
-  try {
-    const user = await User.findById(userId);
-    if (!user) return [];
-    
-    await user.addToConversation(role, content);
-    return user.conversationHistory;
-  } catch (error) {
-    console.error('Error in saveConversationMessage:', error);
-    return [];
-  }
-}
-
-/**
- * Отримати історію розмови
- */
-async function getConversationHistory(userId) {
-  try {
-    const user = await User.findById(userId);
-    return user?.conversationHistory || [];
-  } catch (error) {
-    console.error('Error in getConversationHistory:', error);
-    return [];
-  }
-}
-
-/**
- * Очистити історію розмови
- */
-async function clearConversationHistory(userId) {
-  try {
-    const user = await User.findById(userId);
-    if (!user) return false;
-    
-    await user.clearConversation();
-    return true;
-  } catch (error) {
-    console.error('Error in clearConversationHistory:', error);
-    return false;
-  }
-}
-
-/**
- * Отримати історію транзакцій
- */
-async function getTransactionHistory(userId, limit = 10) {
-  try {
-    return await Transaction.getUserHistory(userId, limit);
-  } catch (error) {
-    console.error('Error in getTransactionHistory:', error);
-    return [];
-  }
-}
-
-/**
- * Отримати статистику користувача
- */
-async function getUserStats(userId) {
-  try {
-    const user = await User.findById(userId);
-    if (!user) return null;
-    
-    const transactions = await Transaction.find({ userId, type: 'deduction' });
-    
-    return {
-      currentBalance: user.tokens,
-      totalSpent: user.totalTokensSpent,
-      totalPurchased: user.totalTokensPurchased,
-      totalEarned: user.totalTokensEarned,
-      generationCount: user.stats.totalGenerations,
-      textRequests: user.stats.textRequests,
-      imageRequests: user.stats.imageRequests,
-      videoRequests: user.stats.videoRequests,
-      audioRequests: user.stats.audioRequests,
-      visionRequests: user.stats.visionRequests,
-      memberSince: user.createdAt,
-      lastActivity: user.lastActivityAt
-    };
-  } catch (error) {
-    console.error('Error in getUserStats:', error);
-    return null;
-  }
-}
-
-/**
- * Отримати всіх користувачів (для адміністрування)
- */
-async function getAllUsers(filters = {}) {
-  try {
-    const query = {};
-    
-    if (filters.isBanned !== undefined) {
-      query.isBanned = filters.isBanned;
-    }
-    
-    return await User.find(query)
-      .sort({ lastActivityAt: -1 })
-      .limit(filters.limit || 100)
-      .lean();
-  } catch (error) {
-    console.error('Error in getAllUsers:', error);
-    return [];
-  }
-}
-
-/**
- * Отримати кількість активних користувачів
- */
-async function getActiveUsersCount(hoursAgo = 24) {
-  try {
-    const cutoffTime = new Date(Date.now() - hoursAgo * 60 * 60 * 1000);
-    return await User.countDocuments({
-      lastActivityAt: { $gte: cutoffTime }
-    });
-  } catch (error) {
-    console.error('Error in getActiveUsersCount:', error);
-    return 0;
-  }
-}
-
 module.exports = {
+  addTokens,
+  deductTokens,
   getUser,
   hasTokens,
-  deductTokens,
-  addTokens,
-  removeTokens,
-  setSubscription,
-  saveConversationMessage,
-  getConversationHistory,
-  clearConversationHistory,
-  getTransactionHistory,
-  getUserStats,
-  getAllUsers,
-  getActiveUsersCount
+  removeTokens
 };

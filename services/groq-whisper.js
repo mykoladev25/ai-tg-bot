@@ -7,17 +7,13 @@ const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY
 });
 
-/**
- * Транскрибувати голос через Groq Whisper
- */
+
 async function transcribeVoice(audioUrl) {
     try {
-        // Завантажити аудіо файл
         const audioResponse = await axios.get(audioUrl, {
             responseType: 'arraybuffer'
         });
 
-        // Зберегти тимчасово
         const tempDir = '/tmp';
         const tempFile = path.join(tempDir, `audio_${Date.now()}.ogg`);
         fs.writeFileSync(tempFile, Buffer.from(audioResponse.data));
@@ -29,7 +25,6 @@ async function transcribeVoice(audioUrl) {
             response_format: 'json'
         });
 
-        // Видалити тимчасовий файл
         fs.unlinkSync(tempFile);
 
         return {

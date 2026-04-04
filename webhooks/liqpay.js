@@ -3,16 +3,11 @@ const liqpay = require('../services/liqpay');
 const userBalance = require('../utils/userBalance');
 const models = require('../config/models');
 
-/**
- * Створити router для LiqPay webhook з посиланням на bot
- */
+
 function createLiqPayRouter(bot) {
   const router = express.Router();
 
-  /**
-   * Callback від LiqPay - сервер LiqPay надішле сюди результат платежу
-   * POST /webhook/liqpay
-   */
+  
   router.post('/liqpay', async (req, res) => {
     try {
       const { data, signature } = req.body;
@@ -22,13 +17,11 @@ function createLiqPayRouter(bot) {
         return res.status(400).json({ error: 'Missing data or signature' });
       }
 
-      // Верифікація підпису
       if (!liqpay.verifySignature(data, signature)) {
         console.error('❌ LiqPay webhook: Invalid signature');
         return res.status(401).json({ error: 'Invalid signature' });
       }
 
-      // Декодування даних платежу
       const paymentData = liqpay.decodeParams(data);
       console.log('📡 LiqPay callback received:', {
         status: paymentData.status,
@@ -38,9 +31,7 @@ function createLiqPayRouter(bot) {
         description: paymentData.description
       });
 
-      // Обробка успішного платежу
       if (paymentData.status === 'success') {
-        // Розпарсимо замовлення: format "userId_planKey_timestamp"
         const parts = paymentData.order_id.split('_');
         const userId = parts[0];
         const planKey = parts[1];
@@ -52,13 +43,11 @@ function createLiqPayRouter(bot) {
 
         const userIdNum = parseInt(userId);
 
-        // ⚠️ SECURITY: Валідація userId
         if (isNaN(userIdNum) || userIdNum <= 0) {
           console.error('❌ LiqPay: Invalid userId:', userId);
           return res.status(400).json({ error: 'Invalid userId' });
         }
 
-        // Перевіримо чи є такий план
         const sub = models.subscriptions[planKey];
 
         if (!sub) {
@@ -66,7 +55,6 @@ function createLiqPayRouter(bot) {
           return res.status(400).json({ error: 'Invalid plan' });
         }
 
-        // ⚠️ SECURITY: Перевірка на ідемпотентність - чи платіж вже оброблений
         const Transaction = require('../database/models/Transaction');
         const existingTransaction = await Transaction.findOne({
           'metadata.orderId': paymentData.order_id,
@@ -78,10 +66,8 @@ function createLiqPayRouter(bot) {
           return res.json({ status: 'ok', message: 'Already processed' });
         }
 
-        // Обробляємо платіж
         console.log(`✅ LiqPay: Processing payment for user ${userIdNum}, plan: ${planKey}`);
 
-        // Використовуємо tokensWayForPay (бонус) або звичайні tokens
         const tokenCount = sub.tokensWayForPay || sub.tokens;
 
         await userBalance.addTokens(
@@ -99,25 +85,23 @@ function createLiqPayRouter(bot) {
           }
         );
 
-        console.log(`✅ Tokens added: ${tokenCount}⚡ (${sub.tokensWayForPay ? 'с бонусом' : 'без бонусу'}) for user ${userIdNum}`);
+        console.log(`✅ Tokens added: ${tokenCount}⚡ (${sub.tokensWayForPay ? 'with bonus' : 'without bonus'}) for user ${userIdNum}`);
 
-        // Отримуємо користувача для відправки повідомлення
         const user = await userBalance.getUser(userIdNum, { id: userIdNum });
 
-        // Відправляємо повідомлення користувачу в Telegram
         if (bot) {
           try {
-            const bonusText = sub.tokensWayForPay ? `\n🎁 <b>+${sub.tokensWayForPay - sub.tokens}⚡ бонус</b> (економія на комісіях LiqPay)` : '';
+            const bonusText = sub.tokensWayForPay ? `\n🎁 <b>+${sub.tokensWayForPay - sub.tokens}⚡ bonus</b> (reduced LiqPay fees)` : '';
 
             await bot.telegram.sendMessage(
               userIdNum,
-              `✅ <b>Платіж успішно оброблений!</b>\n\n` +
-              `💳 Метод: LiqPay\n` +
-              `💎 Тариф: ${sub.name}\n` +
-              `⚡ Токенів нараховано: ${tokenCount}${bonusText}\n` +
-              `💰 Сума: ${paymentData.amount} ${paymentData.currency}\n` +
-              `💵 Новий баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
-              `Дякуємо за покупку! 🎉`,
+              `✅ <b>Payment processed successfully.</b>\n\n` +
+              `💳 Method: LiqPay\n` +
+              `💎 Plan: ${sub.name}\n` +
+              `⚡ Tokens credited: ${tokenCount}${bonusText}\n` +
+              `💰 Amount: ${paymentData.amount} ${paymentData.currency}\n` +
+              `💵 New balance: ${user.tokens.toFixed(2)}⚡\n\n` +
+              `Thank you for your purchase.`,
               { parse_mode: 'HTML' }
             );
             console.log(`📨 Success message sent to user ${userIdNum}`);
@@ -137,17 +121,16 @@ function createLiqPayRouter(bot) {
       } else if (paymentData.status === 'failure' || paymentData.status === 'error') {
         console.warn(`⚠️ LiqPay payment failed: ${paymentData.order_id} - ${paymentData.status}`);
 
-        // Відправляємо повідомлення про помилку користувачу
         const parts = paymentData.order_id.split('_');
         const userId = parseInt(parts[0]);
         if (bot && userId) {
           try {
             await bot.telegram.sendMessage(
               userId,
-              `❌ <b>Платіж не вдався</b>\n\n` +
-              `Статус: ${paymentData.status}\n` +
-              `Замовлення: ${paymentData.order_id}\n\n` +
-              `Спробуйте ще раз або оберіть інший спосіб оплати.`,
+              `❌ <b>Payment failed</b>\n\n` +
+              `Status: ${paymentData.status}\n` +
+              `Order: ${paymentData.order_id}\n\n` +
+              `Please try again or choose another payment method.`,
               { parse_mode: 'HTML' }
             );
           } catch (error) {
@@ -160,7 +143,6 @@ function createLiqPayRouter(bot) {
         console.log(`ℹ️ LiqPay transaction status: ${paymentData.status} for order ${paymentData.order_id}`);
       }
 
-      // Обов'язково повертаємо 200 OK, щоб LiqPay знав що callback оброблений
       res.json({ status: 'ok' });
     } catch (error) {
       console.error('❌ LiqPay webhook error:', error);

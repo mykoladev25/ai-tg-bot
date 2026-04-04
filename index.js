@@ -6,8 +6,15 @@ const axios = require('axios');
 const express = require('express');
 const groqWhisper = require('./services/groq-whisper');
 const adminNotifier = require('./utils/adminNotifier');
+const { resolveLocale, t } = require('./utils/i18n');
+const {
+  buildTelegramFileProxyUrl,
+  getTelegramFileUrl,
+  isExpired,
+  verifyProxySignature
+} = require('./utils/telegramFiles');
 
-// Імпортуємо сервіси
+// Services
 const claude = require('./services/claude');
 const midjourney = require('./services/midjourney');
 const replicate = require('./services/replicate');
@@ -18,16 +25,16 @@ const kiePricingSync = require('./services/kie-pricing-sync');
 const payment = require('./services/payment');
 const exchangeRate = require('./services/exchangeRate');
 
-// Імпортуємо webhooks
+// Webhooks
 const stripeWebhook = require('./webhooks/stripe');
 
-// Імпортуємо моніторинг
+// Monitoring
 const monitoringLoggers = require('./monitoring/loggers');
 const monitoringAlerts = require('./monitoring/alerts');
 const adminRoutes = require('./admin/routes');
 const replicatePricing = require('./services/replicatePricing');
 
-// Імпортуємо утиліти
+// Utilities
 const keyboard = require('./utils/keyboard');
 const userBalance = require('./utils/userBalance');
 const blockedUsersUtil = require('./utils/blockedUsers');
@@ -37,7 +44,7 @@ const db = require('./database/connection');
 const User = require('./database/models/User');
 const GenerationResult = require('./database/models/GenerationResult');
 
-// Імпортуємо конфігурацію
+// Configuration
 const models = require('./config/models');
 const { TRIAL_TOKENS, WORST_CASE_TOKEN_USD } = require('./config/constants');
 const accessControl = require('./config/access');
@@ -45,10 +52,7 @@ const accessControl = require('./config/access');
 const TOKEN_USD = models?._pricingAssumptions?.tokenUSD || 0.01;
 const PRICING_MULTIPLIER = models?._pricingAssumptions?.pricingMultiplier || 1.65;
 
-/**
- * Список моделей дизайну з ефективною ціною для кнопок меню (KIE/Replicate за вибором юзера).
- * Фільтрує Midjourney якщо KIE.AI не налаштований (Midjourney доступний тільки через KIE.AI).
- */
+
 function getDesignModelsWithEffectiveCost(userId) {
   if (!models?.design?.models || !Array.isArray(models.design.models)) {
     console.error('❌ models.design.models is not available');
@@ -57,19 +61,14 @@ function getDesignModelsWithEffectiveCost(userId) {
 
   return models.design.models
     .filter(m => {
-      // Пропускаємо вимкнені моделі
       if (m.available === false) return false;
-      // Пропускаємо приховані в меню моделі (використовуються внутрішньо)
       if (m.menuHidden) return false;
-      // KIE-only моделі показуємо тільки коли KIE.AI увімкнена і в користувача є доступ
       if (m.kieAIOnly) {
         return kieAI.isKieAIEnabled && accessControl.canUseKieAI(userId);
       }
-      // Google direct моделі (Nano Banana FREE / Nano Banana 2) доступні тільки якщо Gemini API налаштований
       if (m.googleDirect) {
         return geminiImage.isConfigured;
       }
-      // Зображення без омежень доступна тільки якщо A2E API налаштований
       if (m.a2eOnly) {
         const a2eService = require('./services/a2e');
         return a2eService.isA2EEnabled;
@@ -77,7 +76,6 @@ function getDesignModelsWithEffectiveCost(userId) {
       return true;
     })
     .map(m => {
-      // Nano Banana PRO — показуємо динамічний діапазон 2K/4K за активним провайдером
       if (m.key === 'nano_banana_pro') {
         const model2k = models.design.models.find(x => x.key === 'nano_banana_2k');
         const model4k = models.design.models.find(x => x.key === 'nano_banana_4k');
@@ -90,7 +88,6 @@ function getDesignModelsWithEffectiveCost(userId) {
         };
       }
 
-      // Google direct моделі з кількома розмірами — показуємо діапазон
       if (m.googleDirect && m.costsBySize && typeof m.costsBySize === 'object') {
         const values = Object.values(m.costsBySize).filter(v => typeof v === 'number');
         if (values.length > 0) {
@@ -111,20 +108,18 @@ function getDesignModelsWithEffectiveCost(userId) {
     });
 }
 
-/** Моделі відео, що доступні тільки через KIE. */
+
 const KIE_ONLY_VIDEO_MODELS = ['kling_3', 'seedance_2', 'seedance_2_fast'];
 
 
-/**
- * Чи може користувач бачити моделі "тільки KIE" (Kling 3.0, Seedance 2 тощо).
- */
+
 function canSeeKieOnlyVideoModels(userId) {
   if (!accessControl.canUseKieAI(userId) || !kieAI.isKieAIEnabled) return false;
   const choice = userProviderChoice.get(userId);
-  return choice !== 'replicate'; // показуємо при kie-ai або auto
+  return choice !== 'replicate'; 
 }
 
-/** Чи показувати ціну KIE в меню: при виборі KIE або при "auto" + є доступ до KIE. При виборі Replicate — завжди Replicate. */
+
 function useKiePriceForDisplay(userId) {
   const choice = userProviderChoice.get(userId);
   if (choice === 'replicate') return false;
@@ -132,10 +127,7 @@ function useKiePriceForDisplay(userId) {
   return accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 }
 
-/**
- * Чи має використовуватись KIE для конкретної моделі з урахуванням вибору провайдера.
- * AUTO та KIE.AI → KIE (якщо є доступ/реалізація), Replicate → Replicate.
- */
+
 function shouldUseKieProvider(userId, modelKey) {
   const choice = userProviderChoice.get(userId);
   if (choice === 'replicate') return false;
@@ -143,19 +135,13 @@ function shouldUseKieProvider(userId, modelKey) {
   return kieAI.isKieAIImplemented(modelKey);
 }
 
-/**
- * Тривалості Sora за провайдером:
- * - KIE.AI: 10/15 (10s тільки з reference image)
- * - Replicate: 4/8/12
- */
+
 function getSoraDurationsForUser(userId, model) {
   if (shouldUseKieProvider(userId, 'sora_2')) return [10, 15];
   return model?.durations || [4, 8, 12];
 }
 
-/**
- * Тип тарифу Sora для KIE.AI.
- */
+
 function resolveSoraType(duration, hasReference = false) {
   if (hasReference) {
     return duration >= 15 ? 'image_to_video_15s' : 'image_to_video_10s';
@@ -163,15 +149,12 @@ function resolveSoraType(duration, hasReference = false) {
   return 'text_to_video_15s';
 }
 
-/**
- * Список відео-моделей для меню з ефективними цінами (KIE/Replicate за провайдером).
- */
+
 function getVideoModelsForUser(userId) {
   const providerChoice = userProviderChoice.get(userId) || 'auto';
   let list = canSeeKieOnlyVideoModels(userId)
     ? models.video.models
     : models.video.models.filter(m => !KIE_ONLY_VIDEO_MODELS.includes(m.key));
-  // Sora 2 тимчасово працює тільки через Replicate
   if (providerChoice === 'kie-ai') {
     list = list.filter(m => m.key !== 'sora_2');
   }
@@ -251,18 +234,15 @@ function getVideoModelsForUser(userId) {
       };
     }
     if (m.key === 'kling_o1_edit') {
-      // Для редагування відео: ціна залежить від mode та наявності відео-input
-      // Показуємо мінімальну ціну (std без відео-input)
       const durations = m.durations || [3, 5, 7, 10];
       const minDuration = Math.min(...durations);
       return {
         ...m,
-        cost: minDuration * m.costPerSecond,  // std без відео-input
-        maxCost: Math.max(...durations) * m.costPerSecondProWithVideo  // pro з відео-input
+        cost: minDuration * m.costPerSecond,  
+        maxCost: Math.max(...durations) * m.costPerSecondProWithVideo  
       };
     }
     if (m.key === 'a2e_motion') {
-      // A2E: показуємо мінімальну та максимальну ціну залежно від тривалості
       const durations = m.durations || [5, 10, 15, 20];
       const minDuration = Math.min(...durations);
       const maxDuration = Math.max(...durations);
@@ -276,10 +256,7 @@ function getVideoModelsForUser(userId) {
   });
 }
 
-/**
- * Ціна за обраним провайдером: KIE → ціна KIE, Replicate → Replicate.
- * Якщо обрано KIE, але в KIE немає реалізації для моделі — ціна Replicate і запуск Replicate.
- */
+
 function getEffectiveImageCost(userId, model, modelKey) {
   if (!useKiePriceForDisplay(userId)) return model.cost;
   if (!kieAI.isKieAIImplemented(modelKey)) return model.cost;
@@ -293,9 +270,7 @@ function getEffectiveImageCost(userId, model, modelKey) {
   }
 }
 
-/**
- * Ціна за обраним провайдером; якщо KIE без реалізації — Replicate.
- */
+
 function getEffectiveKlingV2_6CostPerSecond(userId, model, withAudio) {
   if (!useKiePriceForDisplay(userId)) {
     return withAudio ? (model?.costPerSecondAudio ?? model?.costPerSecond ?? 6) : (model?.costPerSecond ?? model?.costPerSecondNoAudio ?? 6);
@@ -311,12 +286,7 @@ function getEffectiveKlingV2_6CostPerSecond(userId, model, withAudio) {
   return v ?? (withAudio ? 6 : 6);
 }
 
-/**
- * Ціна Veo — flat per-video (токени за одне відео).
- * @param {number} userId
- * @param {string} veoModel - 'veo3_fast' або 'veo3'
- * @returns {number} вартість у токенах
- */
+
 function getEffectiveVeoFlatCost(userId, veoModel = 'veo3_fast') {
   const model = models.video.models.find(m => m.key === 'veo');
   const isQuality = veoModel === 'veo3';
@@ -345,9 +315,7 @@ function getVeoApiCostUSD(userId, veoModel = 'veo3_fast', duration = 8) {
   return veoModel === 'veo3' ? (model?.apiCostQuality ?? 1.25) : (model?.apiCostFast ?? 0.30);
 }
 
-/**
- * Legacy: Ціна Veo per-second (для /api/plans backward compat).
- */
+
 function getEffectiveVeoCostPerSecond(userId, withAudio) {
   const model = models.video.models.find(m => m.key === 'veo');
   if (canUseGeminiVeoDirect(userId)) {
@@ -391,9 +359,7 @@ function getEffectiveVeoGenerationCost(userId, veoModel = 'veo3_fast', duration 
   return getEffectiveVeoFlatCost(userId, veoModel);
 }
 
-/**
- * Ціна Kling 2.5 за обраним провайдером (токенів за секунду).
- */
+
 function getEffectiveKlingCostPerSecond(userId) {
   const model = models.video.models.find(m => m.key === 'kling');
   const fallback = model?.costPerSecond ?? 12;
@@ -404,9 +370,7 @@ function getEffectiveKlingCostPerSecond(userId) {
   return k.costPerSecond;
 }
 
-/**
- * Ціна Runway Turbo за обраним провайдером: токени за секунду або за run.
- */
+
 function getEffectiveRunwayTurboCostPerSecond(userId) {
   const model = models.video.models.find(m => m.key === 'runway_turbo');
   const fallback = model?.costPerSecond ?? 9;
@@ -416,9 +380,7 @@ function getEffectiveRunwayTurboCostPerSecond(userId) {
   return k.costPerSecond;
 }
 
-/**
- * Ціна Kling Motion за обраним провайдером: { std_image, std_video, pro_image, pro_video }.
- */
+
 function getEffectiveKlingMotionCosts(userId) {
   const model = models.video.models.find(m => m.key === 'kling_motion');
   const fallback = model?.costs ?? { std_image: 83, std_video: 165, pro_image: 165, pro_video: 330 };
@@ -429,9 +391,7 @@ function getEffectiveKlingMotionCosts(userId) {
   return k.costs;
 }
 
-/**
- * Ціна Kling 3.0 за обраним провайдером (токенів за секунду; mode: 'std'|'pro').
- */
+
 function getEffectiveKling3CostPerSecond(userId, mode, withAudio) {
   const model = models.video.models.find(m => m.key === 'kling_3');
   const fallbackNo = model?.costPerSecondNoAudio ?? 23;
@@ -443,9 +403,7 @@ function getEffectiveKling3CostPerSecond(userId, mode, withAudio) {
   return withAudio ? (r.costPerSecondAudio ?? fallbackAud) : (r.costPerSecondNoAudio ?? fallbackNo);
 }
 
-/**
- * Ціна за обраним провайдером; якщо KIE без реалізації (напр. Sora) — Replicate ціна і запуск Replicate.
- */
+
 function getEffectiveSora2Cost(userId, model, duration = 15, options = {}) {
   if (!shouldUseKieProvider(userId, 'sora_2')) {
     return Math.ceil(duration * (model?.costPerSecond || 0));
@@ -501,33 +459,26 @@ function getSeedanceCostRange(userId, modelKey) {
   };
 }
 
-// Ініціалізація бота
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 const isDevelopment = false;
 const isShowBroadCast = process.env.SEND_STARTUP_BROADCAST === 'true' && false;
 
 // ==================== DATA STORAGE ====================
-// Для збирання feedback від користувачів
 const feedbackData = new Map(); // userId -> { type, message, timestamp }
 
-// Чернетки розсилок (адмін)
 const broadcastDrafts = new Map(); // adminId -> { type, text?, caption?, fileId?, parseMode? }
 const broadcastStates = new Map(); // adminId -> { step: 'awaiting_content', parseMode }
 
-// Стан генерації зображень (новий флоу)
 // userId -> { model: string, prompt?: string, photos?: Array, step: 'waiting_photos'|'prompt' }
 const imageGenState = new Map();
 
-// Вибір провайдера для користувачів (тільки для адміна поки що)
 // userId -> 'replicate' | 'kie-ai'
 const userProviderChoice = new Map();
 const PROVIDER_CHOICE_FILE = path.join(__dirname, 'config', 'provider-choice.json');
 
 // KIE.AI callback map: taskId -> { chatId, userId, username, model, prompt, cost, apiCost, options }
-// Зберігає дані для відправки результату через webhook callback
 const kieCallbackMap = new Map();
-// Відстежує taskId які вже були доставлені через webhook callback (щоб уникнути подвійної доставки)
 const kieCallbackDelivered = new Set();
 
 function loadProviderChoice() {
@@ -558,25 +509,18 @@ function saveProviderChoice() {
 
 loadProviderChoice();
 
-// Rate limiting для заблокованих користувачів (щоб не спамили)
-const blockedUserLastNotified = new Map(); // userId -> timestamp
-const BLOCKED_USER_COOLDOWN = 5 * 60 * 1000; // 5 хвилин між повідомленнями
+const blockedUserLastNotified = new Map();
+const BLOCKED_USER_COOLDOWN = 5 * 60 * 1000;
 
 const WELCOME_MODAL_TEXT = [
-  'Всі топові нейромережі в одному місці!',
-  'Стань АІ-креатором разом з нами.',
-  'Курс по АІ: https://neurolab.fun/'
+  t('en', 'welcome.text')
 ].join('\n');
 
-const WELCOME_START_BUTTON_TEXT = '✨ Start ✨';
+const WELCOME_START_BUTTON_TEXT = t('en', 'welcome.start');
 
 let cachedBotAvatarFileId = null;
 let cachedBotId = null;
 
-/**
- * Перевіряє чи можна надіслати повідомлення заблокованому користувачу
- * Повертає true якщо можна, false якщо ще рано (cooldown)
- */
 function canNotifyBlockedUser(userId) {
   const lastNotified = blockedUserLastNotified.get(userId);
   const now = Date.now();
@@ -641,22 +585,25 @@ async function sendWelcomeModal(ctx) {
 }
 
 function buildMainMenuMessage(ctx, user) {
-  const firstName = ctx.from?.first_name || 'друг';
+  const locale = resolveLocale(ctx);
+  const firstName = ctx.from?.first_name || 'friend';
   const balance = Number.isFinite(user?.tokens) ? user.tokens.toFixed(2) : '0.00';
 
-  return `🏠 Головне меню
-
-Привіт, ${firstName}!
-
-Я neuro\u200B.lab\u200B.ai - ваш помічник з AI генерації.
-
-💰 Ваш баланс: ${balance}⚡ FREE
-
-Виберіть бажаний розділ 👇`;
+  return [
+    t(locale, 'mainMenu.title'),
+    '',
+    t(locale, 'mainMenu.greeting', { firstName }),
+    '',
+    t(locale, 'mainMenu.intro'),
+    '',
+    t(locale, 'mainMenu.balance', { balance }),
+    '',
+    t(locale, 'mainMenu.cta')
+  ].join('\n');
 }
 
 async function sendMainMenu(ctx, user) {
-  await ctx.reply(buildMainMenuMessage(ctx, user), keyboard.createMainMenu());
+  await ctx.reply(buildMainMenuMessage(ctx, user), keyboard.createMainMenu(resolveLocale(ctx)));
 }
 
 function runBackgroundTask(task, label = 'task') {
@@ -726,22 +673,17 @@ function buildDynamicTrialBlockedModels(trialTokens) {
   return blocked;
 }
 
-/**
- * Перевіряє чи користувач на Trial (не робив покупок)
- */
+
 async function isTrialUser(userId) {
   try {
     const user = await userBalance.getUser(userId);
-    // Trial = користувач НЕ має жодної покупки (totalTokensPurchased = 0)
     return user.totalTokensPurchased === 0;
   } catch (e) {
-    return true; // За замовчуванням вважаємо Trial
+    return true; 
   }
 }
 
-/**
- * Записує Trial usage в базу даних
- */
+
 async function recordTrialUsage(userId, modelKey) {
   try {
     const User = require('./database/models/User');
@@ -754,12 +696,8 @@ async function recordTrialUsage(userId, modelKey) {
   }
 }
 
-/**
- * Перевіряє Trial обмеження для моделі
- * @returns {object} { allowed: boolean, message?: string }
- */
+
 async function checkTrialRestrictions(userId, modelKey, options = {}) {
-  // Trial = без покупок. Але якщо баланс >= початкового (15⚡), дозволяємо доступ.
   const trialTokens = TRIAL_TOKENS;
   let user;
   try {
@@ -772,10 +710,9 @@ async function checkTrialRestrictions(userId, modelKey, options = {}) {
   const hasMinTrialBalance = (user?.tokens || 0) >= trialTokens;
 
   if (!isTrial || hasMinTrialBalance) {
-    return { allowed: true }; // Платний або має >= початкового балансу
+    return { allowed: true }; 
   }
 
-  // 1. Перевірка повністю заблокованих моделей
   if (TRIAL_RESTRICTIONS.blockedModels.includes(modelKey)) {
     return {
       allowed: false,
@@ -783,10 +720,8 @@ async function checkTrialRestrictions(userId, modelKey, options = {}) {
     };
   }
 
-  // 2. Перевірка заблокованих режимів (наприклад, тривалість)
   const blockedModes = TRIAL_RESTRICTIONS.blockedModes[modelKey];
   if (blockedModes) {
-    // Перевірка тривалості для Kling
     if (blockedModes.durations && options.duration) {
       if (blockedModes.durations.includes(options.duration)) {
         return {
@@ -800,7 +735,6 @@ async function checkTrialRestrictions(userId, modelKey, options = {}) {
   return { allowed: true };
 }
 
-// ✅ ГРАФІЧНІ МОДЕЛІ ДЛЯ НОВОГО ФЛОУ (референси → промпт → генерація)
 const IMAGE_MODELS = [
   'stable_diffusion',
   'nano_banana',
@@ -818,7 +752,6 @@ const IMAGE_MODELS = [
   'recraft_upscale'
 ];
 
-// ✅ МОДЕЛІ КОТРІ ПІДТРИМУЮТЬ ВИБІР ASPECT RATIO
 const MODELS_WITH_ASPECT_RATIO = [
   'nano_banana',
   'nano_banana_free',
@@ -833,17 +766,16 @@ const MODELS_WITH_ASPECT_RATIO = [
   'z_image'
 ];
 
-// ✅ МАСИВ МОДЕЛЕЙ З БАГАТОКРОКОВИМ ПРОЦЕСОМ
 const MODELS_WITH_STATE = [
   'kling',                  // duration + aspect + start_image + end_image
   'kling_v2_6',             // duration + aspect + start_image (no end_image)
-  'kling_motion',           // mode + orientation + sound + фото + відео
+  'kling_motion',           
   'veo',                    // aspect ratio + prompt + last_frame + start_image
   'sora_2',                 // duration + aspect ratio + optional reference + prompt
   'seedance_2',             // resolution + duration + aspect ratio + audio + prompt
   'seedance_2_fast',        // resolution + duration + aspect ratio + audio + prompt
-  'nano_banana_pro',        // вибір розміру (2K/4K)
-  ...MODELS_WITH_ASPECT_RATIO // добавляємо моделі з вибором aspect ratio
+  'nano_banana_pro',        
+  ...MODELS_WITH_ASPECT_RATIO 
 ];
 
 const ASPECT_RATIO_OPTIONS = {
@@ -1016,54 +948,44 @@ async function promptAspectRatioSelection(ctx, { modelKey, promptText, hasRefere
   );
 }
 
-// ✅ MIDDLEWARE: обнуляти стан при callback (крім моделей зі станами)
 bot.on('callback_query', async (ctx, next) => {
   const callbackData = ctx.callbackQuery.data;
   const userId = ctx.from.id;
   const currentModel = userCurrentModel.get(userId);
   const state = userState.get(userId);
   
-  // ✅ ДОЗВОЛЯЄМО ASPECT RATIO CALLBACKS
   if (callbackData.startsWith('aspect_ratio_')) {
     return next();
   }
 
-  // ✅ ДОЗВОЛЯЄМО IMG GENERATION CALLBACKS (референси/промпт)
   if (callbackData.startsWith('img_gen_')) {
     return next();
   }
 
-  // ✅ ДОЗВОЛЯЄМО IMG QUALITY CALLBACKS (вибір resolution)
   if (callbackData.startsWith('img_quality_')) {
     return next();
   }
 
-  // ✅ ДОЗВОЛЯЄМО FREE MODEL CALLBACKS
   if (callbackData.startsWith('img_free_')) {
     return next();
   }
 
-  // ✅ ДОЗВОЛЯЄМО VEO CALLBACKS
   if (callbackData.startsWith('veo_')) {
     return next();
   }
 
-  // ✅ ДОЗВОЛЯЄМО SORA CALLBACKS
   if (callbackData.startsWith('sora_')) {
     return next();
   }
 
-  // ✅ ДОЗВОЛЯЄМО KLING CALLBACKS
   if (callbackData.startsWith('kling_')) {
     return next();
   }
 
-  // ✅ ДОЗВОЛЯЄМО KLING MOTION CALLBACKS
   if (callbackData.startsWith('motion_')) {
     return next();
   }
 
-  // ✅ ДОЗВОЛЯЄМО RUNWAY TURBO CALLBACKS
   if (callbackData.startsWith('runway_turbo_')) {
     return next();
   }
@@ -1072,7 +994,6 @@ bot.on('callback_query', async (ctx, next) => {
     return next();
   }
 
-  // ✅ ДОЗВОЛЯЄМО A2E MOTION CALLBACKS
   if (callbackData.startsWith('a2e_')) {
     return next();
   }
@@ -1088,52 +1009,42 @@ bot.on('callback_query', async (ctx, next) => {
     }
   }
   
-  // ✅ Дозволяємо veo state
   if (state?.action === 'veo_generation') {
     return next();
   }
 
-  // ✅ Дозволяємо kling state
   if (state?.action === 'kling_generation') {
     return next();
   }
 
-  // ✅ Дозволяємо kling_motion state
   if (state?.action === 'kling_motion_generation') {
     return next();
   }
 
-  // ✅ Дозволяємо runway turbo state
   if (state?.action === 'runway_turbo_generation') {
     return next();
   }
 
-  // ✅ Дозволяємо kling_3 state
   if (state?.action === 'kling_3_generation') {
     return next();
   }
 
-  // ✅ Дозволяємо seedance state
   if (state?.action === 'seedance_generation') {
     return next();
   }
 
-  // ✅ Дозволяємо a2e_motion state
   if (state?.action === 'a2e_motion_generation') {
     return next();
   }
 
-  // ✅ Дозволяємо a2e_image state
   if (state?.action === 'a2e_image_generation') {
     return next();
   }
 
-  // ✅ Дозволяємо kling_o1_edit state
   if (state?.action === 'kling_o1_edit_generation') {
     return next();
   }
 
-  // ✅ Дозволяємо midjourney state
   if (state?.action === 'midjourney_generation') {
     return next();
   }
@@ -1146,12 +1057,10 @@ bot.on('callback_query', async (ctx, next) => {
 
 // ==================== FEEDBACK HANDLER ====================
 
-// Обробник для текстового feedback
 bot.on('text', async (ctx, next) => {
   const userId = ctx.from.id;
   const text = ctx.message.text;
 
-  // Якщо користувач заповнює feedback
   if (feedbackData.has(userId) && !text.startsWith('/')) {
     const feedback = feedbackData.get(userId);
 
@@ -1165,10 +1074,8 @@ bot.on('text', async (ctx, next) => {
     return;
   }
 
-  // Перевіряємо чи користувач заблокований
   const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
   if (isBlocked) {
-    // Rate limit - відповідаємо тільки раз на 5 хвилин
     if (canNotifyBlockedUser(userId)) {
       await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
     }
@@ -1178,15 +1085,12 @@ bot.on('text', async (ctx, next) => {
   return next();
 });
 
-// Обробник для зображень/фото у feedback
 bot.on(['photo', 'document'], async (ctx, next) => {
   const userId = ctx.from.id;
 
-  // Якщо користувач заповнює feedback та надсилає фото/документ
   if (feedbackData.has(userId)) {
     const feedback = feedbackData.get(userId);
 
-    // Отримуємо caption як текст feedback
     const text = ctx.message.caption || '[Скрін з помилкою/проблемою]';
 
     if (text.length > 1000) {
@@ -1194,10 +1098,8 @@ bot.on(['photo', 'document'], async (ctx, next) => {
       return;
     }
 
-    // Отримуємо ID зображення для пересилання
     let fileId = null;
     if (ctx.message.photo) {
-      // Беремо найбільше фото
       fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
     } else if (ctx.message.document) {
       fileId = ctx.message.document.file_id;
@@ -1211,15 +1113,12 @@ bot.on(['photo', 'document'], async (ctx, next) => {
   return next();
 });
 
-// Допоміжна функція для відправки feedback адміну
 async function sendFeedbackToAdmin(feedback, text, ctx, fileId = null) {
   feedback.message = text;
   feedback.timestamp = new Date();
 
-  // Відправляємо feedback усім адмінам
   const adminIds = accessControl.getAdminIds();
   if (adminIds.length > 0) {
-    // Формуємо рядок з username - показуємо тільки якщо він є
     const usernameDisplay = feedback.username && feedback.username !== 'unknown'
       ? `@${feedback.username}`
       : '(без username)';
@@ -1267,7 +1166,6 @@ ${feedback.message}`;
     }
   }
 
-  // Відповідаємо користувачу
   await ctx.reply(
     `✅ <b>Дякуємо за ваш ${feedback.typeName.toLowerCase()}!</b>
 
@@ -1280,10 +1178,8 @@ bot.on('text', async (ctx, next) => {
   const text = ctx.message.text;
   const userId = ctx.from.id;
 
-  // Перевіряємо чи користувач заблокований
   const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
   if (isBlocked) {
-    // Rate limit - відповідаємо тільки раз на 5 хвилин
     if (canNotifyBlockedUser(userId)) {
       await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
     }
@@ -1293,7 +1189,6 @@ bot.on('text', async (ctx, next) => {
   const currentModel = userCurrentModel.get(userId);
   const state = userState.get(userId);
   
-  // Кнопки головного меню (обнуляють стан) - тільки короткі версії
   const menuButtons = [
     '🧠 Помічники',
     '🎨 Креативи',
@@ -1305,13 +1200,11 @@ bot.on('text', async (ctx, next) => {
     '❓ Допомога'
   ];
   
-  // Якщо натиснута кнопка меню - обнуляємо
   if (menuButtons.includes(text)) {
     userCurrentModel.delete(userId);
     userState.delete(userId);
   }
   
-  // Якщо звичайний текст (промпт) - НЕ обнуляємо, передаємо далі
   return next();
 });
 
@@ -1339,7 +1232,7 @@ const userCurrentModel = new Map();
 const userState = new Map();
 const mediaGroups = new Map();
 
-const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || '@nnn_ddddddd';
+const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || '@support';
 
 const INSTRUCTION_HTML = `
 📄 <b>ІНСТРУКЦІЯ</b>
@@ -1403,15 +1296,12 @@ const INSTRUCTION_HTML = `
 ℹ️ Використовуючи бота, ви погоджуєтеся з умовами обслуговування.
 `;
 
-// ==================== КОМАНДИ ====================
 
 bot.start(async (ctx) => {
   const userId = ctx.from.id;
 
-  // Перевіряємо чи користувач заблокований
   const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
   if (isBlocked) {
-    // Rate limit - відповідаємо тільки раз на 5 хвилин
     if (canNotifyBlockedUser(userId)) {
       await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
     }
@@ -1437,37 +1327,34 @@ bot.start(async (ctx) => {
 });
 
 bot.command('help', async (ctx) => {
-  const helpText = `❓ Допомога
+  const helpText = `❓ Help
 
-🤖 Доступні команди:
-/start - Головне меню
-/profile - Ваш профіль
-/balance - Перевірити баланс
-/history - Історія використання
-/clear - Очистити історію розмови
-/feedback - Форма зворотнього зв'язку
-/instruction - Інструкція
-/info - Юридична інформація та угода користувача
-/help - Ця довідка
+🤖 Available commands:
+/start - Main menu
+/profile - Your profile
+/balance - Check your balance
+/history - Usage history
+/clear - Clear conversation history
+/feedback - Feedback form
+/instruction - Instructions
+/info - Legal information
+/help - This help message
 
-💡 Як користуватися:
-1. Виберіть розділ у головному меню
-2. Оберіть модель для генерації
-3. Надішліть текстовий запит
-4. Чекайте на результат
+💡 How to use the bot:
+1. Choose a section from the main menu
+2. Select a generation model
+3. Send your prompt or media input
+4. Wait for the result
 
-💰 Токени витрачаються за кожну генерацію
-📦 Купіть підписку для отримання більше токенів
+💰 Tokens are charged for each generation
+📦 Buy a package to get more tokens
 
-👤 Підтримка:
-💬 Telegram: https://t.me/nnn_ddddddd
+👤 Support:
+💬 Telegram: https://t.me/${SUPPORT_USERNAME.replace('@', '')}
 
-📋 Важлива інформація:
-🔗 Угода користувача: /info
-🔗 Політика приватності: /info
-🔗 Інформація про компанію: /info
-
-© 2026 neuro.lab.ai Всі права захищені.`;
+📋 Legal information:
+🔗 Terms and privacy: /info
+🔗 Company information: /info`;
 
   await ctx.reply(helpText, keyboard.createBackButton());
 });
@@ -1487,14 +1374,11 @@ bot.command('balance', async (ctx) => {
 bot.command('clear', async (ctx) => {
   const userId = ctx.from.id;
 
-  // Очищаємо стан генерації зображень (новий флоу)
   const hadImageState = imageGenState.has(userId);
   imageGenState.delete(userId);
 
-  // Очищаємо стан генерації (але НЕ обрану модель!)
   const hadState = userState.has(userId);
   userState.delete(userId);
-  // НЕ видаляємо userCurrentModel - користувач може продовжити з тією ж моделлю
 
   if (hadImageState || hadState) {
     const currentModel = userCurrentModel.get(userId);
@@ -1552,7 +1436,7 @@ bot.command('info', async (ctx) => {
 
 Натисніть на кнопку нижче щоб ознайомитися з повним текстом документів:`;
 
-  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createLegalMenu() });
+  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createLegalMenu(ctx) });
 });
 
 bot.command('feedback', async (ctx) => {
@@ -1601,7 +1485,6 @@ bot.command('blocklist', async (ctx) => {
   await ctx.reply(message, { parse_mode: 'HTML' });
 });
 
-// Перевірка цін KIE.AI (тільки для адміна)
 bot.command('kiepricing', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
@@ -1673,7 +1556,6 @@ bot.command('kiepricing', async (ctx) => {
   }
 });
 
-// Форсувати оновлення цін (тільки для адміна)
 bot.command('kiepricingupdate', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
@@ -1698,7 +1580,6 @@ bot.command('kiepricingupdate', async (ctx) => {
   }
 });
 
-// Детальний звіт про ціни (тільки для адміна)
 bot.command('kiepricingreport', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
@@ -1774,7 +1655,6 @@ bot.command('kiepricingreport', async (ctx) => {
   }
 });
 
-// Порівняння цін для конкретної моделі (тільки для адміна)
 bot.command('kiecompare', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
     await ctx.reply('❌ Доступ заборонений');
@@ -1871,20 +1751,17 @@ bot.command(/^unblock_(\d+)$/, async (ctx) => {
     return;
   }
 
-  // Перевіряємо чи користувач заблокований
   const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
   if (!isBlocked) {
     await ctx.reply(`ℹ️ Користувач ${userId} не заблокований`);
     return;
   }
 
-  // Розблокуємо користувача
   const success = await blockedUsersUtil.unblockUser(userId);
 
   if (success) {
     await ctx.reply(`✅ Користувач ${userId} розблокований`);
 
-    // Спробуємо повідомити користувача
     try {
       await bot.telegram.sendMessage(
         userId,
@@ -2018,7 +1895,6 @@ bot.action('broadcast_cancel', async (ctx) => {
   await ctx.reply('✅ Розсилку скасовано.');
 });
 
-// Перехоплюємо контент для превʼю (тільки адмін)
 bot.on('message', async (ctx, next) => {
   if (!accessControl.isAdmin(ctx.from.id)) return next();
   const currentAdminId = ctx.from.id;
@@ -2064,7 +1940,6 @@ bot.on('message', async (ctx, next) => {
   await sendBroadcastPreview(ctx, draft);
 });
 
-// Обробники feedback категорій
 bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -2075,7 +1950,6 @@ bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
     review: '⭐ Відгук'
   };
 
-  // Зберігаємо тип в sessionStorage
   feedbackData.set(ctx.from.id, {
     type: feedbackType,
     typeName: typeNames[feedbackType],
@@ -2094,7 +1968,6 @@ bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
 
 // ==================== ADMIN FEEDBACK HANDLERS ====================
 
-// Адмін підтверджує feedback
 bot.action(/^feedback_confirm_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -2104,7 +1977,6 @@ bot.action(/^feedback_confirm_(\d+)$/, async (ctx) => {
     return;
   }
 
-  // Оновлюємо повідомлення (якщо це текстове)
   const messageText = ctx.callbackQuery?.message?.text;
   if (messageText) {
     await ctx.editMessageText(
@@ -2112,11 +1984,9 @@ bot.action(/^feedback_confirm_(\d+)$/, async (ctx) => {
       { parse_mode: 'HTML' }
     );
   } else {
-    // Якщо це фото/документ, просто рідим reply
     await ctx.reply('✅ <b>Feedback прийнято</b>', { parse_mode: 'HTML' });
   }
 
-  // Повідомляємо користувачу
   try {
     await bot.telegram.sendMessage(
       userId,
@@ -2134,7 +2004,6 @@ bot.action(/^feedback_confirm_(\d+)$/, async (ctx) => {
   console.log(`✅ Feedback confirmed from user ${userId}`);
 });
 
-// Адмін відхиляє feedback
 bot.action(/^feedback_decline_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -2144,7 +2013,6 @@ bot.action(/^feedback_decline_(\d+)$/, async (ctx) => {
     return;
   }
 
-  // Оновлюємо повідомлення (якщо це текстове)
   const messageText = ctx.callbackQuery?.message?.text;
   if (messageText) {
     await ctx.editMessageText(
@@ -2152,11 +2020,9 @@ bot.action(/^feedback_decline_(\d+)$/, async (ctx) => {
       { parse_mode: 'HTML' }
     );
   } else {
-    // Якщо це фото/документ, просто рідим reply
     await ctx.reply('❌ <b>Feedback відхилено</b>', { parse_mode: 'HTML' });
   }
 
-  // Повідомляємо користувачу
   try {
     await bot.telegram.sendMessage(
       userId,
@@ -2174,7 +2040,6 @@ bot.action(/^feedback_decline_(\d+)$/, async (ctx) => {
   console.log(`❌ Feedback declined from user ${userId}`);
 });
 
-// Адмін блокує користувача
 bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -2189,20 +2054,15 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
     return;
   }
 
-  // Парсимо username та firstName з тексту повідомлення
-  // Новий формат: 👤 Від: @username | FirstName
-  // Або: 👤 Від: (без username) | FirstName
   const messageText = ctx.callbackQuery?.message?.text || ctx.callbackQuery?.message?.caption || '';
   let username = null;
   let firstName = 'Unknown';
 
-  // Спробуємо знайти з username
   const userMatchWithUsername = messageText.match(/👤 Від: @(\S+) \| (.+)/);
   if (userMatchWithUsername) {
     username = userMatchWithUsername[1];
     firstName = userMatchWithUsername[2].trim();
   } else {
-    // Спробуємо знайти без username
     const userMatchNoUsername = messageText.match(/👤 Від: \(без username\) \| (.+)/);
     if (userMatchNoUsername) {
       username = null;
@@ -2210,7 +2070,6 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
     }
   }
 
-  // Блокуємо користувача в БД
   const success = await blockedUsersUtil.blockUser(
     userId,
     username,
@@ -2221,7 +2080,6 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
   );
 
   if (success) {
-    // Оновлюємо повідомлення (якщо це текстове)
     const messageText = ctx.callbackQuery?.message?.text;
     if (messageText) {
       await ctx.editMessageText(
@@ -2229,11 +2087,9 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
         { parse_mode: 'HTML' }
       );
     } else {
-      // Якщо це фото/документ, просто рідим reply
       await ctx.reply('🚫 <b>Користувач заблокований</b>', { parse_mode: 'HTML' });
     }
 
-    // Повідомляємо користувачу про блокування
     try {
       await bot.telegram.sendMessage(
         userId,
@@ -2254,7 +2110,6 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
   }
 });
 
-// Обробники feedback категорій
 bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -2265,7 +2120,6 @@ bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
     review: '⭐ Відгук'
   };
 
-  // Зберігаємо тип в sessionStorage
   feedbackData.set(ctx.from.id, {
     type: feedbackType,
     typeName: typeNames[feedbackType],
@@ -2282,7 +2136,6 @@ bot.action(/^feedback_(suggestion|problem|review)$/, async (ctx) => {
   await ctx.reply(message, { parse_mode: 'HTML' });
 });
 
-// ==================== ГОЛОВНЕ МЕНЮ ====================
 
 bot.hears('🧠 Помічники', async (ctx) => {
   await ctx.reply(
@@ -2325,9 +2178,7 @@ bot.hears('👤 Профіль', async (ctx) => {
   await showProfile(ctx);
 });
 
-/**
- * Меню вибору провайдера (доступно всім користувачам)
- */
+
 bot.command('provider', async (ctx) => {
   const userId = ctx.from.id;
 
@@ -2368,9 +2219,7 @@ bot.command('provider', async (ctx) => {
   });
 });
 
-/**
- * Callback handlers для вибору провайдера
- */
+
 bot.action('provider_kie-ai', async (ctx) => {
   const userId = ctx.from.id;
 
@@ -2418,7 +2267,7 @@ bot.action('provider_replicate', async (ctx) => {
 bot.action('provider_auto', async (ctx) => {
   const userId = ctx.from.id;
 
-  userProviderChoice.delete(userId);  // видаляємо вибір, щоб використовувати автоматичний
+  userProviderChoice.delete(userId);  
   saveProviderChoice();
 
   await ctx.editMessageText(
@@ -2437,9 +2286,7 @@ bot.action('provider_auto', async (ctx) => {
   await ctx.answerCbQuery('✅ Автоматичний режим включений!');
 });
 
-/**
- * Callback для кнопки "Вибір провайдера" з меню профіля
- */
+
 bot.action('provider_menu', async (ctx) => {
   const userId = ctx.from.id;
 
@@ -2477,7 +2324,6 @@ bot.action('provider_menu', async (ctx) => {
   await ctx.answerCbQuery('⚙️ Меню провайдера');
 });
 
-// ==================== НАЛАШТУВАННЯ ====================
 
 bot.hears('⚙️ Налаштування', async (ctx) => {
   const userId = ctx.from.id;
@@ -2571,18 +2417,16 @@ bot.hears('📝 Feedback', async (ctx) => {
 });
 
 bot.hears('💰 Поповнити баланс', async (ctx) => {
-  await ctx.reply(`⚡ Купити токени\n\n Виберіть пакет 👇`, keyboard.createSubscriptionsMenu(ctx.from.id));
+  await ctx.reply(`⚡ Buy tokens\n\nChoose a package below.`, keyboard.createSubscriptionsMenu(ctx.from.id, ctx));
 });
 
-// Отримуємо ціни моделей
 const nanoBanana2kModel = models.design.models.find(m => m.key === 'nano_banana_2k');
 const seedream4kModel = models.design.models.find(m => m.key === 'seedream_4k');
-const CREATIVE_COST = seedream4kModel?.cost || 5;  // Seedream 4K: 5 токенів (KIE.AI $0.032)
+const CREATIVE_COST = seedream4kModel?.cost || 5;  
 const CREATIVE_COST_2K = 25;
 const CREATIVE_COST_SEEDREAM_4K = CREATIVE_COST;
 
 // ==================== UKRAINIAN ROMANTIC QUOTES FOR LOVE IS... ====================
-// Точно 25 цитат, як запропоновано
 const UKRAINIAN_LOVE_QUOTES = [
   "засинати, тримаючись за руки",
   "ділити останній шматочок і не шкодувати",
@@ -2612,7 +2456,6 @@ const UKRAINIAN_LOVE_QUOTES = [
 ];
 
 const ROMANTIC_SCENARIOS = [
-  // Класичні романтичні
   "holding hands",
   "hugging warmly",
   "sharing umbrella",
@@ -2623,7 +2466,6 @@ const ROMANTIC_SCENARIOS = [
   "looking at stars",
   "sharing ice cream",
 
-  // Ніжні жести
   "gentle forehead kiss",
   "playing with hair",
   "nose to nose",
@@ -2633,7 +2475,6 @@ const ROMANTIC_SCENARIOS = [
   "intertwined fingers",
   "whispering secrets",
 
-  // Веселі активності
   "pillow fight",
   "making funny faces",
   "building blanket fort",
@@ -2643,7 +2484,6 @@ const ROMANTIC_SCENARIOS = [
   "playing video games",
   "eating pizza together",
 
-  // Побутові милоти
   "morning coffee together",
   "breakfast in bed",
   "doing dishes together",
@@ -2653,7 +2493,6 @@ const ROMANTIC_SCENARIOS = [
   "building snowman",
   "catching raindrops",
 
-  // Сюрреалістичні
   "floating with balloons",
   "sitting on clouds",
   "riding bicycle in sky",
@@ -2662,7 +2501,6 @@ const ROMANTIC_SCENARIOS = [
   "flying with birds",
   "dancing on stars",
 
-  // Пригоди
   "running in rain",
   "jumping in puddles",
   "autumn leaf pile",
@@ -2671,7 +2509,6 @@ const ROMANTIC_SCENARIOS = [
   "picnic in park",
   "riding tandem bike",
 
-  // Творчі моменти
   "drawing each other",
   "taking photos",
   "making heart shapes",
@@ -2679,7 +2516,6 @@ const ROMANTIC_SCENARIOS = [
   "playing guitar together",
   "singing karaoke",
 
-  // Затишні
   "wrapped in blanket",
   "cuddling on couch",
   "sleeping together",
@@ -2697,49 +2533,42 @@ const ROMANTIC_SCENARIOS = [
 ];
 
 const BACKGROUND_COLORS = [
-  // Пастельні рожеві
   "soft pink",
   "blush pink",
   "rose pink",
   "peachy pink",
   "baby pink",
 
-  // Фіолетові відтінки
   "lavender",
   "lilac",
   "light purple",
   "periwinkle",
   "mauve",
 
-  // Зелені та м'ятні
   "mint green",
   "sage green",
   "seafoam",
   "pistachio",
   "pale turquoise",
 
-  // Персикові та коралові
   "peach",
   "apricot",
   "light coral",
   "salmon pink",
   "melon",
 
-  // Блакитні
   "sky blue",
   "powder blue",
   "baby blue",
   "ice blue",
   "aqua",
 
-  // Жовті та кремові
   "cream yellow",
   "butter yellow",
   "lemon chiffon",
   "vanilla",
   "champagne",
 
-  // Особливі
   "cotton candy",
   "pearl white",
   "rose gold",
@@ -2748,49 +2577,41 @@ const BACKGROUND_COLORS = [
 ];
 
 const HEART_COLORS = [
-  // Рожево-червоні
   "pink, red, purple",
   "pink, coral, magenta",
   "red, crimson, scarlet",
   "hot pink, purple, violet",
 
-  // Яскраві мікси
   "fuchsia, pink, rose",
   "coral, peach, pink",
   "ruby, cherry, rose",
   "magenta, pink, lavender",
 
-  // Пастельні комбінації
   "baby pink, blush, rose",
   "lavender, lilac, pink",
   "peach, coral, cream",
   "mint, pink, lavender",
 
-  // Теплі тони
   "orange, coral, pink",
   "gold, rose, pink",
   "salmon, peach, coral",
   "tangerine, pink, red",
 
-  // Холодні відтінки
   "purple, violet, magenta",
   "blue, purple, pink",
   "teal, pink, purple",
   "indigo, purple, pink",
 
-  // Яскраві контрасти
   "neon pink, hot pink, magenta",
   "electric pink, fuchsia, purple",
   "bright red, pink, orange",
 
-  // Ніжні градієнти
   "soft pink, rose, blush",
   "cream, peach, pink",
   "white, pink, rose",
   "vanilla, coral, pink"
 ];
 
-// Бонус: додаткові деталі для унікальності
 const CUTE_DETAILS = [
   "with floating hearts around",
   "with sparkles and stars",
@@ -2809,7 +2630,6 @@ const CUTE_DETAILS = [
   "with golden shimmer"
 ];
 
-// До Дня Закоханих - Love is... комік
 bot.action('creative_love_is', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -2820,7 +2640,6 @@ bot.action('creative_love_is', async (ctx) => {
     return;
   }
 
-  // Генеруємо випадкові елементи
   const randomQuote = UKRAINIAN_LOVE_QUOTES[Math.floor(Math.random() * UKRAINIAN_LOVE_QUOTES.length)];
   const randomScenario = ROMANTIC_SCENARIOS[Math.floor(Math.random() * ROMANTIC_SCENARIOS.length)];
   const randomBgColor = BACKGROUND_COLORS[Math.floor(Math.random() * BACKGROUND_COLORS.length)];
@@ -2840,7 +2659,6 @@ bot.action('creative_love_is', async (ctx) => {
     }
   });
 
-  // ✅ ВАЖНО: Встановити currentModel щоб система знала яку модель використовувати
   userCurrentModel.set(userId, 'love_is');
 
   await ctx.reply(
@@ -2856,7 +2674,6 @@ bot.action('creative_love_is', async (ctx) => {
   );
 });
 
-// ❤️ Льодяник - Valentine's portrait з серцем-льодяником
 bot.action('creative_hearts', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -2888,7 +2705,6 @@ bot.action('creative_hearts', async (ctx) => {
   );
 });
 
-// ✨ Порцелянова фігурка - 3D collectible-figure портрет
 bot.action('creative_porcelain_figure', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -2921,7 +2737,6 @@ bot.action('creative_porcelain_figure', async (ctx) => {
   );
 });
 
-// 🐱 Котики - cozy editorial портрет з кошенятами
 bot.action('creative_kittens', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -2953,7 +2768,6 @@ bot.action('creative_kittens', async (ctx) => {
   );
 });
 
-// 🌊 Підводний макро-портрет - ultra-detailed underwater close-up
 bot.action('creative_underwater_macro', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -2985,7 +2799,6 @@ bot.action('creative_underwater_macro', async (ctx) => {
   );
 });
 
-// 👑 Bridgerton - Regency portrait у стилі серіалу
 bot.action('creative_bridgerton', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -3002,7 +2815,6 @@ bot.action('creative_bridgerton', async (ctx) => {
     model: 'seedream_4k'
   });
 
-  // Скидаємо інші флоу, щоб фото точно пішло в креатив
   imageGenState.delete(userId);
   userCurrentModel.delete(userId);
 
@@ -3019,8 +2831,6 @@ bot.action('creative_bridgerton', async (ctx) => {
   );
 });
 
-// ==================== ОБРОБКА ФОТО ДЛЯ КРЕАТИВІВ ====================
-// Вставити ПЕРЕД bot.on('photo') handler
 
 async function handleCreativePhoto(ctx, imageUrl) {
   const userId = ctx.from.id;
@@ -3030,7 +2840,6 @@ async function handleCreativePhoto(ctx, imageUrl) {
 
   const creativeType = state.creative;
 
-  // Промпти (АНГЛІЙСЬКА + збереження рис обличчя)
   let prompt = null;
   if (creativeType === 'love_is') {
     const data = state?.loveIsData || {
@@ -3179,7 +2988,6 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
     return true;
   }
 
-  // Вибираємо правильну модель для кожного креативу
   let modelKey;
   if (creativeType === 'love_is') {
     modelKey = 'nano_banana_2k';
@@ -3229,7 +3037,6 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
   const username = ctx.from.username || 'unknown';
   const creativeLabel = creativeNames[creativeType] || creativeType;
 
-  // Звільняємо стан одразу, щоб не блокувати користувача
   userState.delete(userId);
   userCurrentModel.delete(userId);
 
@@ -3237,13 +3044,9 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
     try {
       let result;
 
-      // Перевіряємо чи можемо використовувати KIE.AI для адміна
-      // Перевіряємо чи можемо використовувати KIE.AI
-      // Враховуємо вибір користувача з userProviderChoice та централізовану систему доступу
       const userChosenProvider = userProviderChoice.get(userId);
       const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 
-      // Логіка: провайдер за вибором; love_is → nano_banana_2k, інші → seedream_4k
       const creativeModelKey = modelKey; // 'nano_banana_2k' | 'seedream_4k'
       let useKieAI = false;
       if (userChosenProvider === 'kie-ai') {
@@ -3257,40 +3060,31 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
       const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
       console.log(`🎯 Creative generation using ${providerName}: ${creativeType}`);
 
-      // Вибираємо правильну функцію генерації в залежності від креативу
-      // По дефолту використовуємо 9:16 для всіх креативів
       if (creativeType === 'hearts') {
-        // Hearts використовує Seedream 4K з aspect ratio 9:16
         result = useKieAI
           ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '9:16', 'high')
           : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
       } else if (creativeType === 'porcelain_figure') {
-        // Porcelain figure використовує Seedream 4K з aspect ratio 1:1
         result = useKieAI
           ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '1:1', 'high')
           : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '1:1');
       } else if (creativeType === 'kittens') {
-        // Kittens використовує Seedream 4K з aspect ratio 1:1
         result = useKieAI
           ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '1:1', 'high')
           : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '1:1');
       } else if (creativeType === 'underwater_macro') {
-        // Underwater macro використовує Seedream 4K з aspect ratio 16:9
         result = useKieAI
           ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '16:9', 'high')
           : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '16:9');
       } else if (creativeType === 'bridgerton') {
-        // Bridgerton використовує Seedream 4K з aspect ratio 9:16
         result = useKieAI
           ? await kieAI.generateWithSeedreamKieAI(prompt, imageUrl, '9:16', 'high')
           : await replicate.generateWithSeedream(prompt, imageUrl, '4K', '9:16');
       } else if (creativeType === 'love_is') {
-        // Love is... використовує NanoBanana 2K з aspect ratio 9:16
         result = useKieAI
           ? await kieAI.generateWithNanoBananaKieAI(prompt, imageUrl, '2K', '9:16')
           : await replicate.generateWithNanoBanana(prompt, imageUrl, '2K', '9:16');
       } else {
-        // Fallback для інших креативів - теж 9:16
         const resolution = modelKey === 'nano_banana_2k' ? '2K' : '4K';
         result = useKieAI
           ? (resolution === '2K'
@@ -3343,14 +3137,12 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
         provider: useKieAI ? 'kie' : 'replicate'
       });
 
-      // Перевірити розмір файлу
       const fileSize = await getFileSize(result.imageUrl);
       const maxPhotoSize = 10 * 1024 * 1024; // 10MB
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
 
       if (fileSize > maxPhotoSize) {
-        // Файл завеликий - віддати посиланням
         const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
 
         await bot.telegram.sendMessage(
@@ -3374,7 +3166,6 @@ Photorealistic, expensive Regency romance drama vibe, Instagram-ready.`
           }
         );
       } else {
-        // Файл нормальний - відправити як фото
         await safeSendPhoto(chatId, result.imageUrl, {
           caption: `✅ ${creativeLabel}\n\n💰 Витрачено: ${creativeCost}⚡`,
           ...keyboard.createBackButton('main_menu')
@@ -3442,10 +3233,9 @@ bot.action('gpt_sora_watermark_remover', async (ctx) => {
 
   console.log('🧹 Sora Watermark Remover action clicked by user:', userId);
 
-  // Отримуємо динамічну ціну з KIE.AI
   const kieAI = require('./services/kie-ai');
   const modelInfo = await kieAI.getModelInfo('sora-watermark-remover');
-  const cost = modelInfo?.cost || 10; // Fallback до 10 токенів якщо не вдалося отримати ціну
+  const cost = modelInfo?.cost || 10; 
 
   console.log('🧹 Sora Watermark: Model info loaded:', {
     cost,
@@ -3529,7 +3319,6 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|1:4|4:1|1:8|8:1|4:5|5:4|9:1
 
   console.log(`📐 Aspect ratio selected: ${aspectRatio} for model: ${modelKey}`);
 
-  // Генеруємо з вибраним aspect ratio (у фоні, щоб не блокувати інші апдейти)
   const imageInput = state.imageUrl || null;
   const targetModelKey = state.targetModelKey || modelKey;
   const generationOptions = getImageGenerationOptionsFromState(state);
@@ -3543,7 +3332,6 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|1:4|4:1|1:8|8:1|4:5|5:4|9:1
 
 // ==================== MIDJOURNEY SPECIFIC HANDLERS ====================
 
-// Midjourney - вибір швидкості
 bot.action('midjourney', async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -3578,7 +3366,6 @@ bot.action('midjourney', async (ctx) => {
   );
 });
 
-// Вибір швидкості Midjourney
 bot.action(/^mj_speed_(relaxed|fast|turbo)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -3592,7 +3379,6 @@ bot.action(/^mj_speed_(relaxed|fast|turbo)$/, async (ctx) => {
     return;
   }
 
-  // Зберігаємо стан
   userState.set(userId, {
     action: 'midjourney_generation',
     step: 'select_aspect_ratio',
@@ -3624,7 +3410,6 @@ bot.action(/^mj_speed_(relaxed|fast|turbo)$/, async (ctx) => {
   );
 });
 
-// Вибір aspect ratio Midjourney (новий формат з швидкістю в callback)
 bot.action(/^mj_ar_([^_]+)_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -3640,7 +3425,6 @@ bot.action(/^mj_ar_([^_]+)_(.+)$/, async (ctx) => {
 
   const cost = model.speeds[speed].cost;
 
-  // Зберігаємо стан для вибору налаштувань
   userState.set(userId, {
     action: 'midjourney_generation',
     step: 'select_settings',
@@ -3648,7 +3432,6 @@ bot.action(/^mj_ar_([^_]+)_(.+)$/, async (ctx) => {
     aspectRatio,
     taskType: 'mj_txt2img',
     fileUrls: [],
-    // Дефолтні значення
     stylization: 100,
     weirdness: 0,
     variety: 50
@@ -3685,7 +3468,6 @@ bot.action(/^mj_ar_([^_]+)_(.+)$/, async (ctx) => {
   );
 });
 
-// Старий обробник для зворотної сумісності зі старими кнопками
 bot.action(/^mj_aspect_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -3723,7 +3505,6 @@ bot.action(/^mj_aspect_(.+)$/, async (ctx) => {
   );
 });
 
-// Налаштування Stylization
 bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -3732,10 +3513,8 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
 
   console.log(`🔍 [STYLIZATION BUTTON] Callback triggered - userId=${userId}, speed=${speed}, aspectRatio=${aspectRatio}`);
 
-  // Відновлюємо або створюємо стан з параметрів callback
   let state = userState.get(userId);
 
-  // Детальне логування стану
   if (state) {
     console.log(`🔍 [STYLIZATION BUTTON] State found:`, JSON.stringify({
       action: state.action,
@@ -3753,7 +3532,6 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
   console.log(`🔍 mj_set_stylization ENTRY - userId: ${userId}, hasState: ${!!state}, action: ${state?.action}, stylization: ${state?.stylization}, step: ${state?.step}, stateTimestamp: ${state?._timestamp}`);
 
   if (!state || state.action !== 'midjourney_generation') {
-    // Створюємо новий стан тільки якщо його немає
     console.log(`⚠️ Creating NEW state for stylization (state=${!!state}, action=${state?.action})`);
     state = {
       action: 'midjourney_generation',
@@ -3766,19 +3544,16 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
       variety: 50,
       _timestamp: Date.now()
     };
-    userState.set(userId, state); // Зберігаємо одразу
+    userState.set(userId, state); 
     console.log(`🔍 [STYLIZATION BUTTON] Created and saved new state`);
   } else {
-    // Якщо стан існує, оновлюємо тільки speed і aspectRatio (якщо змінилися)
     const stateAge = Date.now() - (state._timestamp || 0);
     console.log(`✅ Using EXISTING state, age=${stateAge}ms, preserving stylization=${state.stylization}, weirdness=${state.weirdness}, variety=${state.variety}`);
     state.speed = speed;
     state.aspectRatio = aspectRatio;
     state._timestamp = Date.now();
-    // Зберігаємо існуючі значення stylization, weirdness, variety
   }
 
-  // Ensure default values if undefined (тільки для нового стану)
   if (state.stylization === undefined) state.stylization = 100;
   if (state.weirdness === undefined) state.weirdness = 0;
   if (state.variety === undefined) state.variety = 50;
@@ -3801,7 +3576,6 @@ bot.action(/^mj_set_stylization_([^_]+)_(.+)$/, async (ctx) => {
   );
 });
 
-// Налаштування Weirdness
 bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -3810,10 +3584,8 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
 
   console.log(`🔍 [WEIRDNESS BUTTON] Callback triggered - userId=${userId}, speed=${speed}, aspectRatio=${aspectRatio}`);
 
-  // Відновлюємо або створюємо стан
   let state = userState.get(userId);
 
-  // Детальне логування стану
   if (state) {
     console.log(`🔍 [WEIRDNESS BUTTON] State found:`, JSON.stringify({
       action: state.action,
@@ -3831,7 +3603,6 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
   console.log(`🔍 mj_set_weirdness ENTRY - userId: ${userId}, hasState: ${!!state}, action: ${state?.action}, weirdness: ${state?.weirdness}, step: ${state?.step}, stateTimestamp: ${state?._timestamp}`);
 
   if (!state || state.action !== 'midjourney_generation') {
-    // Створюємо новий стан тільки якщо його немає
     console.log(`⚠️ Creating NEW state for weirdness (state=${!!state}, action=${state?.action})`);
     state = {
       action: 'midjourney_generation',
@@ -3844,19 +3615,16 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
       variety: 50,
       _timestamp: Date.now()
     };
-    userState.set(userId, state); // Зберігаємо одразу
+    userState.set(userId, state); 
     console.log(`🔍 [WEIRDNESS BUTTON] Created and saved new state`);
   } else {
-    // Якщо стан існує, оновлюємо тільки speed і aspectRatio
     const stateAge = Date.now() - (state._timestamp || 0);
     console.log(`✅ Using EXISTING state, age=${stateAge}ms, preserving stylization=${state.stylization}, weirdness=${state.weirdness}, variety=${state.variety}`);
     state.speed = speed;
     state.aspectRatio = aspectRatio;
     state._timestamp = Date.now();
-    // Зберігаємо існуючі значення stylization, weirdness, variety
   }
 
-  // Ensure default values if undefined (тільки для нового стану)
   if (state.stylization === undefined) state.stylization = 100;
   if (state.weirdness === undefined) state.weirdness = 0;
   if (state.variety === undefined) state.variety = 50;
@@ -3879,7 +3647,6 @@ bot.action(/^mj_set_weirdness_([^_]+)_(.+)$/, async (ctx) => {
   );
 });
 
-// Налаштування Variety
 bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -3888,10 +3655,8 @@ bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
 
   console.log(`🔍 [VARIETY BUTTON] Callback triggered - userId=${userId}, speed=${speed}, aspectRatio=${aspectRatio}`);
 
-  // Відновлюємо або створюємо стан
   let state = userState.get(userId);
 
-  // Детальне логування стану
   if (state) {
     console.log(`🔍 [VARIETY BUTTON] State found:`, JSON.stringify({
       action: state.action,
@@ -3909,7 +3674,6 @@ bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
   console.log(`🔍 mj_set_variety ENTRY - userId: ${userId}, hasState: ${!!state}, action: ${state?.action}, variety: ${state?.variety}, step: ${state?.step}`);
 
   if (!state || state.action !== 'midjourney_generation') {
-    // Створюємо новий стан тільки якщо його немає
     console.log(`⚠️ Creating NEW state for variety (state=${!!state}, action=${state?.action})`);
     state = {
       action: 'midjourney_generation',
@@ -3925,16 +3689,13 @@ bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
     userState.set(userId, state);
     console.log(`🔍 [VARIETY BUTTON] Created and saved new state`);
   } else {
-    // Якщо стан існує, оновлюємо тільки speed і aspectRatio
     const stateAge = Date.now() - (state._timestamp || 0);
     console.log(`✅ Using EXISTING state, age=${stateAge}ms, preserving stylization=${state.stylization}, weirdness=${state.weirdness}, variety=${state.variety}`);
     state.speed = speed;
     state.aspectRatio = aspectRatio;
     state._timestamp = Date.now();
-    // Зберігаємо існуючі значення stylization, weirdness, variety
   }
 
-  // Ensure default values if undefined (тільки для нового стану)
   if (state.stylization === undefined) state.stylization = 100;
   if (state.weirdness === undefined) state.weirdness = 0;
   if (state.variety === undefined) state.variety = 50;
@@ -3956,14 +3717,12 @@ bot.action(/^mj_set_variety_([^_]+)_(.+)$/, async (ctx) => {
   );
 });
 
-// Продовжити з налаштуваннями
 bot.action(/^mj_settings_done_([^_]+)_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
   const speed = ctx.match[1];
   const aspectRatio = ctx.match[2];
 
-  // Відновлюємо або створюємо стан
   let state = userState.get(userId);
   if (!state || state.action !== 'midjourney_generation') {
     state = {
@@ -4025,7 +3784,6 @@ bot.action(/^mj_upscale_(.+)_(\d+)$/, async (ctx) => {
       return;
     }
 
-    // Чекаємо результату
     const finalResult = await midjourney.waitForCompletion(result.taskId);
 
     if (finalResult.success && finalResult.resultUrls && finalResult.resultUrls.length > 0) {
@@ -4081,13 +3839,11 @@ bot.action(/^mj_vary_(.+)_(\d+)$/, async (ctx) => {
       return;
     }
 
-    // Чекаємо результату
     const finalResult = await midjourney.waitForCompletion(result.taskId);
 
     if (finalResult.success && finalResult.resultUrls && finalResult.resultUrls.length > 0) {
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
 
-      // Відправляємо всі варіації
       for (let i = 0; i < finalResult.resultUrls.length; i++) {
         const imageUrl = finalResult.resultUrls[i];
         const caption = i === 0
@@ -4139,17 +3895,15 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
     return;
   }
 
-  // ✅ TRIAL CHECK: Перевірка обмежень для nano_banana_4k
   const trialCheck = await checkTrialRestrictions(ctx.from.id, modelKey);
   if (!trialCheck.allowed) {
     await ctx.answerCbQuery();
     await ctx.reply(
       trialCheck.message,
-      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu(ctx.from.id) }
+      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu(ctx.from.id, ctx) }
     );
     return;
   }
-  // Показуємо warning якщо це остання безкоштовна генерація
   if (trialCheck.warning) {
     await ctx.reply(trialCheck.warning, { parse_mode: 'HTML' });
   }
@@ -4161,7 +3915,6 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
     return;
   }
 
-  // 🎁 FREE MODEL CHECK: Nano Banana FREE — перевірка ліміту безкоштовних генерацій
   if (modelKey === 'nano_banana_free') {
     const user = await User.findById(ctx.from.id);
     const freeUsed = user?.freeUsage?.nano_banana_free || 0;
@@ -4202,7 +3955,6 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
     return;
   }
 
-  // 🍌 Вибір якості для Nano Banana 2 / Nano Banana PRO
   if (IMAGE_SIZE_OPTIONS[modelKey]) {
     const sizes = IMAGE_SIZE_OPTIONS[modelKey];
     const modelTitle = modelKey === 'nano_banana_pro' ? 'Nano Banana PRO' : model.name;
@@ -4262,7 +4014,6 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
     return;
   }
 
-  // 🔥 Зображення без омежень — окремий флоу з вибором якості
   if (modelKey === 'a2e_image') {
     try {
       const a2eService = require('./services/a2e');
@@ -4316,7 +4067,6 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
 
   const maxPhotos = model.maxImages || 1;
 
-  // ✅ НОВИЙ ФЛОУ: Зберігаємо стан - чекаємо на референси
   imageGenState.set(ctx.from.id, {
     model: modelKey,
     step: 'waiting_photos',
@@ -4328,7 +4078,6 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
     `✍️ <b>Крок 2:</b> Введіть промпт\n\n` +
     `Натисніть <b>"Далі до промпту"</b> якщо без референсів.\n\n`;
 
-  // Інструкції для різних моделей (effectiveCost — для KIE-користувачів реальна вартість)
   const messages = {
     clarity: `✨ <b>${model.name}</b>\n\n` +
       `🔮 Покращення якості зображень\n\n` +
@@ -4394,7 +4143,6 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
       `⏱️ Час: ~10-20 секунд`
   };
 
-  // Для nano_banana та seedream моделей використовуємо спільний шаблон
   let messageKey = modelKey;
   if (modelKey === 'nano_banana_free') messageKey = 'nano_banana_free';
   else if (modelKey === 'nano_banana_2') messageKey = 'nano_banana_2';
@@ -4490,7 +4238,6 @@ bot.action(/^img_free_model_(nano_banana|nano_banana_2|nano_banana_pro)$/, async
   );
 });
 
-// 🍌 Крок вибору якості для Nano Banana 2 / Nano Banana PRO
 bot.action(/^img_quality_(nano_banana_2|nano_banana_pro)_(0\.5K|1K|2K|4K)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
@@ -4537,7 +4284,6 @@ bot.action(/^img_quality_(nano_banana_2|nano_banana_pro)_(0\.5K|1K|2K|4K)$/, asy
     photos: []
   });
 
-  // Підтримуємо поточну модель у сесії для подальшої обробки тексту/фото
   userCurrentModel.set(userId, modelKey);
 
   const refsStep = `📝 <b>Крок 2:</b> Надішліть референс-зображення (опціонально)\n` +
@@ -4560,7 +4306,6 @@ bot.action(/^img_quality_(nano_banana_2|nano_banana_pro)_(0\.5K|1K|2K|4K)$/, asy
   );
 });
 
-// ✅ НОВИЙ ФЛОУ: Кнопка "Почати генерацію" (без референсів)
 bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const userId = ctx.from.id;
@@ -4614,7 +4359,6 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
     return;
   }
 
-  // Якщо промпт ще не введено — переходимо до кроку промпту
   if (!imgState.prompt) {
     imageGenState.set(userId, { ...imgState, step: 'prompt' });
 
@@ -4640,7 +4384,6 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
   );
 });
 
-// ✅ НОВИЙ ФЛОУ: Кнопка "Додати референси"
 bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const userId = ctx.from.id;
@@ -4654,7 +4397,6 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
     return;
   }
 
-  // Оновлюємо стан - чекаємо на фото (референси)
   imgState.step = 'waiting_photos';
   imgState.photos = imgState.photos || [];
   imageGenState.set(userId, imgState);
@@ -4689,7 +4431,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
 
   await ctx.answerCbQuery();
 
-  // KIE-only відео моделі — тільки при доступі KIE
   if (KIE_ONLY_VIDEO_MODELS.includes(modelKey) && !canSeeKieOnlyVideoModels(ctx.from.id)) {
     await ctx.reply(
       `🔒 <b>${model.name}</b> доступна тільки при виборі провайдера <b>KIE.AI</b>.\n\n` +
@@ -4699,7 +4440,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // Sora 2 тимчасово доступна тільки через Replicate
   if (modelKey === 'sora_2' && userProviderChoice.get(ctx.from.id) === 'kie-ai') {
     await ctx.reply(
       '⚠️ <b>Sora 2</b> тимчасово працює тільки через <b>Replicate</b>.\n\n' +
@@ -4709,16 +4449,14 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // ✅ TRIAL CHECK: Перевірка обмежень для безкоштовних користувачів
   const trialCheck = await checkTrialRestrictions(ctx.from.id, modelKey);
   if (!trialCheck.allowed) {
     await ctx.reply(
       trialCheck.message,
-      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu(ctx.from.id) }
+      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu(ctx.from.id, ctx) }
     );
     return;
   }
-  // Показуємо warning якщо це остання безкоштовна генерація
   if (trialCheck.warning) {
     await ctx.reply(trialCheck.warning, { parse_mode: 'HTML' });
   }
@@ -4758,7 +4496,7 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     );
   }
   if (modelKey === 'veo') {
-    requiredCost = getEffectiveVeoGenerationCost(ctx.from.id, 'veo3_fast', 4); // мінімальна ціна = Fast 4s
+    requiredCost = getEffectiveVeoGenerationCost(ctx.from.id, 'veo3_fast', 4); 
   }
   if (modelKey === 'seedance_2' || modelKey === 'seedance_2_fast') {
     requiredCost = getSeedanceCostRange(ctx.from.id, modelKey).minCost;
@@ -4766,7 +4504,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
   if (modelKey === 'kling_o1_edit') {
     const durations = model.durations || [3, 5, 7, 10];
     const minDuration = Math.min(...durations);
-    // Мінімальна ціна: std без відео-input
     requiredCost = minDuration * model.costPerSecond;
   }
 
@@ -4775,7 +4512,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // Для A2E Motion не встановлюємо currentModel, бо це image-to-video модель
   if (modelKey !== 'a2e_motion') {
     userCurrentModel.set(ctx.from.id, modelKey);
   }
@@ -4840,7 +4576,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // A2E Motion без омежень 🔥
   if (modelKey === 'a2e_motion') {
     try {
       const a2eService = require('./services/a2e');
@@ -4895,7 +4630,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     }
   }
 
-  // Для Kling 3.0 (KIE.AI) — тільки якщо є доступ до KIE та KIE увімкнена
   if (modelKey === 'kling_3') {
     if (!kieAI.isKieAIEnabled) {
       await ctx.reply('❌ KIE.AI тимчасово вимкнена. Додайте KIE_AI_API_KEY в .env.', keyboard.createBackButton('video_menu'));
@@ -4995,7 +4729,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // Для Kling показуємо спеціальне меню з вибором тривалості
   if (modelKey === 'kling' || modelKey === 'kling_v2_6') {
     const durations = model.durations || [5];
     const minDuration = Math.min(...durations);
@@ -5035,7 +4768,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // Для Runway Turbo показуємо флоу: image -> параметри -> промпт
   if (modelKey === 'runway_turbo') {
     const durations = model.durations || [5];
     const minDuration = Math.min(...durations);
@@ -5072,7 +4804,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // Для Veo показуємо спеціальне меню з вибором якості моделі (Крок 1)
   if (modelKey === 'veo') {
     const useGeminiDirectVeo = canUseGeminiVeoDirect(ctx.from.id);
     const costFastMin = getEffectiveVeoGenerationCost(ctx.from.id, 'veo3_fast', 4);
@@ -5106,7 +4837,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // Для Sora 2 показуємо вибір тривалості
   if (modelKey === 'sora_2') {
     if (!model.costPerSecond || model.costPerSecond <= 0) {
       await ctx.reply(
@@ -5161,7 +4891,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  // Розрахунок ефективної вартості для відображення у повідомленнях
   let displayCost = model.cost;
   if (modelKey === 'runway_turbo') {
     displayCost = 5 * getEffectiveRunwayTurboCostPerSecond(ctx.from.id);
@@ -5188,7 +4917,6 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
 
 // ==================== KLING 3.0 (KIE.AI) CALLBACKS ====================
 
-// Крок 1: Режим (std / pro)
 bot.action(/^kling_3_mode_(std|pro)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5229,7 +4957,6 @@ bot.action(/^kling_3_mode_(std|pro)$/, async (ctx) => {
   );
 });
 
-// Single-shot → вибір тривалості
 bot.action('kling_3_shot_single', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5262,7 +4989,6 @@ bot.action('kling_3_shot_single', async (ctx) => {
   );
 });
 
-// Multi-shot → кількість сцен
 bot.action('kling_3_shot_multi', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5289,7 +5015,6 @@ bot.action('kling_3_shot_multi', async (ctx) => {
   );
 });
 
-// Multi: обрано кількість сцен
 bot.action(/^kling_3_scenes_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5306,7 +5031,6 @@ bot.action(/^kling_3_scenes_(\d+)$/, async (ctx) => {
   );
 });
 
-// Multi-shot: тривалість сцени (1–12)
 bot.action(/^kling_3_scene_dur_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5358,7 +5082,6 @@ bot.action(/^kling_3_scene_dur_(\d+)$/, async (ctx) => {
   );
 });
 
-// Крок 2: Тривалість (single-shot)
 bot.action(/^kling_3_duration_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5391,7 +5114,6 @@ bot.action(/^kling_3_duration_(\d+)$/, async (ctx) => {
   );
 });
 
-// Крок 3: Пропорції
 bot.action(/^kling_3_aspect_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5409,7 +5131,6 @@ bot.action(/^kling_3_aspect_(.+)$/, async (ctx) => {
   const costWithAudio = state.duration * costPerSecAud;
   const costNoAudio = state.duration * costPerSecNo;
 
-  // Multi-shot: API вимагає sound 'on', не питаємо — одразу далі з generateAudio: true
   if (state.multiShots) {
     userState.set(userId, {
       ...state,
@@ -5456,7 +5177,6 @@ bot.action(/^kling_3_aspect_(.+)$/, async (ctx) => {
   );
 });
 
-// Крок 4: Аудіо
 bot.action(/^kling_3_audio_(on|off)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5497,7 +5217,6 @@ bot.action(/^kling_3_audio_(on|off)$/, async (ctx) => {
   );
 });
 
-// Крок 5: Стартове зображення — пропустити → переходимо до елементів (або промпту)
 bot.action('kling_3_skip_start_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5525,7 +5244,6 @@ bot.action('kling_3_skip_start_image', async (ctx) => {
   );
 });
 
-// Крок 5: Стартове зображення — чекаємо фото
 bot.action('kling_3_add_start_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5544,7 +5262,6 @@ bot.action('kling_3_add_start_image', async (ctx) => {
   );
 });
 
-// Елементи: пропустити → перехід до промпту (single) або ready_multi (multi-shot)
 bot.action('kling_3_skip_elements', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5587,7 +5304,6 @@ bot.action('kling_3_skip_elements', async (ctx) => {
   );
 });
 
-// Елементи: додати елемент → просимо ім’я
 bot.action('kling_3_add_element', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5605,7 +5321,6 @@ bot.action('kling_3_add_element', async (ctx) => {
   );
 });
 
-// Multi-shot: старт генерації
 bot.action('kling_3_generate_multi', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5616,7 +5331,6 @@ bot.action('kling_3_generate_multi', async (ctx) => {
 
 // ==================== VEO 3.1 CALLBACKS ====================
 
-// Крок 1: Вибір якості моделі (Fast / Quality)
 bot.action(/^veo_model_(fast|quality)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5654,14 +5368,12 @@ bot.action(/^veo_model_(fast|quality)$/, async (ctx) => {
   );
 });
 
-// Крок 2: Вибір aspect ratio
 bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  const aspectRatio = ctx.match[1]; // "16:9" або "9:16"
+  const aspectRatio = ctx.match[1]; 
   const state = userState.get(userId);
 
-  // Якщо немає стейту від Крок 1 — створюємо з default (fast)
   const veoModel = state?.veoModel || 'veo3_fast';
   const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
   const useGeminiDirectVeo = canUseGeminiVeoDirect(userId);
@@ -5699,7 +5411,6 @@ bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
   );
 });
 
-// Крок 3: Вибір тривалості
 bot.action(/^veo_duration_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5768,7 +5479,6 @@ bot.action(/^veo_duration_(\d+)$/, async (ctx) => {
   );
 });
 
-// Крок 4: Вибір аудіо
 bot.action(/^veo_audio_(on|off)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5886,7 +5596,6 @@ bot.action(/^runway_turbo_aspect_(.+)$/, async (ctx) => {
 
 // ==================== VEO START IMAGE CALLBACKS ====================
 
-// Користувач хоче додати стартове зображення
 bot.action('veo_add_start_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5915,7 +5624,6 @@ bot.action('veo_add_start_image', async (ctx) => {
   );
 });
 
-// Користувач пропускає стартове зображення - переходимо до останнього кадру
 bot.action('veo_skip_start_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5956,7 +5664,6 @@ bot.action('veo_skip_start_image', async (ctx) => {
   );
 });
 
-// Додати останній кадр
 bot.action('veo_add_last_frame', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -5980,7 +5687,6 @@ bot.action('veo_add_last_frame', async (ctx) => {
   );
 });
 
-// Пропустити останній кадр - переходимо до промпту
 bot.action('veo_skip_last_frame', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6004,7 +5710,6 @@ bot.action('veo_skip_last_frame', async (ctx) => {
   );
 });
 
-// Перейти до промпту (без додаткових опцій)
 bot.action('veo_generate_now', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6029,7 +5734,6 @@ bot.action('veo_generate_now', async (ctx) => {
 
 // ==================== SORA 2 CALLBACKS ====================
 
-// Крок 1: Вибір тривалості
 bot.action(/^sora_duration_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6067,7 +5771,6 @@ bot.action(/^sora_duration_(\d+)$/, async (ctx) => {
   );
 });
 
-// Крок 2: Вибір aspect ratio
 bot.action(/^sora_aspect_(portrait|landscape)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6111,7 +5814,6 @@ bot.action(/^sora_aspect_(portrait|landscape)$/, async (ctx) => {
   );
 });
 
-// Додати reference image
 bot.action('sora_add_reference', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6134,7 +5836,6 @@ bot.action('sora_add_reference', async (ctx) => {
   );
 });
 
-// Пропустити reference image
 bot.action('sora_skip_reference', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6317,7 +6018,6 @@ bot.action(/^seedance_audio_(on|off)$/, async (ctx) => {
 
 // ==================== KLING v2.5 CALLBACKS ====================
 
-// Крок 1: Вибір тривалості
 bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6328,12 +6028,11 @@ bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
   const costPerSecKling = modelKey === 'kling_v2_6' ? getEffectiveKlingV2_6CostPerSecond(userId, model, false) : getEffectiveKlingCostPerSecond(userId);
   const klingCost = duration * costPerSecKling;
 
-  // ✅ TRIAL CHECK: 10 секунд заблоковано для Trial
   const trialCheck = await checkTrialRestrictions(userId, modelKey, { duration });
   if (!trialCheck.allowed) {
     await ctx.reply(
       trialCheck.message,
-      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu(ctx.from.id) }
+      { parse_mode: 'HTML', ...keyboard.createSubscriptionsMenu(ctx.from.id, ctx) }
     );
     return;
   }
@@ -6398,7 +6097,6 @@ bot.action(/^kling_duration_(\d+)$/, async (ctx) => {
   );
 });
 
-// Крок 2 (Kling v2.6): Вибір аудіо
 bot.action(/^kling_audio_(on|off)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6443,7 +6141,6 @@ bot.action(/^kling_audio_(on|off)$/, async (ctx) => {
   );
 });
 
-// Крок 2: Вибір aspect ratio
 bot.action(/^kling_aspect_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6471,14 +6168,12 @@ bot.action(/^kling_aspect_(.+)$/, async (ctx) => {
     ? `🔊 Аудіо: <b>${state.generateAudio ? 'Так' : 'Ні'}</b>\n`
     : '';
 
-  // ⚠️ Kling v2.5 (key: 'kling') — тільки image-to-video! Не показуємо "Без зображення"
   const isKlingV25 = modelKey === 'kling';
   const requiresImage = isKlingV25;
 
   const buttons = [];
   buttons.push([Markup.button.callback('🖼️ Завантажу зображення', 'kling_add_start_image')]);
 
-  // Якщо модель НЕ вимагає image, показуємо опцію "Без зображення"
   if (!requiresImage) {
     buttons.push([Markup.button.callback('⏭️ Без зображення (text-to-video)', 'kling_skip_start_image')]);
   }
@@ -6502,7 +6197,6 @@ bot.action(/^kling_aspect_(.+)$/, async (ctx) => {
   );
 });
 
-// Крок 3a: Додати стартове зображення
 bot.action('kling_add_start_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6526,7 +6220,6 @@ bot.action('kling_add_start_image', async (ctx) => {
   );
 });
 
-// Крок 3b: Пропустити стартове зображення
 bot.action('kling_skip_start_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6540,7 +6233,6 @@ bot.action('kling_skip_start_image', async (ctx) => {
     return;
   }
 
-  // ⚠️ Kling v2.5 вимагає зображення!
   if (modelKey === 'kling') {
     await ctx.answerCbQuery('⚠️ Kling v2.5 працює тільки з зображеннями!', { show_alert: true });
     return;
@@ -6599,7 +6291,6 @@ bot.action('kling_skip_start_image', async (ctx) => {
   );
 });
 
-// Крок 4 (після start_image): Питаємо про end_image
 bot.action('kling_ask_end_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6632,7 +6323,6 @@ bot.action('kling_ask_end_image', async (ctx) => {
   );
 });
 
-// Додати end_image
 bot.action('kling_add_end_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6656,7 +6346,6 @@ bot.action('kling_add_end_image', async (ctx) => {
   );
 });
 
-// Пропустити end_image - перейти до промпту
 bot.action('kling_skip_end_image', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6695,7 +6384,6 @@ bot.action('kling_skip_end_image', async (ctx) => {
 
 // ==================== KLING MOTION CONTROL CALLBACKS ====================
 
-// Крок 1: Вибір mode (STD/PRO)
 bot.action(/^motion_mode_(std|pro)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6708,7 +6396,6 @@ bot.action(/^motion_mode_(std|pro)$/, async (ctx) => {
     mode: mode
   });
 
-  // Показуємо ціни для обраного mode (ефективні ціни за провайдером)
   const effectiveCosts = getEffectiveKlingMotionCosts(userId);
   const imageCost = effectiveCosts[`${mode}_image`];
   const videoCost = effectiveCosts[`${mode}_video`];
@@ -6732,7 +6419,6 @@ bot.action(/^motion_mode_(std|pro)$/, async (ctx) => {
   );
 });
 
-// Крок 2: Вибір orientation (image/video)
 bot.action(/^motion_orient_(image|video)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6778,7 +6464,6 @@ bot.action(/^motion_orient_(image|video)$/, async (ctx) => {
   );
 });
 
-// Крок 3: Вибір keep_original_sound
 bot.action(/^motion_sound_(on|off)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6812,7 +6497,6 @@ bot.action(/^motion_sound_(on|off)$/, async (ctx) => {
   );
 });
 
-// Генерувати Kling Motion
 bot.action('motion_generate_now', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6829,7 +6513,6 @@ bot.action('motion_generate_now', async (ctx) => {
 
 // ==================== KLING O1 EDIT FLOW ====================
 
-// Крок 1: Вибір mode (std/pro)
 bot.action(/^kling_o1_mode_(std|pro)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6860,8 +6543,6 @@ bot.action(/^kling_o1_mode_(std|pro)$/, async (ctx) => {
   );
 });
 
-// Обробка відео для kling_o1_edit
-// ❌ ВИДАЛЕНО: Дублікат обробника відео (тепер є один універсальний обробник нижче)
 // bot.on('video', async (ctx) => {
 //   const userId = ctx.from.id;
 //   const state = userState.get(userId);
@@ -6870,38 +6551,24 @@ bot.action(/^kling_o1_mode_(std|pro)$/, async (ctx) => {
 //     return;
 //   }
 
-// ПЕРЕМІЩЕНО В УНІВЕРСАЛЬНИЙ ОБРОБНИК НИЖЧЕ (рядок ~8820)
-// ПЕРЕМІЩЕНО В УНІВЕРСАЛЬНИЙ ОБРОБНИК НИЖЧЕ (рядок ~8820)
 
 //   const videoFile = ctx.message.video;
 //   if (!videoFile) {
-//     await ctx.reply('❌ Помилка: не вдалося отримати відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
 //     return;
 //   }
 //
-//   // Перевірка розміру (200MB max)
 //   const fileSizeMB = (videoFile.file_size || 0) / (1024 * 1024);
 //   if (fileSizeMB > 200) {
 //     await ctx.reply(
-//       `❌ Відео занадто велике!\n\n` +
-//       `Максимальний розмір: 200MB\n` +
-//       `Ваш файл: ${fileSizeMB.toFixed(2)}MB\n\n` +
-//       `Спробуйте стиснути відео або використати коротший кліп.`,
 //       keyboard.createBackButton('video_menu')
 //     );
 //     return;
 //   }
 //
-//   // Перевірка роздільності (мінімум 720px по обох вимірах)
 //   const videoWidth = videoFile.width || 0;
 //   const videoHeight = videoFile.height || 0;
 //   if (videoWidth < 720 || videoHeight < 720) {
 //     await ctx.reply(
-//       `❌ Роздільність відео занадто низька!\n\n` +
-//       `Мінімальна роздільність: 720x720 пікселів\n` +
-//       `Ваше відео: ${videoWidth}x${videoHeight}\n\n` +
-//       `⚠️ Обидва виміри (ширина та висота) повинні бути не менше 720px.\n\n` +
-//       `Спробуйте використати відео з вищою роздільністю.`,
 //       keyboard.createBackButton('video_menu')
 //     );
 //     return;
@@ -6909,7 +6576,6 @@ bot.action(/^kling_o1_mode_(std|pro)$/, async (ctx) => {
 //
 //   const videoUrl = await getVideoUrl(ctx);
 //   if (!videoUrl) {
-//     await ctx.reply('❌ Помилка: не вдалося завантажити відео. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
 //     return;
 //   }
 //
@@ -6921,11 +6587,6 @@ bot.action(/^kling_o1_mode_(std|pro)$/, async (ctx) => {
 //
 //   await ctx.reply(
 //     `✂️ <b>Kling O1 Edit</b>\n\n` +
-//     `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
-//     `🎥 Відео: <b>Завантажено</b>\n\n` +
-//     `🎬 <b>Крок 3: Як використовувати відео?</b>\n\n` +
-//     `• <b>Feature</b> — як референс стилю/камери (можна змінювати тривалість)\n` +
-//     `• <b>Base</b> — редагування відео (тривалість як у оригіналі)`,
 //     {
 //       parse_mode: 'HTML',
 //       ...Markup.inlineKeyboard([
@@ -6933,15 +6594,12 @@ bot.action(/^kling_o1_mode_(std|pro)$/, async (ctx) => {
 //           Markup.button.callback('🎨 Feature', 'kling_o1_video_type_feature'),
 //           Markup.button.callback('✂️ Base', 'kling_o1_video_type_base')
 //         ],
-//         [Markup.button.callback('← Назад', 'video_menu')]
 //       ])
 //     }
 //   );
 // });
 
-// ❌ КІНЕЦЬ ЗАКОМЕНТОВАНОГО ОБРОБНИКА
 
-// Крок 3: Вибір video_reference_type
 bot.action(/^kling_o1_video_type_(feature|base)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6960,7 +6618,6 @@ bot.action(/^kling_o1_video_type_(feature|base)$/, async (ctx) => {
   });
 
   if (videoType === 'feature') {
-    // Feature type: можна вибрати duration
     await ctx.reply(
       `✂️ <b>Kling O1 Edit</b>\n\n` +
       `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
@@ -6987,7 +6644,6 @@ bot.action(/^kling_o1_video_type_(feature|base)$/, async (ctx) => {
       }
     );
   } else {
-    // Base type: одразу питаємо про звук
     await ctx.reply(
       `✂️ <b>Kling O1 Edit</b>\n\n` +
       `⚙️ Режим: <b>${state.mode === 'pro' ? '💎 PRO' : '⚡ STD'}</b>\n` +
@@ -7008,7 +6664,6 @@ bot.action(/^kling_o1_video_type_(feature|base)$/, async (ctx) => {
   }
 });
 
-// Крок 4a: Вибір duration (для feature type)
 bot.action(/^kling_o1_duration_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -7045,7 +6700,6 @@ bot.action(/^kling_o1_duration_(\d+)$/, async (ctx) => {
   );
 });
 
-// Крок 4b/5: Вибір keep_original_sound
 bot.action(/^kling_o1_sound_(on|off)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -7082,7 +6736,6 @@ bot.action(/^kling_o1_sound_(on|off)$/, async (ctx) => {
   );
 });
 
-// Крок 4: Додати frames або пропустити
 bot.action('kling_o1_add_frames', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -7137,12 +6790,10 @@ bot.action('kling_o1_skip_frames', async (ctx) => {
   );
 });
 
-// Обробка start_image для kling_o1_edit
 bot.on('photo', async (ctx, next) => {
   const userId = ctx.from.id;
   const state = userState.get(userId);
 
-  // ✅ A2E Motion: Обробка фото для анімації (ПЕРЕВІРЯЄМО ПЕРШИМ!)
   if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_image') {
     console.log('🔥 A2E Motion: Processing photo for user', userId);
     const imageUrl = await getImageUrl(ctx);
@@ -7153,7 +6804,6 @@ bot.on('photo', async (ctx, next) => {
 
     console.log('🔥 A2E Motion: Image URL received, setting state to select_duration');
 
-    // Зберігаємо в userCurrentModel для backup
     userCurrentModel.set(userId, 'a2e_motion');
 
     const newState = {
@@ -7188,7 +6838,6 @@ bot.on('photo', async (ctx, next) => {
     return;
   }
 
-  // ✅ KLING O1 EDIT: Обробка start_image
   if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_start_image') {
     const imageUrl = await getImageUrl(ctx);
     if (!imageUrl) {
@@ -7219,7 +6868,6 @@ bot.on('photo', async (ctx, next) => {
     return;
   }
 
-  // ✅ KLING O1 EDIT: Обробка end_image
   if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_end_image') {
     const imageUrl = await getImageUrl(ctx);
     if (!imageUrl) {
@@ -7252,7 +6900,6 @@ bot.on('photo', async (ctx, next) => {
     return;
   }
 
-  // ✅ KLING O1 EDIT: Обробка reference_images
   if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_reference_images') {
     const imageUrl = await getImageUrl(ctx);
     if (!imageUrl) {
@@ -7305,7 +6952,6 @@ bot.on('photo', async (ctx, next) => {
     return;
   }
 
-  // Якщо жоден обробник не спрацював, передаємо наступному handler
   return next();
 });
 
@@ -7431,16 +7077,7 @@ bot.action('kling_o1_skip_ref_images', async (ctx) => {
 });
 
 // ==================== SHARED VIDEO RECOVERY POLLING ====================
-/**
- * Запускає фоновий polling для відео яке не встигло завершитись під час основного polling.
- * Використовується коли KIE.AI повертає pending: true після таймауту.
- *
- * @param {object} opts
- *   chatId, userId, username, modelKey, modelLabel, taskId,
- *   cost, apiCostObj, deductMeta, promptSnippet, resultMeta (рядок для caption),
- *   isRunway (bool) — чи використовувати runway endpoint для опитування,
- *   monitorOptions (object) — передається в logUsageEvent
- */
+
 async function startVideoRecoveryPolling({
   chatId, userId, username,
   modelKey, modelLabel, taskId,
@@ -7449,7 +7086,7 @@ async function startVideoRecoveryPolling({
   isRunway = false,
   monitorOptions = {}
 }) {
-  const maxAttempts = 720; // 60 хвилин (720 * 5s)
+  const maxAttempts = 720; 
   const interval = 5000;
   let attempts = 0;
 
@@ -7487,7 +7124,6 @@ async function startVideoRecoveryPolling({
           return;
         }
 
-        // Списуємо токени
         await userBalance.deductTokens(userId, cost, deductDescription, deductMeta);
         const isTrial = await isTrialUser(userId);
         await monitoringLoggers.logUsageEvent({
@@ -7520,7 +7156,6 @@ async function startVideoRecoveryPolling({
     }
   }
 
-  // Вичерпали всі спроби
   console.error(`❌ [Recovery] ${modelLabel} task ${taskId} never completed`);
   await bot.telegram.sendMessage(chatId,
     `❌ <b>${modelLabel}: Генерація не завершилась</b>\n\n` +
@@ -7548,7 +7183,7 @@ async function generateKlingMotionVideo(ctx, state) {
     return;
   }
 
-  const modelName = model.name;  // Зберігаємо для безпеки
+  const modelName = model.name;  
   const motionCost = state.motionCost;
   const costKey = `${state.mode}_${state.orientation}`;
   const apiCost = model.apiCosts[costKey];
@@ -7573,16 +7208,13 @@ async function generateKlingMotionVideo(ctx, state) {
     { parse_mode: 'HTML' }
   );
 
-  // ✅ ОЧИЩУЄМО СТАН ОДРАЗУ - щоб користувач міг працювати з ботом далі
   userState.delete(userId);
   userCurrentModel.delete(userId);
 
-  // ✅ ЗАПУСКАЄМО ГЕНЕРАЦІЮ У ФОНІ
   const generationData = { ...state };
 
   (async () => {
     try {
-      // Перевіряємо чи можемо використовувати KIE.AI
       const userChosenProvider = userProviderChoice.get(userId);
       const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 
@@ -7599,7 +7231,6 @@ async function generateKlingMotionVideo(ctx, state) {
       const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
       console.log(`🎯 Kling Motion using provider: ${providerName}`);
 
-      // Генеруємо через обраний провайдер
       const result = useKieAI
         ? await kieAI.generateKlingMotionKieAI(
             generationData.prompt || '',
@@ -7644,7 +7275,6 @@ async function generateKlingMotionVideo(ctx, state) {
           `❌ Помилка генерації Kling Motion.\n\n${result.error}\n\nСпробуйте ще раз.`
         );
 
-        // 📊 Логуємо невдалу генерацію
         const isTrial = await isTrialUser(userId);
         await monitoringLoggers.logUsageEvent({
           userId,
@@ -7666,7 +7296,6 @@ async function generateKlingMotionVideo(ctx, state) {
         keepOriginalSound: generationData.keepOriginalSound
       });
 
-      // 📊 Логуємо успішну генерацію
       const isTrialMotion = await isTrialUser(userId);
       await monitoringLoggers.logUsageEvent({
         userId,
@@ -7737,7 +7366,6 @@ async function generateKlingO1EditVideo(ctx, state) {
     return;
   }
 
-  // Duration: якщо feature type - зі стану, інакше 5 (для base ігнорується API)
   const duration = (state.videoReferenceType === 'feature' && state.duration) ? state.duration : 5;
   const hasVideo = !!state.referenceVideo;
   const costPerSec = hasVideo
@@ -7771,7 +7399,6 @@ async function generateKlingO1EditVideo(ctx, state) {
 
   (async () => {
     try {
-      // Конвертуємо формат посилань на зображення з @Image1, @Image2 в <<<image_1>>>, <<<image_2>>>
       let processedPrompt = generationData.prompt || '';
       if (generationData.referenceImages && generationData.referenceImages.length > 0) {
         for (let i = 0; i < generationData.referenceImages.length; i++) {
@@ -7791,7 +7418,7 @@ async function generateKlingO1EditVideo(ctx, state) {
         keepOriginalSound: generationData.keepOriginalSound !== undefined ? generationData.keepOriginalSound : true,  // default true
         mode: generationData.mode,
         aspectRatio: generationData.aspectRatio || null,
-        duration: generationData.videoReferenceType === 'feature' ? duration : undefined  // для base type ігнорується
+        duration: generationData.videoReferenceType === 'feature' ? duration : undefined  
       });
 
       if (!result.success) {
@@ -7871,13 +7498,11 @@ async function generateKlingO1EditVideo(ctx, state) {
   })();
 }
 
-// ==================== Зображення без омежень CALLBACKS ====================
 
-// Крок 1: Вибір якості
 bot.action(/^a2e_img_quality_(1080p|2k)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
-  const quality = ctx.match[1]; // '1080p' або '2k'
+  const quality = ctx.match[1]; 
   const state = userState.get(userId);
   const model = models.design.models.find(m => m.key === 'a2e_image');
 
@@ -7923,7 +7548,6 @@ bot.action(/^a2e_img_quality_(1080p|2k)$/, async (ctx) => {
   );
 });
 
-// Крок 2b: Пропустити референси
 bot.action('a2e_img_skip_refs', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -7957,7 +7581,6 @@ bot.action('a2e_img_skip_refs', async (ctx) => {
   );
 });
 
-// Крок 2a: Додати ще одне фото або продовжити
 bot.action('a2e_img_add_more', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -7980,7 +7603,6 @@ bot.action('a2e_img_add_more', async (ctx) => {
   );
 });
 
-// ==================== Зображення без омежень GENERATION FUNCTION ====================
 
 async function generateA2EImage(ctx, state) {
   const userId = ctx.from.id;
@@ -8028,7 +7650,6 @@ async function generateA2EImage(ctx, state) {
 
   (async () => {
     try {
-      // Створюємо задачу в A2E API
       const startResult = await a2eService.startText2ImageTask({
         prompt: generationData.prompt,
         width: generationData.width || 1024,
@@ -8065,14 +7686,12 @@ async function generateA2EImage(ctx, state) {
 
       let finalResult = null;
 
-      // Якщо A2E повернув зображення одразу (inline) — пропускаємо polling
       if (startResult.imageUrl) {
         console.log(`🖼️ Зображення без омежень: Got inline result, skipping polling`);
         finalResult = { success: true, imageUrl: startResult.imageUrl };
       } else {
-        // Polling статусу задачі
         let attempts = 0;
-        const maxAttempts = 60; // 5 хвилин (60 × 5 сек)
+        const maxAttempts = 60; 
         const pollInterval = 5000;
         while (attempts < maxAttempts) {
           await new Promise(resolve => setTimeout(resolve, pollInterval));
@@ -8088,7 +7707,6 @@ async function generateA2EImage(ctx, state) {
           // A2E uses current_status: initialized | generating | completed | failed
           const status = taskData?.current_status || taskData?.status || taskData?.state;
 
-          // A2E повертає image_urls[] для готових зображень
           const imageUrls = taskData?.image_urls || [];
           const imageUrl = (imageUrls.length > 0 && imageUrls[0]) ? imageUrls[0] : null;
 
@@ -8124,7 +7742,6 @@ async function generateA2EImage(ctx, state) {
       } // end of else (polling path)
 
       if (finalResult.success && finalResult.imageUrl) {
-        // Списуємо токени
         await userBalance.deductTokens(userId, cost, {
           type: 'generation',
           model: 'a2e_image',
@@ -8133,7 +7750,6 @@ async function generateA2EImage(ctx, state) {
           taskId: taskId
         });
 
-        // Зберігаємо результат в БД
         try {
           await GenerationResult.create({
             userId,
@@ -8156,7 +7772,6 @@ async function generateA2EImage(ctx, state) {
           console.warn('Failed to save Зображення без омежень generation result:', dbErr.message);
         }
 
-        // Надсилаємо зображення
         try {
           await bot.telegram.sendPhoto(chatId, finalResult.imageUrl, {
             caption:
@@ -8175,12 +7790,10 @@ async function generateA2EImage(ctx, state) {
           );
         }
 
-        // Видаляємо статусне повідомлення
         try {
           await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
         } catch (e) { /* ignore */ }
 
-        // Логування
         const isTrial = await isTrialUser(userId);
         await monitoringLoggers.logUsageEvent({
           userId,
@@ -8195,7 +7808,6 @@ async function generateA2EImage(ctx, state) {
         console.log(`✅ Зображення без омежень: Sent image to user ${userId}, cost=${cost}⚡`);
         gracefulShutdown.completeGeneration(statusMsg.message_id, true);
       } else {
-        // Помилка генерації
         await adminNotifier.notifyAdmin(bot, new Error(finalResult.error || 'Зображення без омежень generation failed'), {
           userId, username, action: 'a2e_image_generation', model: model.name, taskId
         });
@@ -8237,7 +7849,6 @@ async function generateA2EImage(ctx, state) {
 
 // ==================== A2E MOTION CALLBACKS ====================
 
-// Крок 2: Вибір тривалості після завантаження зображення
 bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -8246,7 +7857,6 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
   const currentModel = userCurrentModel.get(userId);
   const model = models.video.models.find(m => m.key === 'a2e_motion');
 
-  // DEBUG: детальне логування
   console.log('🔥 A2E Duration callback:', {
     userId,
     duration,
@@ -8257,7 +7867,6 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
     hasModel: !!model
   });
 
-  // Якщо state втрачено але є currentModel - відновлюємо state
   if (!state && currentModel === 'a2e_motion') {
     console.log('🔥 A2E Duration: State lost, but currentModel exists. Asking user to resend image.');
     await ctx.reply(
@@ -8278,7 +7887,6 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
     return;
   }
 
-  // Перевірка наявності imageUrl
   if (!state.imageUrl) {
     console.log('❌ A2E Duration: No imageUrl in state');
     await ctx.reply(
@@ -8310,7 +7918,6 @@ bot.action(/^a2e_duration_(\d+)$/, async (ctx) => {
   );
 });
 
-// Крок 4: Пропустити negative prompt
 bot.action('a2e_skip_negative', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -8397,7 +8004,6 @@ async function generateA2EMotionVideo(ctx, state) {
 
   (async () => {
     try {
-      // Створюємо задачу в A2E API
       const startResult = await a2eService.startImageToVideoTask({
         imageUrl: generationData.imageUrl,
         prompt: generationData.prompt,
@@ -8434,10 +8040,9 @@ async function generateA2EMotionVideo(ctx, state) {
       const taskId = startResult.taskId;
       console.log(`🔥 A2E: Task created: ${taskId}, polling for result...`);
 
-      // Polling статусу задачі
       let attempts = 0;
-      const maxAttempts = 120; // 10 хвилин (120 * 5 сек)
-      const pollInterval = 5000; // 5 секунд
+      const maxAttempts = 120; 
+      const pollInterval = 5000; 
 
       let finalResult = null;
       while (attempts < maxAttempts) {
@@ -8453,7 +8058,6 @@ async function generateA2EMotionVideo(ctx, state) {
         const taskData = detailsResult.data;
         const status = taskData?.status || taskData?.state;
 
-        // Перевіряємо статус задачі
         if (status === 'completed' || status === 'success' || taskData?.video_url || taskData?.result_url) {
           finalResult = {
             success: true,
@@ -8470,8 +8074,7 @@ async function generateA2EMotionVideo(ctx, state) {
           break;
         }
 
-        // Якщо статус 'processing' або 'running' - продовжуємо polling
-        if (attempts % 12 === 0) { // Кожні 60 секунд
+        if (attempts % 12 === 0) { 
           console.log(`🔥 A2E: Task ${taskId} still processing... (attempt ${attempts}/${maxAttempts})`);
         }
       }
@@ -8507,7 +8110,6 @@ async function generateA2EMotionVideo(ctx, state) {
         return;
       }
 
-      // Віднімаємо токени
       await userBalance.deductTokens(userId, cost, `${model.name} generation`, {
         modelKey: 'a2e_motion',
         modelName: model.name,
@@ -8516,7 +8118,6 @@ async function generateA2EMotionVideo(ctx, state) {
         duration: duration
       });
 
-      // Зберігаємо результат в MongoDB
       try {
         await GenerationResult.create({
           userId,
@@ -8542,7 +8143,6 @@ async function generateA2EMotionVideo(ctx, state) {
         console.log(`✅ A2E: Result saved to MongoDB for user ${userId}`);
       } catch (dbError) {
         console.error('❌ A2E: Failed to save result to MongoDB:', dbError);
-        // Не блокуємо успішну генерацію через помилку БД
       }
 
       const isTrial = await isTrialUser(userId);
@@ -8590,7 +8190,6 @@ async function generateA2EMotionVideo(ctx, state) {
   })();
 }
 
-// Генерувати Kling відразу
 bot.action('kling_generate_now', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -8656,16 +8255,13 @@ async function generateKlingVideo(ctx, state) {
     { parse_mode: 'HTML' }
   );
 
-  // ✅ ОЧИЩУЄМО СТАН ОДРАЗУ - щоб користувач міг працювати з ботом далі
   userState.delete(userId);
   userCurrentModel.delete(userId);
 
-  // ✅ ЗАПУСКАЄМО ГЕНЕРАЦІЮ У ФОНІ
   const generationData = { ...state };
 
   (async () => {
     try {
-      // Перевіряємо чи можемо використовувати KIE.AI
       const userChosenProvider = userProviderChoice.get(userId);
       const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
 
@@ -8684,7 +8280,6 @@ async function generateKlingVideo(ctx, state) {
       let result;
 
       if (useKieAI) {
-        // KIE.AI підтримує Kling v2.5 та v2.6
         const version = modelKey === 'kling_v2_6' ? 'v2.6' : 'v2.5';
         const enableSound = generationData.generateAudio === true;
 
@@ -8749,7 +8344,6 @@ async function generateKlingVideo(ctx, state) {
           `❌ Помилка генерації Kling.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
         );
 
-        // 📊 Логуємо невдалу генерацію
         const isTrial = await isTrialUser(userId);
         await monitoringLoggers.logUsageEvent({
           userId,
@@ -8773,7 +8367,6 @@ async function generateKlingVideo(ctx, state) {
         generateAudio: generationData.generateAudio === true
       });
 
-      // 📊 Логуємо успішну генерацію
       const isTrialKling = await isTrialUser(userId);
       await monitoringLoggers.logUsageEvent({
         userId,
@@ -8804,7 +8397,6 @@ async function generateKlingVideo(ctx, state) {
         ...keyboard.createBackButton('video_menu')
       });
 
-      // ✅ Записуємо Trial usage
       recordTrialUsage(userId, modelKey);
 
     } catch (error) {
@@ -8824,8 +8416,8 @@ async function generateKlingVideo(ctx, state) {
 
 // ==================== KLING 3.0 (KIE.AI) GENERATION FUNCTION ====================
 
-/** Вартість Kling 3.0 за секунду (токени): з кешу KIE + 30% націнка, якщо KIE_AI_USE_CACHE_PRICING не 'false'. */
-/** Ціна Kling 3.0 за секунду; використовуйте getEffectiveKling3CostPerSecond(userId, mode, withAudio) замість цієї функції. */
+
+
 function getKling3CostPerSecond(model, mode = 'pro', withAudio = false) {
   return withAudio ? (model?.costPerSecondAudio ?? 45) : (model?.costPerSecondNoAudio ?? 23);
 }
@@ -8946,7 +8538,6 @@ async function generateKling3Video(ctx, state) {
           `❌ Помилка генерації Kling 3.0.\n\n${result.error}\n\nСпробуйте ще раз.`
         );
 
-        // 📊 Логуємо невдалу генерацію
         const isTrial = await isTrialUser(userId);
         await monitoringLoggers.logUsageEvent({
           userId,
@@ -8956,7 +8547,7 @@ async function generateKling3Video(ctx, state) {
           isTrial,
           isFree: isTrial,
           errorCode: result.error?.substring(0, 100),
-          provider: 'kie'  // Kling 3.0 тільки на KIE.AI
+          provider: 'kie'  
         });
 
         return;
@@ -8970,7 +8561,6 @@ async function generateKling3Video(ctx, state) {
         generateAudio: generationData.generateAudio
       });
 
-      // 📊 Логуємо успішну генерацію
       const isTrialKling3 = await isTrialUser(userId);
       await monitoringLoggers.logUsageEvent({
         userId,
@@ -8979,7 +8569,7 @@ async function generateKling3Video(ctx, state) {
         options: { duration: generationData.duration, mode: generationData.mode, generateAudio: generationData.generateAudio },
         isTrial: isTrialKling3,
         isFree: isTrialKling3,
-        provider: 'kie'  // Kling 3.0 тільки на KIE.AI
+        provider: 'kie'  
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -9061,7 +8651,6 @@ async function generateRunwayTurboVideo(ctx, state) {
     { parse_mode: 'HTML' }
   );
 
-  // ✅ ОЧИЩУЄМО СТАН ОДРАЗУ - щоб користувач міг працювати з ботом далі
   userState.delete(userId);
   userCurrentModel.delete(userId);
 
@@ -9244,15 +8833,11 @@ async function generateVeoVideo(ctx, state) {
     { parse_mode: 'HTML' }
   );
 
-  // ✅ ОЧИЩУЄМО СТАН ОДРАЗУ - щоб користувач міг працювати з ботом далі
   userState.delete(userId);
   userCurrentModel.delete(userId);
 
-  // ✅ ЗАПУСКАЄМО ГЕНЕРАЦІЮ У ФОНІ (без await на верхньому рівні)
-  // Зберігаємо необхідні дані локально
   const generationData = { ...state };
 
-  // Асинхронна функція що виконується у фоні
   (async () => {
     try {
       let providerName = 'Google Gemini API';
@@ -9277,11 +8862,9 @@ async function generateVeoVideo(ctx, state) {
 
       console.log(`🎯 Veo using provider: ${providerName}`);
 
-      // Будуємо масив imageUrls та generationType для KIE.AI Veo
       let veoImageUrls = [];
       let veoGenerationType = null;
       if (generationData.references && generationData.references.length > 0) {
-        // Reference mode: масив reference зображень (до 3)
         veoImageUrls = generationData.references.slice(0, 3);
         veoGenerationType = 'REFERENCE_2_VIDEO';
       } else if (generationData.startImage && generationData.lastFrame) {
@@ -9289,11 +8872,9 @@ async function generateVeoVideo(ctx, state) {
         veoImageUrls = [generationData.startImage, generationData.lastFrame];
         veoGenerationType = 'FIRST_AND_LAST_FRAMES_2_VIDEO';
       } else if (generationData.startImage) {
-        // Тільки стартовий кадр
         veoImageUrls = [generationData.startImage];
         veoGenerationType = 'FIRST_AND_LAST_FRAMES_2_VIDEO';
       } else if (generationData.lastFrame) {
-        // Тільки останній кадр
         veoImageUrls = [generationData.lastFrame];
         veoGenerationType = 'FIRST_AND_LAST_FRAMES_2_VIDEO';
       } else {
@@ -9319,8 +8900,6 @@ async function generateVeoVideo(ctx, state) {
               aspectRatio: generationData.aspectRatio,
               model: generationData.veoModel || 'veo3_fast',
               generateAudio: generateAudio,
-              // 🔔 Реєструємо taskId в kieCallbackMap ОДРАЗУ після створення задачі,
-              // ДО початку polling — щоб webhook від KIE.AI не був пропущений
               onTaskCreated: (taskId) => {
                 console.log(`📋 Veo: registering taskId=${taskId} in kieCallbackMap BEFORE polling`);
                 kieCallbackMap.set(taskId, {
@@ -9350,11 +8929,9 @@ async function generateVeoVideo(ctx, state) {
 
       console.log(`🎯 Veo result: success=${result.success}, pending=${!!result.pending}, taskId=${result.taskId}, videoUrl=${result.videoUrl ? result.videoUrl.substring(0, 100) : 'NULL'}, error=${result.error || 'none'}, provider=${result.provider}`);
 
-      // ⏱️ PENDING: відео ще генерується після таймауту polling — продовжуємо у фоні
       if (!result.success && result.pending && result.taskId) {
         console.log(`⏱️ Veo task ${result.taskId} pending — starting background recovery for user ${userId}`);
 
-        // Зберігаємо дані для callback webhook (якщо KIE.AI надішле callback раніше за polling)
         kieCallbackMap.set(result.taskId, {
           chatId, userId, username,
           model: 'veo', modelName: model.name,
@@ -9375,21 +8952,19 @@ async function generateVeoVideo(ctx, state) {
           { parse_mode: 'HTML' }
         );
 
-        // Фоновий recovery polling
         const recoveryTaskId = result.taskId;
         (async () => {
-          const maxRecoveryAttempts = 2160; // ще 3 години (2160 * 5s)
+          const maxRecoveryAttempts = 2160; 
           const recoveryInterval = 5000;
           let recoveryAttempts = 0;
           while (recoveryAttempts < maxRecoveryAttempts) {
             try {
               await new Promise(r => setTimeout(r, recoveryInterval));
               recoveryAttempts++;
-              // Використовуємо Veo-специфічний endpoint
               const job = await kieAI.fetchVeoTaskInfoExported(recoveryTaskId);
               if (!job) continue;
               const jobState = (job.state || job.status || '').toLowerCase();
-              if (recoveryAttempts % 12 === 0) { // логуємо кожну хвилину
+              if (recoveryAttempts % 12 === 0) { 
                 console.log(`🔄 Veo recovery poll (${recoveryAttempts}/${maxRecoveryAttempts}): taskId=${recoveryTaskId} state=${jobState}`);
               }
               if (jobState === 'success' || jobState === 'completed') {
@@ -9412,7 +8987,6 @@ async function generateVeoVideo(ctx, state) {
                   await bot.telegram.sendMessage(chatId, `❌ Veo 3.1: відео згенеровано, але URL не знайдено. Зверніться до підтримки. TaskId: ${recoveryTaskId}`);
                   return;
                 }
-                // Списуємо токени
                 await userBalance.deductTokens(userId, veoCost, `${model.name} generation`, {
                   modelKey: 'veo', modelName: model.name, apiCost: apiCost,
                   prompt: generationData.prompt, aspectRatio: generationData.aspectRatio,
@@ -9460,7 +9034,6 @@ async function generateVeoVideo(ctx, state) {
               console.error(`⚠️ Veo recovery poll error (${recoveryAttempts}):`, e.message);
             }
           }
-          // Вичерпали всі спроби
           console.error(`❌ Veo recovery: task ${recoveryTaskId} never completed after extended wait`);
           await bot.telegram.sendMessage(chatId,
             `❌ <b>Google Veo 3.1: Генерація не завершилась</b>\n\n` +
@@ -9477,7 +9050,6 @@ async function generateVeoVideo(ctx, state) {
       }
 
       if (!result.success) {
-        // ✅ Видаляємо з callbackMap — помилка, не чекаємо callback
         if (result.taskId) kieCallbackMap.delete(result.taskId);
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
           userId, username, action: 'veo_generation', model: model.name,
@@ -9488,7 +9060,6 @@ async function generateVeoVideo(ctx, state) {
           `❌ Помилка генерації Veo 3.1.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
         );
 
-        // 📊 Логуємо невдалу генерацію
         const isTrial = await isTrialUser(userId);
         await monitoringLoggers.logUsageEvent({
           userId,
@@ -9504,12 +9075,11 @@ async function generateVeoVideo(ctx, state) {
         return;
       }
 
-      // ✅ Перевіряємо чи відео вже доставлено через webhook callback
       if (result.taskId && kieCallbackDelivered.has(result.taskId)) {
         console.log(`📋 Veo task ${result.taskId} already delivered via webhook callback — skipping polling delivery`);
         kieCallbackDelivered.delete(result.taskId);
         kieCallbackMap.delete(result.taskId);
-        try { await bot.telegram.deleteMessage(chatId, statusMsg.message_id); } catch (e) { /* ігноруємо */ }
+        try { await bot.telegram.deleteMessage(chatId, statusMsg.message_id); } catch (e) {  }
         return;
       }
 
@@ -9523,7 +9093,6 @@ async function generateVeoVideo(ctx, state) {
         provider: providerKey
       });
 
-      // 📊 Логуємо успішну генерацію
       const isTrialVeo = await isTrialUser(userId);
       await monitoringLoggers.logUsageEvent({
         userId,
@@ -9537,7 +9106,6 @@ async function generateVeoVideo(ctx, state) {
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
 
-      // Попередження перед відео
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>Google Veo 3.1 готово!</b>\n\n` +
@@ -9607,7 +9175,6 @@ async function generateSoraVideo(ctx, state) {
   const providerKey = useKieAI ? 'kie' : 'replicate';
   const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
 
-  // KIE.AI: 10s доступно лише для image-to-video.
   if (useKieAI && duration === 10 && !hasReference) {
     await ctx.reply(
       '⚠️ <b>Sora 2 (KIE.AI): 10с режим доступний тільки зі стартовим зображенням.</b>\n\n' +
@@ -9826,7 +9393,7 @@ bot.action('welcome_start', async (ctx) => {
 
 bot.action('audio_menu', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.reply('🎙️ Аудіо з AI\n\nВиберіть розділ для роботи з аудіо 👇', keyboard.createInlineMenu(models.audio.models, 2));
+  await ctx.reply('🎙️ AI audio\n\nChoose an audio workflow below.', keyboard.createInlineMenu(models.audio.models, 2));
 });
 
 bot.action('main_menu', async (ctx) => {
@@ -9835,17 +9402,17 @@ bot.action('main_menu', async (ctx) => {
   userState.delete(userId);
   userCurrentModel.delete(userId);
   imageGenState.delete(userId);
-  await ctx.reply('🏠 Головне меню', keyboard.createMainMenu());
+  await ctx.reply('🏠 Main menu', keyboard.createMainMenu());
 });
 
 bot.action('design_menu', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.reply('🎨 Дизайн з AI\n\nВиберіть розділ для роботи з зображенням 👇', keyboard.createInlineMenu(getDesignModelsWithEffectiveCost(ctx.from.id), 1));
+  await ctx.reply('🎨 AI design\n\nChoose an image workflow below.', keyboard.createInlineMenu(getDesignModelsWithEffectiveCost(ctx.from.id), 1));
 });
 
 bot.action('video_menu', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.reply('🎬 Створення відео\n\nВиберіть розділ для роботи з відео 👇', keyboard.createInlineMenu(getVideoModelsForUser(ctx.from.id), 1));
+  await ctx.reply('🎬 Video creation\n\nChoose a video workflow below.', keyboard.createInlineMenu(getVideoModelsForUser(ctx.from.id), 1));
 });
 
 bot.action('profile_menu', async (ctx) => {
@@ -9856,23 +9423,18 @@ bot.action('profile_menu', async (ctx) => {
 // Tokens purchase
 bot.action('buy_subscription', async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.reply(`⚡ Купити токени\n\n Виберіть пакет 👇`, keyboard.createSubscriptionsMenu(ctx.from.id));
+  await ctx.reply(`⚡ Buy tokens\n\nChoose a package below.`, keyboard.createSubscriptionsMenu(ctx.from.id, ctx));
 });
 
 bot.action('community', async (ctx) => {
   await ctx.answerCbQuery();
-  const message = `👥 <b>Спільнота neuro\u200B.lab\u200B.ai</b>
+  const message = `👥 <b>Community</b>
 
-👩‍💼 <b>Авторка:</b> Анастасія Черевань
+This open-source bot does not ship with personal social links.
 
-📱 <b>Соціальні мережі:</b>
-- Instagram: https://www.instagram.com/anastasia.che.ai
-- Threads: https://www.threads.com/@anastasia.che.ai
+For support, contact: ${SUPPORT_USERNAME}
 
-💬 <b>Telegram група:</b>
-<a href="t.me/+AFbdgWuqG8UxMTVi">neuro\u200B.lab\u200B.ai</a>
-
-Приєднуйтесь до нашої спільноти! 🚀`;
+You can add your own community links in the bot flow before publishing.`;
 
   await ctx.reply(message, { parse_mode: 'HTML', disable_web_page_preview: false, ...keyboard.createBackButton() });
 });
@@ -9888,7 +9450,7 @@ bot.action('legal_info', async (ctx) => {
 
 Натисніть на кнопку нижче щоб ознайомитися з повним текстом документів:`;
 
-  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createLegalMenu() });
+  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createLegalMenu(ctx) });
 });
 
 bot.action(/^sub_(starter|basic|pro|premium|starter_test)$/, async (ctx) => {
@@ -9909,7 +9471,6 @@ bot.action(/^sub_(starter|basic|pro|premium|starter_test)$/, async (ctx) => {
     return;
   }
 
-  // Розраховуємо ціну за токен та економію (базуємось на актуальному STARTER)
   const starterSub = models.subscriptions.starter;
   const starterTokens = starterSub?.tokensWayForPay ?? starterSub?.tokens;
   const starterPricePerToken = starterTokens ? (starterSub.priceUSD / starterTokens) : 0;
@@ -9919,13 +9480,11 @@ bot.action(/^sub_(starter|basic|pro|premium|starter_test)$/, async (ctx) => {
     ? Math.round((1 - pricePerToken / starterPricePerToken) * 100)
     : 0;
 
-  // Короткий опис пакету в доларах
   let message = `⚡ <b>Пакет ${sub.name}</b> — $${sub.priceUSD}\n\n`;
   message += `💎 Доступ до всіх моделей\n`;
   message += `⏰ Токени НЕ згорають\n`;
   message += `✨ Комбінуйте як завгодно!\n\n`;
 
-  // Показуємо економію для пакетів більших за STARTER
   if (planKey !== 'starter' && savingsPercent > 0) {
     message += `🔥 <b>Економія ${savingsPercent}%</b> порівняно зі STARTER!\n\n`;
   }
@@ -9936,7 +9495,7 @@ bot.action(/^sub_(starter|basic|pro|premium|starter_test)$/, async (ctx) => {
   message += `💡 <i>Чим більший пакет — тим вигідніше!</i>\n\n`;
   message += `📱 Оберіть спосіб оплати 👇`;
 
-  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createPaymentMenu(sub.price, planKey, userId, telegramId) });
+  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createPaymentMenu(sub.price, planKey, userId, telegramId, ctx) });
 });
 
 bot.action(/^pay_stars_(starter|basic|pro|premium|starter_test)$/, async (ctx) => {
@@ -10005,7 +9564,7 @@ bot.on('successful_payment', async (ctx) => {
     return;
   }
 
-  const tokens = sub.tokens; // Stars — без бонусів
+  const tokens = sub.tokens; 
   const amountStars = payment.total_amount;
 
   try {
@@ -10063,11 +9622,10 @@ bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const currentModel = userCurrentModel.get(userId);
   const state = userState.get(userId);
-  let text = ctx.message.text;  // let - бо може змінитись при накопиченні довгого промпту
+  let text = ctx.message.text;  
 
   if (text.startsWith('/')) return;
 
-  // ✅ VEO: Якщо юзер надіслав текст замість зображення — одразу запускаємо TEXT_2_VIDEO
   if (state?.action === 'veo_generation' && (state?.step === 'waiting_start_image' || state?.step === 'ask_start_image' || state?.step === 'ask_last_frame' || state?.step === 'waiting_last_frame')) {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -10091,7 +9649,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ VEO: Обробка промпту (останній крок)
   if (state?.action === 'veo_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -10113,7 +9670,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ RUNWAY TURBO: Обробка промпту (останній крок)
   if (state?.action === 'runway_turbo_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -10141,7 +9697,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ SORA 2: Обробка промпту (останній крок)
   if (state?.action === 'sora_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -10163,7 +9718,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ SEEDANCE 2: Обробка промпту (останній крок)
   if (state?.action === 'seedance_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -10185,7 +9739,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ KLING: Обробка промпту
   if (state?.action === 'kling_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -10196,7 +9749,6 @@ bot.on('text', async (ctx) => {
       return;
     }
 
-    // Зберігаємо промпт і генеруємо
     userState.set(userId, {
       ...state,
       prompt: text,
@@ -10208,7 +9760,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ KLING 3.0 Multi-shot: опис сцени
   if (state?.action === 'kling_3_generation' && state?.step === 'waiting_scene_prompt' && state?.multiShots) {
     if (!text || text.length < 3) {
       await ctx.reply('Опишіть сцену детальніше (мінімум 3 символи).', keyboard.createBackButton('video_menu'));
@@ -10242,7 +9793,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ KLING 3.0: Ім’я елемента для kling_elements
   if (state?.action === 'kling_3_generation' && state?.step === 'waiting_element_name') {
     const name = (text || '').trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase() || 'element';
     const safeName = name.slice(0, 50) || 'element';
@@ -10261,7 +9811,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ KLING 3.0 (KIE.AI): Обробка промпту (останній крок)
   if (state?.action === 'kling_3_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -10283,7 +9832,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ Зображення без омежень: Обробка промпту для генерації зображення
   if (state?.action === 'a2e_image_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 3) {
       await ctx.reply(
@@ -10316,7 +9864,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ A2E Motion: Обробка prompt та перехід до negative prompt
   if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -10355,7 +9902,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ A2E Motion: Обробка negative prompt
   if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_negative_prompt') {
     if (text && text.length > 200) {
       await ctx.reply(
@@ -10392,7 +9938,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ KLING O1 EDIT: Обробка prompt
   if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
       await ctx.reply(
@@ -10403,7 +9948,6 @@ bot.on('text', async (ctx) => {
       return;
     }
 
-    // Перевірка на копіювання повідомлення бота
     if (text.includes('NeuroLabAI') || text.includes('БОТ НЕЙРОМЕРЕЖІ') || text.includes('Крок') || text.includes('💰 Орієнтовна вартість')) {
       await ctx.reply(
         '⚠️ Схоже, ви скопіювали повідомлення бота!\n\n' +
@@ -10424,7 +9968,6 @@ bot.on('text', async (ctx) => {
     userState.set(userId, updatedState);
 
     const model = models.video.models.find(m => m.key === 'kling_o1_edit');
-    // Duration: якщо feature type - зі стану, інакше 5 (для base ігнорується API)
     const duration = (updatedState.videoReferenceType === 'feature' && updatedState.duration) ? updatedState.duration : 5;
     const hasVideo = !!updatedState.referenceVideo;
     const costPerSec = hasVideo
@@ -10445,9 +9988,7 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ KLING MOTION: Обробка промпту (опціонально)
   if (state?.action === 'kling_motion_generation' && state?.step === 'ask_prompt') {
-    // Зберігаємо промпт і генеруємо
     userState.set(userId, {
       ...state,
       prompt: text,
@@ -10459,7 +10000,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ A2E Motion: якщо є активний флоу але користувач надіслав текст замість фото
   if (state?.action === 'a2e_motion_generation') {
     if (state.step === 'waiting_image') {
       await ctx.reply(
@@ -10470,7 +10010,6 @@ bot.on('text', async (ctx) => {
       );
       return;
     }
-    // Якщо інший step (крім prompt/negative_prompt які обробляються вище) - показуємо повідомлення
     if (state.step !== 'waiting_prompt' && state.step !== 'waiting_negative_prompt' && state.step !== 'select_duration') {
       await ctx.reply(
         '🔥 <b>Motion без омежень</b>\n\n' +
@@ -10482,7 +10021,6 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  // ✅ KLING O1 EDIT: якщо є активний флоу але немає currentModel
   if (state?.action === 'kling_o1_edit_generation') {
     if (state.step === 'waiting_video') {
       await ctx.reply(
@@ -10492,8 +10030,6 @@ bot.on('text', async (ctx) => {
       );
       return;
     }
-    // Якщо step = waiting_prompt - текст обробиться в KLING O1 EDIT обробнику вище (рядок 6677)
-    // Якщо інший step - показуємо повідомлення
     if (state.step !== 'waiting_prompt') {
       await ctx.reply(
         '✂️ <b>Kling O1 Edit</b>\n\n' +
@@ -10503,7 +10039,6 @@ bot.on('text', async (ctx) => {
       );
       return;
     }
-    // Якщо step = waiting_prompt - не переходимо далі, обробка вже вище
   }
 
   if (!currentModel && !state?.action) {
@@ -10511,11 +10046,9 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ KLING MOTION: якщо модель обрана але флоу не розпочато
   if (currentModel === 'kling_motion') {
     const motionState = userState.get(userId);
 
-    // Якщо є активний флоу - перевіряємо на якому кроці
     if (motionState?.action === 'kling_motion_generation') {
       if (motionState.step === 'waiting_image') {
         await ctx.reply(
@@ -10533,9 +10066,7 @@ bot.on('text', async (ctx) => {
         );
         return;
       }
-      // Якщо step = ask_prompt - текст обробиться в KLING MOTION обробнику вище
     } else {
-      // Флоу не розпочато - направляємо в меню
       await ctx.reply(
         '🔥 <b>Kling Motion Control</b>\n\n' +
         '⚠️ Спочатку налаштуйте параметри!\n\n' +
@@ -10546,7 +10077,6 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  // ✅ VEO: якщо модель veo але немає стану - показуємо що треба обрати aspect ratio
   if (currentModel === 'veo' && !state?.action) {
     await ctx.reply(
       '🌟 <b>Google Veo 3.1</b>\n\n' +
@@ -10557,7 +10087,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ RUNWAY TURBO: якщо модель runway_turbo але немає стану
   if (currentModel === 'runway_turbo' && !state?.action) {
     await ctx.reply(
       '🎬 <b>Runway Gen-4 Turbo</b>\n\n' +
@@ -10568,7 +10097,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ SORA 2: якщо модель sora_2 але немає стану
   if (currentModel === 'sora_2' && !state?.action) {
     await ctx.reply(
       '🌌 <b>OpenAI Sora 2</b>\n\n' +
@@ -10589,7 +10117,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ НОВИЙ ФЛОУ ДЛЯ ГРАФІЧНИХ МОДЕЛЕЙ
   const imgState = imageGenState.get(userId);
   const activeImageModel = currentModel || imgState?.model;
   if (imgState && IMAGE_MODELS.includes(activeImageModel)) {
@@ -10748,7 +10275,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ A2E Motion: якщо currentModel встановлено але це image-to-video модель
   if (currentModel === 'a2e_motion') {
     await ctx.reply(
       '🖼️ <b>Motion без омежень потребує ЗОБРАЖЕННЯ!</b>\n\n' +
@@ -10759,7 +10285,6 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  // ✅ MIDJOURNEY: обробка налаштувань (stylization, weirdness, variety)
   if (state?.action === 'midjourney_generation') {
     // Stylization input
     if (state.step === 'awaiting_stylization') {
@@ -10771,7 +10296,6 @@ bot.on('text', async (ctx) => {
 
       console.log(`🔍 [STYLIZATION TEXT] Before update - userId=${userId}, state exists: ${!!userState.get(userId)}, current stylization: ${state.stylization}`);
 
-      // Логування зміни дефолтного значення
       const defaultValue = 100;
       if (value !== defaultValue) {
         console.log(`🎨 Midjourney Stylization змінено з дефолту: userId=${userId}, default=${defaultValue}, new=${value}, diff=${value - defaultValue}`);
@@ -10823,7 +10347,6 @@ bot.on('text', async (ctx) => {
 
       console.log(`🔍 [WEIRDNESS TEXT] Before update - userId=${userId}, state exists: ${!!userState.get(userId)}, current weirdness: ${state.weirdness}`);
 
-      // Логування зміни дефолтного значення
       const defaultValue = 0;
       if (value !== defaultValue) {
         console.log(`🌀 Midjourney Weirdness змінено з дефолту: userId=${userId}, default=${defaultValue}, new=${value}, diff=+${value}`);
@@ -10875,7 +10398,6 @@ bot.on('text', async (ctx) => {
 
       console.log(`🔍 [VARIETY TEXT] Before update - userId=${userId}, state exists: ${!!userState.get(userId)}, current variety: ${state.variety}`);
 
-      // Логування зміни дефолтного значення
       const defaultValue = 50;
       if (value !== defaultValue) {
         console.log(`🎲 Midjourney Variety змінено з дефолту: userId=${userId}, default=${defaultValue}, new=${value}, diff=${value - defaultValue}`);
@@ -10918,7 +10440,6 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  // ✅ MIDJOURNEY: обробка промпту
   if (state?.action === 'midjourney_generation' && state?.step === 'waiting_prompt') {
     console.log('🖼️ Midjourney: Processing prompt for user', userId);
     runBackgroundTask(() => handleMidjourneyGeneration(ctx, text), 'midjourney_generation');
@@ -10944,7 +10465,6 @@ bot.on('text', async (ctx) => {
     ideogram: () => handleImageGeneration(ctx, text, 'ideogram'),
     kling: () => handleVideoGeneration(ctx, text, 'kling'),
     kling_v2_6: () => handleVideoGeneration(ctx, text, 'kling_v2_6'),
-    // kling_3 використовує окремий флоу через state machine (kling_3_generation)
     runway_gen4: () => handleVideoGeneration(ctx, text, 'runway_gen4'),
     suno: () => handleSunoGeneration(ctx, text)
   };
@@ -11009,7 +10529,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ A2E Motion: Обробка фото для анімації (перевіряємо першим)
   if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_image') {
     console.log('🔥 A2E Motion: Processing photo for user', userId);
     const imageUrl = await getImageUrl(ctx);
@@ -11047,7 +10566,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ Зображення без омежень: Обробка референсних фото (другий handler)
   if (state?.action === 'a2e_image_generation' && state?.step === 'waiting_photos') {
     console.log('🖼️ Зображення без омежень: Processing reference photo (2nd handler) for user', userId);
     const imageUrl = await getImageUrl(ctx);
@@ -11100,7 +10618,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ VEO: Обробка стартового зображення (image-to-video)
   if (state?.action === 'veo_generation' && state?.step === 'waiting_start_image') {
     console.log(`✅ Processing VEO start image for user ${userId}`);
     const imageUrl = await getImageUrl(ctx);
@@ -11127,7 +10644,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ VEO: Обробка last_frame
   if (state?.action === 'veo_generation' && state?.step === 'waiting_last_frame') {
     const imageUrl = await getImageUrl(ctx);
 
@@ -11146,7 +10662,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ SORA 2: Обробка стартового зображення (input_reference)
   if (state?.action === 'sora_generation' && state?.step === 'waiting_reference') {
     const imageUrl = await getImageUrl(ctx);
 
@@ -11165,7 +10680,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ KLING 3.0: Обробка стартового зображення
   if (state?.action === 'kling_3_generation' && state?.step === 'waiting_start_image') {
     const imageUrl = await getImageUrl(ctx);
 
@@ -11192,7 +10706,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ KLING 3.0: Збір медіа для елемента (2–4 фото або 1 відео)
   if (state?.action === 'kling_3_generation' && state?.step === 'waiting_element_media' && state?.currentElement) {
     const videoUrl = await getVideoUrl(ctx);
     if (videoUrl) {
@@ -11249,7 +10762,6 @@ bot.on('photo', async (ctx) => {
   }
 
 
-  // ✅ RUNWAY TURBO: Обробка initial image
   if (state?.action === 'runway_turbo_generation' && state?.step === 'waiting_image') {
     const imageUrl = await getImageUrl(ctx);
 
@@ -11278,7 +10790,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ KLING: Обробка стартового зображення
   if (state?.action === 'kling_generation' && state?.step === 'waiting_start_image') {
     console.log(`✅ Processing Kling start image for user ${userId}`);
     const imageUrl = await getImageUrl(ctx);
@@ -11335,7 +10846,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ KLING: Обробка end_image
   if (state?.action === 'kling_generation' && state?.step === 'waiting_end_image') {
     console.log(`✅ Processing Kling end image for user ${userId}`);
     const imageUrl = await getImageUrl(ctx);
@@ -11368,7 +10878,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ KLING MOTION: Обробка фото персонажа
   if (state?.action === 'kling_motion_generation' && state?.step === 'waiting_image') {
     console.log(`✅ Processing Kling Motion image for user ${userId}`);
     const imageUrl = await getImageUrl(ctx);
@@ -11405,7 +10914,6 @@ bot.on('photo', async (ctx) => {
     if (handled) return;
   }
 
-  // ✅ НОВИЙ ФЛОУ: Обробка референс-фото
   const imgState = imageGenState.get(userId);
   if (imgState && imgState.step === 'select_quality') {
     await ctx.reply(
@@ -11429,7 +10937,6 @@ bot.on('photo', async (ctx) => {
     const maxPhotos = imgState.selectedMaxImages || model?.maxImages || 1;
     const mediaGroupId = ctx.message.media_group_id;
 
-    // Якщо це альбом - збираємо всі фото через mediaGroups Map
     if (mediaGroupId) {
       const albumKey = `ref_${mediaGroupId}`;
 
@@ -11445,13 +10952,11 @@ bot.on('photo', async (ctx) => {
       const group = mediaGroups.get(albumKey);
       const photo = ctx.message.photo[ctx.message.photo.length - 1];
       const file = await ctx.telegram.getFile(photo.file_id);
-      const photoUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+      const photoUrl = buildTelegramFileProxyUrl(file.file_path);
       group.photos.push({ id: ctx.message.message_id, url: photoUrl });
 
-      // Скидаємо таймер
       if (group.timeout) clearTimeout(group.timeout);
 
-      // Чекаємо 500мс на інші фото з альбому
       group.timeout = setTimeout(async () => {
         const finalGroup = mediaGroups.get(albumKey);
         if (!finalGroup) return;
@@ -11492,7 +10997,6 @@ bot.on('photo', async (ctx) => {
       return;
     }
 
-    // Одне фото - зберігаємо референс
     const imageUrl = await getImageUrl(ctx);
     if (!imgState.photos) imgState.photos = [];
 
@@ -11551,7 +11055,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ Перевірити чи користувач вибрав модель
   if (!currentModel) {
     await ctx.reply(
       '❌ Спочатку виберіть модель для обробки фото.\n\n' +
@@ -11561,14 +11064,12 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ Спеціальний випадок: користувач обрав "🖼️ Завантажте зображення для аналізу" з гідлінгу Claude
   if (currentModel === 'image') {
     console.log(`🖼️ Image analysis mode selected, redirecting to Claude vision`);
     runBackgroundTask(() => handleClaudeVision(ctx), 'claude_vision_image_mode');
     return;
   }
 
-  // ✅ SORA 2: якщо модель обрана але флоу не розпочато
   if (currentModel === 'sora_2' && !state?.action) {
     await ctx.reply(
       '🌌 <b>OpenAI Sora 2</b>\n\n' +
@@ -11589,7 +11090,6 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // ✅ Спеціальний випадок: користувач обрав "💌 День Закоханих" креатив
   if (currentModel === 'love_is') {
     console.log(`💌 Love is... creative selected, handling creative photo`);
     const imageUrl = await getImageUrl(ctx);
@@ -11597,7 +11097,6 @@ bot.on('photo', async (ctx) => {
     if (handled) return;
   }
 
-  // ❤️ Льодяник креатив
   if (currentModel === 'hearts') {
     console.log(`❤️ Hearts creative selected, handling creative photo`);
     const imageUrl = await getImageUrl(ctx);
@@ -11605,7 +11104,6 @@ bot.on('photo', async (ctx) => {
     if (handled) return;
   }
 
-  // 👑 Bridgerton креатив
   if (currentModel === 'bridgerton') {
     console.log(`👑 Bridgerton creative selected, handling creative photo`);
     const imageUrl = await getImageUrl(ctx);
@@ -11613,7 +11111,6 @@ bot.on('photo', async (ctx) => {
     if (handled) return;
   }
 
-  // ✨ Порцелянова фігурка креатив
   if (currentModel === 'porcelain_figure') {
     console.log(`✨ Porcelain figure creative selected, handling creative photo`);
     const imageUrl = await getImageUrl(ctx);
@@ -11621,7 +11118,6 @@ bot.on('photo', async (ctx) => {
     if (handled) return;
   }
 
-  // 🐱 Котики креатив
   if (currentModel === 'kittens') {
     console.log(`🐱 Kittens creative selected, handling creative photo`);
     const imageUrl = await getImageUrl(ctx);
@@ -11629,7 +11125,6 @@ bot.on('photo', async (ctx) => {
     if (handled) return;
   }
 
-  // 🌊 Підводний макро-портрет креатив
   if (currentModel === 'underwater_macro') {
     console.log(`🌊 Underwater macro creative selected, handling creative photo`);
     const imageUrl = await getImageUrl(ctx);
@@ -11647,7 +11142,7 @@ bot.on('photo', async (ctx) => {
     const group = mediaGroups.get(mediaGroupId);
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
     const file = await ctx.telegram.getFile(photo.file_id);
-    const photoUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+    const photoUrl = buildTelegramFileProxyUrl(file.file_path);
     group.photos.push(photoUrl);
 
     if (ctx.message.caption) group.caption = ctx.message.caption;
@@ -11663,15 +11158,12 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
-  // Обробка одного фото
   const videoModels = ['kling', 'kling_v2_6', 'runway_gen4'];
   const imageModels = ['nano_banana', 'nano_banana_2', 'nano_banana_pro', 'nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_4k', 'seedream_5_lite', 'ideogram', 'recraft_upscale'];
 
-  // Отримуємо caption як промпт
   let prompt = ctx.message.caption || '';
 
 
-  // Якщо промпт пустий - використовуємо дефолтний
   if (!prompt) {
     prompt = 'transform this image, masterpiece quality, highly detailed';
   }
@@ -11681,7 +11173,6 @@ bot.on('photo', async (ctx) => {
   } else if (currentModel === 'clarity') {
     runBackgroundTask(() => handleClarityUpscaler(ctx), 'clarity_upscaler');
   } else if (currentModel === 'kling_motion' || currentModel === 'kling_motion_minimal') {
-    // Kling Motion: зберігаємо фото, чекаємо на відео
     const imageUrl = await getImageUrl(ctx);
     userState.set(userId, { model: currentModel, step: 'waiting_video', imageUrl });
     const videoLengthMsg = currentModel === 'kling_motion_minimal' ? '(<= 10 сек⏱️)' : '(до 5 сек⏱️)';
@@ -11693,11 +11184,9 @@ bot.on('photo', async (ctx) => {
       keyboard.createBackButton('video_menu')
     );
   } else if (imageModels.includes(currentModel)) {
-    // ✅ ЯК ЩО ЦЕ МОДЕЛЬ З ASPECT RATIO - ПОКАЗАТИ МЕНЮ ВИБОРУ
     if (MODELS_WITH_ASPECT_RATIO.includes(currentModel)) {
       const imageUrl = await getImageUrl(ctx);
 
-      // Зберігаємо дані для подальшої генерації
       const stateData = {
         model: currentModel,
         step: 'waiting_aspect_ratio',
@@ -11716,7 +11205,6 @@ bot.on('photo', async (ctx) => {
         referencesCount: imageUrl ? 1 : 0
       });
     } else {
-      // Для інших моделей просто генерувати
       runBackgroundTask(() => handleImageGeneration(ctx, prompt, currentModel), 'image_generation_photo');
     }
   } else if (videoModels.includes(currentModel)) {
@@ -11745,7 +11233,6 @@ bot.on('video', async (ctx) => {
     hasImageUrl: !!state?.imageUrl
   });
 
-  // ✅ KLING 3.0: Відео для елемента (element_input_video_urls)
   if (state?.action === 'kling_3_generation' && state?.step === 'waiting_element_media' && state?.currentElement) {
     const videoUrl = await getVideoUrl(ctx);
     if (videoUrl) {
@@ -11776,7 +11263,6 @@ bot.on('video', async (ctx) => {
     }
   }
 
-  // ✅ KLING O1 EDIT: Обробка референсного відео
   if (state?.action === 'kling_o1_edit_generation' && state?.step === 'waiting_video') {
     const videoFile = ctx.message.video;
     if (!videoFile) {
@@ -11784,7 +11270,6 @@ bot.on('video', async (ctx) => {
       return;
     }
 
-    // Перевірка розміру (200MB max)
     const fileSizeMB = (videoFile.file_size || 0) / (1024 * 1024);
     if (fileSizeMB > 200) {
       await ctx.reply(
@@ -11797,7 +11282,6 @@ bot.on('video', async (ctx) => {
       return;
     }
 
-    // Перевірка роздільності (мінімум 720px по обох вимірах)
     const videoWidth = videoFile.width || 0;
     const videoHeight = videoFile.height || 0;
     if (videoWidth < 720 || videoHeight < 720) {
@@ -11845,7 +11329,6 @@ bot.on('video', async (ctx) => {
     return;
   }
 
-  // ✅ KLING MOTION: Обробка референсного відео
   if (state?.action === 'kling_motion_generation' && state?.step === 'waiting_video' && state?.imageUrl) {
     const model = models.video.models.find(m => m.key === 'kling_motion');
     const motionCost = state.motionCost;
@@ -11858,7 +11341,6 @@ bot.on('video', async (ctx) => {
 
     const videoFile = ctx.message.video;
 
-    // Перевірка розміру (Telegram getFile обмежений до 20MB)
     const fileSizeMB = (videoFile.file_size || 0) / (1024 * 1024);
     const maxDuration = state.orientation === 'image' ? 10 : 30;
 
@@ -11883,7 +11365,7 @@ bot.on('video', async (ctx) => {
     let videoUrl;
     try {
       const fileInfo = await ctx.telegram.getFile(videoFile.file_id);
-      videoUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${fileInfo.file_path}`;
+      videoUrl = buildTelegramFileProxyUrl(fileInfo.file_path);
     } catch (error) {
       console.error('❌ Kling Motion: Failed to get video file:', error);
       await ctx.reply(
@@ -11924,7 +11406,6 @@ bot.on('video', async (ctx) => {
     return;
   }
 
-  // Якщо відео не для Kling Motion - показуємо інструкцію
   await ctx.reply(
     '⚠️ Для використання відео:\n\n' +
     '1. Виберіть модель 🔥 Kling Motion Control\n' +
@@ -11942,14 +11423,12 @@ async function handleMediaGroup(ctx, group) {
   const { photos, caption, currentModel, userId } = group;
   const model = models.design.models.find(m => m.key === currentModel);
 
-  // ✅ Перевірити чи модель знайдена
   if (!model) {
     console.error(`❌ Model not found in handleMediaGroup: ${currentModel}`);
     await ctx.reply('❌ Модель не знайдена. Спробуйте ще раз.');
     return;
   }
 
-  // Отримуємо промпт з caption
   let finalPrompt = caption || '';
 
 
@@ -11957,15 +11436,12 @@ async function handleMediaGroup(ctx, group) {
     finalPrompt = 'transform these images, masterpiece quality, highly detailed';
   }
 
-  // ✅ Перевірити чи модель підтримує багато зображень
   if (model.maxImages && model.maxImages > 1) {
-    // ✅ ЯК ЩО ЦЕ МОДЕЛЬ З ASPECT RATIO - ПОКАЗИТИ МЕНЮ ВИБОРУ
     if (MODELS_WITH_ASPECT_RATIO.includes(currentModel)) {
-      // Зберігаємо дані для подальшої генерації
       userState.set(userId, {
         model: currentModel,
         step: 'waiting_aspect_ratio',
-        imageUrl: photos, // передаємо масив фото
+        imageUrl: photos, 
         prompt: finalPrompt
       });
 
@@ -11998,22 +11474,22 @@ async function getImageUrl(ctx) {
   if (!ctx.message?.photo) return null;
   const photo = ctx.message.photo[ctx.message.photo.length - 1];
   const file = await ctx.telegram.getFile(photo.file_id);
-  return `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+  return buildTelegramFileProxyUrl(file.file_path);
 }
 
-/** Повертає URL файлу відео з повідомлення (для Kling 3.0 element_input_video_urls). */
+
 async function getVideoUrl(ctx) {
   if (!ctx.message?.video) return null;
   const file = await ctx.telegram.getFile(ctx.message.video.file_id);
-  return `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+  return buildTelegramFileProxyUrl(file.file_path);
 }
 
-/** Збирає всі URL фото з повідомлення (1 фото або альбом у media group). */
+
 async function getImageUrlsFromContext(ctx) {
   if (!ctx.message?.photo) return [];
   const photo = ctx.message.photo[ctx.message.photo.length - 1];
   const file = await ctx.telegram.getFile(photo.file_id);
-  const url = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+  const url = buildTelegramFileProxyUrl(file.file_path);
   return [url];
 }
 
@@ -12082,10 +11558,7 @@ async function safeSendVideo(chatId, url, options) {
   return bot.telegram.sendVideo(chatId, { url: mediaUrl }, options);
 }
 
-/**
- * 🎁 Nano Banana FREE — генерація через Google Gemini API (безкоштовно)
- * Окремий хендлер, бо не використовує провайдер-фолбек систему
- */
+
 async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio, generationOptions = {}) {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
@@ -12098,7 +11571,6 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
   const selectedModel = models.design.models.find((m) => m.key === freeBaseModelKey);
   const maxImages = generationOptions.maxImages || selectedModel?.maxImages || model.maxImages || geminiImage.MAX_REFERENCE_IMAGES;
 
-  // Перевірка ліміту
   const user = await User.findById(userId);
   const freeUsed = user?.freeUsage?.nano_banana_free || 0;
   const freeLimit = geminiImage.FREE_GENERATIONS_LIMIT;
@@ -12152,12 +11624,10 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
       return;
     }
 
-    // ✅ Інкрементуємо лічильник безкоштовних генерацій
     await User.findByIdAndUpdate(userId, {
       $inc: { 'freeUsage.nano_banana_free': 1 }
     });
 
-    // Видаляємо статусне повідомлення
     try {
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
     } catch (e) {
@@ -12173,7 +11643,6 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
       `💰 Вартість: БЕЗКОШТОВНО 🎁\n` +
       `📊 Залишилось: ${remaining} з ${freeLimit}`;
 
-    // Перевіряємо розмір — якщо >10MB, Telegram не прийме як фото
     const maxPhotoSize = 10 * 1024 * 1024;
     try {
       if (result.imageBuffer.length > maxPhotoSize) {
@@ -12194,7 +11663,6 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
       }
     } catch (sendErr) {
       console.error('❌ Nano Banana FREE: Failed to send image to Telegram:', sendErr.message);
-      // Fallback: спробуємо без parse_mode
       try {
         await bot.telegram.sendPhoto(chatId,
           { source: result.imageBuffer, filename: 'nano_banana_free.png' },
@@ -12206,7 +11674,6 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
       }
     }
 
-    // Логування
     const isTrial = await isTrialUser(userId);
     await monitoringLoggers.logUsageEvent({
       userId,
@@ -12250,9 +11717,7 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
   }
 }
 
-/**
- * 💳 Google Gemini direct model — платна генерація через Google API (без KIE/Replicate fallback)
- */
+
 async function handleGeminiDirectGeneration(ctx, prompt, model, imageInput, aspectRatio, generationOptions = {}) {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
@@ -12429,7 +11894,6 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   const resolvedModelKey = resolveModelKeyBySize(modelKey, generationOptions.imageSize);
   const model = models.design.models.find(m => m.key === resolvedModelKey);
 
-  // ✅ Перевіримо чи модель знайдена
   if (!model) {
     console.error(`❌ Model not found: ${resolvedModelKey} (requested: ${modelKey})`);
     await ctx.reply('❌ Модель не знайдена. Спробуйте ще раз.');
@@ -12438,7 +11902,6 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
 
   imageInput = normalizeReferenceOrder(imageInput);
 
-  // 🎁 Nano Banana FREE — окремий шлях генерації через Google Gemini API
   if (resolvedModelKey === 'nano_banana_free') {
     return handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio, generationOptions);
   }
@@ -12482,7 +11945,6 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   const isAlbum = Array.isArray(imageInput) && imageInput.length > 1;
   const mode = imageInput ? (isAlbum ? `album (${imageInput.length})` : 'img2img') : 'text2img';
 
-  // 🛑 Перевіряємо чи не йде shutdown
   if (gracefulShutdown.isInShutdown()) {
     await ctx.reply('⚠️ Бот оновлюється. Спробуйте через 1-2 хвилини.');
     return;
@@ -12490,7 +11952,6 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
 
   const statusMsg = await ctx.reply(`${model.name} генерація (${mode})...\n\nПромпт: "${prompt}"`);
 
-  // 🛑 Реєструємо генерацію для graceful shutdown
   const requestId = gracefulShutdown.generateRequestId();
   gracefulShutdown.registerGeneration(requestId, {
     userId,
@@ -12518,7 +11979,6 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
   (async () => {
     let finished = false;
     try {
-      // 🎯 НОВА СИСТЕМА: Автоматичний fallback між провайдерами
       const userChosenProvider = userProviderChoice.get(userId);
       const hasKieAccess = accessControl.canUseKieAI(userId);
       const kieEnabled = kieAI.isKieAIEnabled;
@@ -12533,13 +11993,11 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         isKieImplemented: kieAI.isKieAIImplemented(generationData.modelKey)
       });
 
-      // Генеруємо через систему з fallback
       const result = await providerFallback.generateWithFallback({
         modelKey: generationData.modelKey,
         userChoice: userChosenProvider,
         canUseKieAI,
 
-        // KIE.AI генератор
         kieGenerator: async () => {
           switch (generationData.modelKey) {
             case 'stable_diffusion':
@@ -12602,7 +12060,6 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
           }
         },
 
-        // Replicate генератор
         replicateGenerator: async () => {
           switch (generationData.modelKey) {
             case 'flux':
@@ -12675,7 +12132,6 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
         context: { userId, username, modelKey: generationData.modelKey }
       });
 
-      // Провайдер який реально використали
       const actualProvider = result.provider;
       const providerName = actualProvider === 'kie' ? 'KIE.AI' : 'Replicate';
 
@@ -12823,7 +12279,6 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
   const username = ctx.from.username || 'unknown';
   const model = models.video.models.find(m => m.key === modelKey);
 
-  // 🛑 Перевіряємо чи не йде shutdown
   if (gracefulShutdown.isInShutdown()) {
     await ctx.reply('⚠️ Бот оновлюється. Спробуйте через 1-2 хвилини.');
     return;
@@ -12836,7 +12291,6 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
 
   const imageUrl = await getImageUrl(ctx);
   
-  // ✅ Перевіряємо чи модель вимагає зображення (universal check)
   if (model.requiresImage && !imageUrl) {
     const modelNames = {
       'runway_turbo': 'Runway Gen-4 Turbo',
@@ -13234,7 +12688,6 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
     videoUrl: videoUrl.substring(0, 50)
   });
 
-  // Перевірка стану
   if (!state || state.action !== 'sora_watermark_remover' || state.step !== 'waiting_url') {
     console.log('❌ Sora Watermark: Invalid state', {
       noState: !state,
@@ -13247,7 +12700,6 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
     return;
   }
 
-  // Перевірка URL
   if (!videoUrl.includes('sora.chatgpt.com')) {
     await ctx.reply(
       '❌ <b>Невірний URL!</b>\n\n' +
@@ -13263,7 +12715,6 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
 
   console.log('✅ Sora Watermark: URL validation passed');
 
-  // Отримуємо динамічну ціну
   console.log('🧹 Sora Watermark: Getting model info...');
   const kieAI = require('./services/kie-ai');
   const modelInfo = await kieAI.getModelInfo('sora-watermark-remover');
@@ -13271,7 +12722,6 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
 
   console.log('✅ Sora Watermark: Model info received:', { cost, apiCost: modelInfo?.apiCost });
 
-  // Перевірка балансу
   console.log('🧹 Sora Watermark: Checking balance for user', userId);
   const hasBalance = await userBalance.hasTokens(userId, cost);
   console.log('🧹 Sora Watermark: Balance check result:', { hasBalance, requiredCost: cost });
@@ -13284,7 +12734,6 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
 
   console.log('✅ Sora Watermark: Balance sufficient');
 
-  // Очищаємо стан
   console.log('🧹 Sora Watermark: Clearing state...');
   userState.delete(userId);
   userCurrentModel.delete(userId);
@@ -13304,7 +12753,6 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
 
     console.log('🧹 Sora Watermark: Calling removeSoraWatermark API for user', userId);
 
-    // Створюємо задачу
     const createResult = await soraWatermarkRemover.removeSoraWatermark(videoUrl);
 
     console.log('🧹 Sora Watermark: API result:', {
@@ -13314,7 +12762,6 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
     });
 
     if (!createResult.success) {
-      // Перевіряємо тип помилки
       const isPermissionError = createResult.error?.toLowerCase().includes('permission') ||
                                  createResult.error?.toLowerCase().includes('access');
       const isCreditsError = createResult.error?.toLowerCase().includes('credits insufficient') ||
@@ -13364,14 +12811,12 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
     const maxRetries = 60;
     const retryDelay = 5000;
 
-    // Polling статусу
     while (retries < maxRetries) {
       await new Promise(resolve => setTimeout(resolve, retryDelay));
 
       const status = await soraWatermarkRemover.checkTaskStatus(taskId);
 
       if (status.state === 'success' && status.resultUrls?.[0]) {
-        // Списуємо токени
         await userBalance.deductTokens(
           userId,
           cost,
@@ -13386,10 +12831,8 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
 
         const user = await userBalance.getUser(userId, ctx.from);
 
-        // Видаляємо статус
         await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
 
-        // Надсилаємо відео
         await ctx.replyWithVideo(status.resultUrls[0], {
           caption:
             `✅ <b>Watermark видалено!</b>\n\n` +
@@ -13412,7 +12855,6 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
         return;
       }
 
-      // Оновлюємо статус
       if (retries % 3 === 0) {
         await ctx.telegram.editMessageText(
           ctx.chat.id,
@@ -13428,7 +12870,6 @@ async function handleSoraWatermarkRemover(ctx, videoUrl) {
       retries++;
     }
 
-    // Таймаут
     await ctx.telegram.editMessageText(
       ctx.chat.id,
       statusMsg.message_id,
@@ -13464,12 +12905,10 @@ async function handleMidjourneyGeneration(ctx, prompt) {
   const taskType = state.taskType || 'mj_txt2img';
   const fileUrls = state.fileUrls || [];
 
-  // ✨ Розширені налаштування
   const stylization = state.stylization !== undefined ? state.stylization : 100;
   const weirdness = state.weirdness !== undefined ? state.weirdness : 0;
   const variety = state.variety !== undefined ? state.variety : 50;
 
-  // ⚠️ Перевірка чи Midjourney доступний (потрібен KIE.AI API key)
   if (!kieAI.isKieAIEnabled) {
     console.error('❌ Midjourney unavailable: KIE_AI_API_KEY not configured');
     await ctx.reply(
@@ -13486,7 +12925,6 @@ async function handleMidjourneyGeneration(ctx, prompt) {
     return;
   }
 
-  // Визначаємо вартість залежно від швидкості
   const cost = model.speeds[speed]?.cost || model.cost;
   const apiCost = model.speeds[speed]?.apiCost || model.apiCost;
 
@@ -13533,7 +12971,6 @@ async function handleMidjourneyGeneration(ctx, prompt) {
     });
 
     if (!result.success) {
-      // Спеціальна обробка для помилок доступу
       const errorMsg = result.error || 'Unknown error';
       const isAccessError = errorMsg.includes('access permissions') ||
         errorMsg.includes('unauthorized') ||
@@ -13600,7 +13037,6 @@ async function handleMidjourneyGeneration(ctx, prompt) {
 
     console.log('✅ Midjourney task created:', result.taskId);
 
-    // Чекаємо результату (polling або webhook)
     const finalResult = await midjourney.waitForCompletion(result.taskId);
 
     if (finalResult.success && finalResult.resultUrls && finalResult.resultUrls.length > 0) {
@@ -13623,7 +13059,6 @@ async function handleMidjourneyGeneration(ctx, prompt) {
       const user = await userBalance.getUser(userId, ctx.from);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
 
-      // Відправляємо результати (4 варіанти)
       const imageUrls = finalResult.resultUrls.slice(0, 4);
 
       for (let i = 0; i < imageUrls.length; i++) {
@@ -13828,7 +13263,7 @@ async function showProfile(ctx) {
   message += `💸 Витрачено: ${stats.totalSpent.toFixed(2)}⚡\n`;
   message += `📅 З нами: ${stats.memberSince.toLocaleDateString('uk-UA')}`;
   
-  await ctx.reply(message, keyboard.createProfileMenu());
+  await ctx.reply(message, keyboard.createProfileMenu(ctx));
 }
 
 async function showInsufficientTokens(ctx, required) {
@@ -13842,7 +13277,7 @@ async function showInsufficientTokens(ctx, required) {
     : '';
   await ctx.reply(
     `Ви використали токени.🙌🏻\n\nНеобхідно: ${required}⚡\nВаш баланс: ${user.tokens.toFixed(2)}⚡\n\nВсі генерації в таких нейромережах коштують нам реальних грошей. Але ми зробили зручний бот, де ви можете користуватись ними прямо в Телеграм 😍\n\n${starterLine}Щоб продовжити, придбайте підписку та отримайте більше токенів👇🏻\n\n`,
-    keyboard.createSubscriptionMenu()
+    keyboard.createSubscriptionMenu(ctx)
   );
 }
 
@@ -13954,7 +13389,6 @@ async function broadcastDraft(draft) {
       }
     }
 
-    // Якщо заданий список, розсилаємо ТІЛЬКИ цим користувачам
     if (priorityIds.length) {
       console.log('ℹ️ Broadcast limited to priority list only.');
       console.log(`✅ Broadcast complete: ${successCount} sent, ${failCount} failed`);
@@ -14000,7 +13434,6 @@ async function broadcastMessage(message, parseMode = null) {
   return broadcastDraft({ type: 'text', text: message, parseMode });
 }
 
-// ==================== ЗАПУСК БОТА ====================
 
 async function startBot() {
   try {
@@ -14036,10 +13469,8 @@ async function startBot() {
 
     console.log('🤖 Starting bot...');
 
-    // Виводимо поточні налаштування доступу
     accessControl.printConfig();
 
-    // 🔍 Перевірка стану KIE.AI
     console.log('\n╔════════════════════════════════════════════════════════╗');
     console.log('║              KIE.AI PROVIDER STATUS                    ║');
     console.log('╠════════════════════════════════════════════════════════╣');
@@ -14053,18 +13484,14 @@ async function startBot() {
     console.log('✅ Bot started successfully!');
     console.log('📱 Bot username: @neuro_lab_ai_bot');
 
-    // 🛑 Ініціалізуємо graceful shutdown (для pm2 restart)
     gracefulShutdown.initShutdownHandlers(bot);
 
-    // 💰 Перевірка цін Replicate при старті
     replicatePricing.logPriceComparison();
 
-    // 💰 Оновлення цін KIE.AI при старті (якщо потрібно)
     try {
       console.log('💰 Checking KIE.AI pricing...');
       await kiePricingSync.updatePricingIfNeeded();
 
-      // Щоденне оновлення цін (раз на 24 години)
       setInterval(async () => {
         console.log('⏰ Daily KIE.AI pricing update...');
         try {
@@ -14073,7 +13500,7 @@ async function startBot() {
         } catch (error) {
           console.error('❌ Failed to update KIE.AI pricing:', error.message);
         }
-      }, 24 * 60 * 60 * 1000); // 24 години
+      }, 24 * 60 * 60 * 1000); 
     } catch (error) {
       console.error('⚠️ KIE.AI pricing update failed (not critical):', error.message);
     }
@@ -14101,22 +13528,18 @@ async function startBot() {
     const app = express();
     const PORT = process.env.PORT || 5500;
 
-    // ⚠️ ВАЖЛИВО: WayForPay webhook - потрібен спеціальний parser для raw JSON!
-    // WayForPay надсилає raw JSON без правильного Content-Type header
+    // WayForPay can send raw JSON without a consistent Content-Type header.
     app.post('/webhook/wayforpay', express.raw({ type: '*/*' }), (req, res, next) => {
         try {
             let data;
 
             if (typeof req.body === 'string') {
-                // Raw JSON string
                 console.log('📥 Parsing raw JSON from WayForPay...');
                 data = JSON.parse(req.body);
             } else if (Buffer.isBuffer(req.body)) {
-                // Buffer - конвертуємо в string
                 console.log('📥 Parsing Buffer from WayForPay...');
                 data = JSON.parse(req.body.toString('utf8'));
             } else if (typeof req.body === 'object') {
-                // Об'єкт - використовуємо як є
                 data = req.body;
             } else {
                 console.error('❌ Unexpected body type:', typeof req.body);
@@ -14132,8 +13555,8 @@ async function startBot() {
         }
     });
 
-    // ✅ Стандартні body parsers для інших маршрутів
-    app.use(express.json({ limit: '1mb' })); // Обмеження розміру body
+    // Standard body parsers for the remaining routes.
+    app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
     // ✅ Security headers
@@ -14167,7 +13590,7 @@ async function startBot() {
       return true;
     }
 
-    // ✅ Rate limiting middleware для платіжних endpoints
+    // Rate limiting middleware for payment endpoints.
     app.use('/api/stripe', (req, res, next) => {
       const ip = req.ip || req.connection.remoteAddress;
       if (!checkRateLimit(ip, 'stripe')) {
@@ -14195,7 +13618,7 @@ async function startBot() {
       next();
     });
 
-    // ✅ CORS для публічних API endpoints (дозволяємо всім - це публічна інформація)
+    // Public API endpoints expose non-sensitive information only.
     app.use('/api', (req, res, next) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -14204,6 +13627,39 @@ async function startBot() {
         return res.sendStatus(200);
       }
       next();
+    });
+
+    app.get('/telegram/file/:filePath', async (req, res) => {
+      const filePath = req.params.filePath;
+      const { expires, signature } = req.query;
+
+      if (!filePath || isExpired(expires) || !verifyProxySignature(filePath, expires, signature)) {
+        return res.status(403).json({ error: 'Invalid or expired file link' });
+      }
+
+      try {
+        const telegramFileResponse = await axios.get(getTelegramFileUrl(filePath), {
+          responseType: 'stream',
+          timeout: 30000
+        });
+
+        const contentType = telegramFileResponse.headers['content-type'];
+        const contentLength = telegramFileResponse.headers['content-length'];
+
+        if (contentType) {
+          res.setHeader('Content-Type', contentType);
+        }
+
+        if (contentLength) {
+          res.setHeader('Content-Length', contentLength);
+        }
+
+        res.setHeader('Cache-Control', 'private, max-age=300');
+        telegramFileResponse.data.pipe(res);
+      } catch (error) {
+        console.error('Telegram file proxy error:', error.message);
+        res.status(502).json({ error: 'Failed to load Telegram file' });
+      }
     });
 
     // Webhook для Stripe (необхідно до express.json())
@@ -14233,11 +13689,8 @@ async function startBot() {
         const msg = body?.msg;
 
         console.log(`📥 KIE.AI webhook: taskId=${taskId}, code=${code}, msg=${msg}`);
-        console.log(`📥 KIE.AI webhook FULL body: ${JSON.stringify(body).substring(0, 2000)}`);
         if (body?.data) {
           console.log(`📥 KIE.AI webhook data keys: ${Object.keys(body.data).join(',')}`);
-          if (body.data.info) console.log(`📥 KIE.AI webhook data.info: ${JSON.stringify(body.data.info).substring(0, 500)}`);
-          if (body.data.response) console.log(`📥 KIE.AI webhook data.response: ${JSON.stringify(body.data.response).substring(0, 500)}`);
         }
 
         if (!taskId) {
@@ -14245,15 +13698,12 @@ async function startBot() {
           return res.status(200).json({ ok: true });
         }
 
-        // Шукаємо дані для цього taskId
         const callbackData = kieCallbackMap.get(taskId);
         if (!callbackData) {
-          // Не знайшли — можливо вже доставлено через polling
           console.log(`📥 KIE.AI webhook: taskId=${taskId} not in callbackMap (already delivered via polling)`);
           return res.status(200).json({ ok: true });
         }
 
-        // Перевіряємо статус
         if (code !== 200) {
           console.error(`❌ KIE.AI webhook: task ${taskId} failed: code=${code}, msg=${msg}`);
           const errorMsg = body?.data?.info?.resultUrls || msg || 'Unknown error';
@@ -14264,16 +13714,13 @@ async function startBot() {
           return res.status(200).json({ ok: true });
         }
 
-        // Витягуємо URL відео
         let videoUrl = kieAI.extractVideoUrlExported(body?.data);
         console.log(`📹 KIE.AI webhook: extracted videoUrl=${videoUrl ? videoUrl.substring(0, 100) : 'NULL'}`);
 
-        // Fallback: /veo/get-1080p-video
         if (!videoUrl && taskId) {
           console.log(`🔄 KIE.AI webhook: trying get-1080p-video fallback for ${taskId}...`);
           videoUrl = await kieAI.fetchVeo1080pUrlExported(taskId);
           if (!videoUrl) {
-            // 1080p може ще processing — чекаємо та пробуємо
             await new Promise(r => setTimeout(r, 60000));
             videoUrl = await kieAI.fetchVeo1080pUrlExported(taskId);
           }
@@ -14281,12 +13728,9 @@ async function startBot() {
 
         if (!videoUrl) {
           console.error(`❌ KIE.AI webhook: no video URL after all methods. data keys: ${Object.keys(body?.data || {}).join(',')}`);
-          if (body?.data?.info) console.error(`  info: ${JSON.stringify(body.data.info).substring(0, 500)}`);
-          if (body?.data?.response) console.error(`  response: ${JSON.stringify(body.data.response).substring(0, 500)}`);
           return res.status(200).json({ ok: true });
         }
 
-        // ✅ Відео готове — списуємо токени та відправляємо
         const { chatId, userId, veoCost, apiCost, duration, generateAudio, prompt, aspectRatio, hasStartImage, hasLastFrame, references } = callbackData;
 
         try {
@@ -14319,10 +13763,9 @@ async function startBot() {
           });
 
           console.log(`✅ KIE.AI webhook: Veo video delivered to user ${userId} via callback`);
-          kieCallbackDelivered.add(taskId); // Mark as delivered to prevent double delivery from polling
+          kieCallbackDelivered.add(taskId);
         } catch (sendErr) {
           console.error(`❌ KIE.AI webhook: failed to send video: ${sendErr.message}`);
-          // Все одно спробуємо надіслати URL
           try {
             await bot.telegram.sendMessage(chatId, `🎥 Відео готове: ${videoUrl}\n\n💰 Витрачено: ${veoCost}⚡`);
           } catch (e2) {
@@ -14335,7 +13778,7 @@ async function startBot() {
 
       } catch (error) {
         console.error('❌ KIE.AI webhook error:', error.message);
-        return res.status(200).json({ ok: true }); // Завжди 200 щоб KIE.AI не ретраїв
+        return res.status(200).json({ ok: true });
       }
     });
 
@@ -15790,7 +15233,7 @@ async function startBot() {
       console.log(`💳 WayForPay checkout: GET http://127.0.0.1:${PORT}/pay/wayforpay?plan=starter`);
       console.log(`💱 Exchange Rate API: GET http://127.0.0.1:${PORT}/api/exchange-rate`);
       console.log(`📊 Plans API: GET http://127.0.0.1:${PORT}/api/plans`);
-      console.log(`📈 Admin Dashboard: GET http://127.0.0.1:${PORT}/admin/dashboard?token=YOUR_TOKEN`);
+      console.log(`📈 Admin Login: http://127.0.0.1:${PORT}/admin/login`);
     });
 
     // ==================== START BOT ====================

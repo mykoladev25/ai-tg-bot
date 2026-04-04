@@ -7,20 +7,7 @@ if (!A2E_API_TOKEN) {
   console.warn('⚠️ A2E_API_TOKEN not set in environment variables');
 }
 
-/**
- * Створює задачу генерації відео з зображення через A2E API
- * 
- * @param {Object} options - Параметри генерації
- * @param {string} options.imageUrl - URL зображення
- * @param {string} options.prompt - Промпт для генерації
- * @param {string} [options.negativePrompt] - Негативний промпт
- * @param {number} [options.videoTime=5] - Тривалість відео (5, 10, 15, 20 секунд)
- * @param {string} [options.modelType='GENERAL'] - Тип моделі (GENERAL або FLF2V)
- * @param {string} [options.endImageUrl] - URL кінцевого зображення (для FLF2V)
- * @param {boolean} [options.extendPrompt=true] - Автоматично розширювати промпт
- * @param {boolean} [options.skipFaceEnhance=false] - Пропустити покращення обличчя
- * @returns {Promise<{success: boolean, taskId?: string, error?: string}>}
- */
+
 async function startImageToVideoTask(options = {}) {
   try {
     const {
@@ -35,26 +22,24 @@ async function startImageToVideoTask(options = {}) {
     } = options;
 
     if (!imageUrl) {
-      throw new Error('imageUrl є обов\'язковим параметром');
+      throw new Error('imageUrl is required');
     }
 
     if (!prompt) {
-      throw new Error('prompt є обов\'язковим параметром');
+      throw new Error('prompt is required');
     }
 
     if (!A2E_API_TOKEN) {
-      throw new Error('A2E_API_TOKEN не налаштовано');
+      throw new Error('A2E_API_TOKEN is not configured');
     }
 
-    // Валідація videoTime
     const validVideoTimes = [5, 10, 15, 20];
     if (!validVideoTimes.includes(videoTime)) {
-      throw new Error(`videoTime має бути одним з: ${validVideoTimes.join(', ')}`);
+      throw new Error(`videoTime must be one of: ${validVideoTimes.join(', ')}`);
     }
 
-    // Для FLF2V потрібен endImageUrl
     if (modelType === 'FLF2V' && !endImageUrl) {
-      throw new Error('endImageUrl є обов\'язковим для моделі FLF2V');
+      throw new Error('endImageUrl is required for the FLF2V model');
     }
 
     const requestBody = {
@@ -111,16 +96,11 @@ async function startImageToVideoTask(options = {}) {
   }
 }
 
-/**
- * Отримує інформацію про задачу генерації
- * 
- * @param {string} taskId - ID задачі
- * @returns {Promise<{success: boolean, data?: Object, error?: string}>}
- */
+
 async function getTaskDetails(taskId) {
   try {
     if (!A2E_API_TOKEN) {
-      throw new Error('A2E_API_TOKEN не налаштовано');
+      throw new Error('A2E_API_TOKEN is not configured');
     }
 
     const response = await axios.get(
@@ -153,15 +133,11 @@ async function getTaskDetails(taskId) {
   }
 }
 
-/**
- * Отримує всі записи задач користувача
- * 
- * @returns {Promise<{success: boolean, data?: Array, error?: string}>}
- */
+
 async function getAllRecords() {
   try {
     if (!A2E_API_TOKEN) {
-      throw new Error('A2E_API_TOKEN не налаштовано');
+      throw new Error('A2E_API_TOKEN is not configured');
     }
 
     const response = await axios.get(
@@ -194,16 +170,11 @@ async function getAllRecords() {
   }
 }
 
-/**
- * Видаляє задачу
- * 
- * @param {string} taskId - ID задачі
- * @returns {Promise<{success: boolean, error?: string}>}
- */
+
 async function deleteTask(taskId) {
   try {
     if (!A2E_API_TOKEN) {
-      throw new Error('A2E_API_TOKEN не налаштовано');
+      throw new Error('A2E_API_TOKEN is not configured');
     }
 
     const response = await axios.delete(
@@ -237,19 +208,7 @@ async function deleteTask(taskId) {
 
 // ==================== TEXT-TO-IMAGE ====================
 
-/**
- * Створює задачу генерації зображення з тексту через A2E API
- *
- * @param {Object} options - Параметри генерації
- * @param {string} options.prompt - Текстовий промпт
- * @param {number} [options.width=1024] - Ширина зображення
- * @param {number} [options.height=1024] - Висота зображення
- * @param {string} [options.modelType='a2e'] - Тип моделі (a2e, seedream)
- * @param {string[]} [options.inputImages] - URL референсних зображень (макс. 2)
- * @param {string} [options.aspectRatio] - Aspect ratio (для seedream)
- * @param {number} [options.maxImages=1] - Кількість зображень
- * @returns {Promise<{success: boolean, taskId?: string, error?: string}>}
- */
+
 async function startText2ImageTask(options = {}) {
   try {
     const {
@@ -263,19 +222,16 @@ async function startText2ImageTask(options = {}) {
     } = options;
 
     if (!prompt) {
-      throw new Error('prompt є обов\'язковим параметром');
+      throw new Error('prompt is required');
     }
 
     if (!A2E_API_TOKEN) {
-      throw new Error('A2E_API_TOKEN не налаштовано');
+      throw new Error('A2E_API_TOKEN is not configured');
     }
 
-    // Визначаємо req_key (стиль) на основі modelType
     // high_aes_general_v21_L = General Style, high_aes = Manga Style
     const reqKey = modelType === 'manga' ? 'high_aes' : 'high_aes_general_v21_L';
 
-    // ===== Формуємо body згідно з A2E API документацією =====
-    // Обов'язкові поля: name, prompt, req_key, width, height
     const requestBody = {
       name: new Date().toISOString().replace('T', ' ').substring(0, 19),
       prompt: prompt,
@@ -284,7 +240,6 @@ async function startText2ImageTask(options = {}) {
       height: height
     };
 
-    // Додаткові поля якщо є
     if (inputImages && inputImages.length > 0) {
       requestBody.input_images = inputImages.slice(0, 2);
     }
@@ -297,8 +252,6 @@ async function startText2ImageTask(options = {}) {
       prompt: prompt.substring(0, 80)
     });
 
-    // ===== Відправляємо запит =====
-    // Endpoint: POST /api/v1/userText2image/start (lowercase 'i' в 'image')
     const response = await axios.post(
       `${A2E_API_BASE}/userText2image/start`,
       requestBody,
@@ -307,7 +260,7 @@ async function startText2ImageTask(options = {}) {
           'Authorization': `Bearer ${A2E_API_TOKEN}`,
           'Content-Type': 'application/json'
         },
-        timeout: 120000 // 2 хвилини — API може генерувати синхронно
+        timeout: 120000 
       }
     );
 
@@ -317,7 +270,6 @@ async function startText2ImageTask(options = {}) {
     console.log(`📥 A2E Text2Image response FULL: ${JSON.stringify(response.data).substring(0, 1000)}`);
 
     if (response.data && response.data.code === 0) {
-      // ===== A2E API повертає data як МАСИВ або об'єкт! =====
       const respData = isArray ? rawData[0] : rawData;
 
       if (!respData || (typeof respData === 'object' && Object.keys(respData).length === 0)) {
@@ -330,7 +282,6 @@ async function startText2ImageTask(options = {}) {
       const imageUrls = respData.image_urls || [];
       console.log(`📥 A2E Text2Image parsed: _id=${taskId}, status=${status}, image_urls=${imageUrls.length}, keys=${Object.keys(respData).join(',')}`);
 
-      // Перевіряємо чи зображення вже готове (синхронна відповідь)
       if (imageUrls.length > 0 && imageUrls[0]) {
         const imageUrl = imageUrls[0];
         console.log(`✅ A2E Text2Image: Got SYNC result! taskId=${taskId}, status=${status}, urls=${imageUrls.length}, url=${imageUrl.substring(0, 100)}`);
@@ -342,7 +293,6 @@ async function startText2ImageTask(options = {}) {
         };
       }
 
-      // Статус 'initialized' або 'generating' — задача створена, потрібен polling
       if (taskId) {
         console.log(`✅ A2E Text2Image task created: ${taskId}, status=${status} → needs polling`);
         return {
@@ -352,7 +302,6 @@ async function startText2ImageTask(options = {}) {
         };
       }
 
-      // Крайній випадок — немає ні taskId ні image_urls
       console.error(`❌ A2E Text2Image: No taskId and no image_urls. Full data: ${JSON.stringify(respData).substring(0, 500)}`);
       throw new Error('A2E API did not return a task ID or image URL');
 
@@ -371,16 +320,11 @@ async function startText2ImageTask(options = {}) {
   }
 }
 
-/**
- * Отримує інформацію про задачу text2image
- *
- * @param {string} taskId - ID задачі
- * @returns {Promise<{success: boolean, data?: Object, error?: string}>}
- */
+
 async function getText2ImageTaskDetails(taskId) {
   try {
     if (!A2E_API_TOKEN) {
-      throw new Error('A2E_API_TOKEN не налаштовано');
+      throw new Error('A2E_API_TOKEN is not configured');
     }
 
     // ===== METHOD 1: GET /api/v1/userText2image/:taskId =====
@@ -398,7 +342,6 @@ async function getText2ImageTaskDetails(taskId) {
 
       if (response.data && response.data.code === 0) {
         const rawData = response.data.data;
-        // A2E може повернути масив або об'єкт
         const data = Array.isArray(rawData) ? rawData[0] : rawData;
         console.log(`📥 A2E Text2Image details: taskId=${taskId}, status=${data?.current_status}, image_urls=${data?.image_urls?.length || 0}`);
         return {

@@ -1,39 +1,39 @@
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/neurolab_bot';
+const DEFAULT_MONGODB_URI = 'mongodb://127.0.0.1:27017/telegram-ai-bot';
+const MONGODB_URI = process.env.MONGODB_URI || DEFAULT_MONGODB_URI;
+const CONNECTION_TIMEOUT_MS = 10000;
 
 async function connect() {
   try {
-    // ⏱️ Set connection timeout to 10 seconds
     const connectPromise = mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 10000,
-      connectTimeoutMS: 10000,
+      serverSelectionTimeoutMS: CONNECTION_TIMEOUT_MS,
+      socketTimeoutMS: CONNECTION_TIMEOUT_MS,
+      connectTimeoutMS: CONNECTION_TIMEOUT_MS
     });
 
-    // Race: either connect or timeout after 10 seconds
     await Promise.race([
       connectPromise,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('MongoDB connection timeout after 10s')), 10000)
-      )
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`MongoDB connection timeout after ${CONNECTION_TIMEOUT_MS / 1000}s`)), CONNECTION_TIMEOUT_MS);
+      })
     ]);
 
-    console.log('✅ Connected to MongoDB');
-    
-    mongoose.connection.on('error', (err) => {
-      console.error('❌ MongoDB connection error:', err);
+    console.log('Connected to MongoDB');
+
+    mongoose.connection.on('error', (error) => {
+      console.error('MongoDB connection error:', error);
     });
-    
+
     mongoose.connection.on('disconnected', () => {
-      console.warn('⚠️ MongoDB disconnected');
+      console.warn('MongoDB disconnected');
     });
-    
+
     return true;
   } catch (error) {
-    console.error('⚠️ Failed to connect to MongoDB:', error.message);
-    console.log('⚠️ Bot will continue without database (read-only mode)');
+    console.error('Failed to connect to MongoDB:', error.message);
+    console.log('The bot will continue without database persistence');
     return false;
   }
 }
@@ -41,9 +41,9 @@ async function connect() {
 async function disconnect() {
   try {
     await mongoose.connection.close();
-    console.log('🔌 MongoDB connection closed');
+    console.log('MongoDB connection closed');
   } catch (error) {
-    console.error('❌ Error closing MongoDB connection:', error);
+    console.error('Error closing MongoDB connection:', error);
   }
 }
 

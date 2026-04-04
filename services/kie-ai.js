@@ -1,9 +1,4 @@
-/**
- * KIE.AI провайдер для генерацій через api.kie.ai
- * Документація: https://docs.kie.ai/market/google/pro-image-to-image
- *
- * Альтернатива до Replicate для адміністраторів
- */
+
 
 const axios = require('axios');
 
@@ -13,18 +8,12 @@ const accessControl = require('../config/access');
 
 // ==================== HELPER FUNCTIONS ====================
 
-/**
- * Перевіряємо чи користувач є адміном (з config/access, підтримка кількох адмінів)
- */
+
 function isAdminUser(userId) {
   return accessControl.isAdmin(userId);
 }
 
-/**
- * Офіційний endpoint для отримання статусу таску (Get Task Details).
- * Документація: https://docs.kie.ai/market/common/get-task-detail
- * Статуси: waiting, queuing, generating, success, fail
- */
+
 async function fetchTaskRecordInfo(taskId) {
   const response = await axios.get(
     `${KIE_API_BASE}/jobs/recordInfo`,
@@ -39,11 +28,7 @@ async function fetchTaskRecordInfo(taskId) {
   return response.data?.data || null;
 }
 
-/**
- * Polling для отримання результату від KIE.AI API (Market models: Nano Banana, Seedream, Ideogram, Recraft тощо).
- * Використовує офіційний GET /jobs/recordInfo?taskId= (не /jobs/status/).
- * Статуси за документацією: waiting, queuing, generating, success, fail
- */
+
 async function pollJobStatus(taskId, maxAttempts = 400, interval = 3000, modelName = 'KIE.AI') {
   let attempts = 0;
 
@@ -68,7 +53,6 @@ async function pollJobStatus(taskId, maxAttempts = 400, interval = 3000, modelNa
         const errorMsg = job.failMsg || job.failCode || job.error || 'Unknown error';
         throw new Error(`Task failed: ${errorMsg}`);
       }
-      // waiting, queuing, generating (або running) — продовжуємо polling
 
       await new Promise(resolve => setTimeout(resolve, interval));
       attempts++;
@@ -86,7 +70,6 @@ async function pollJobStatus(taskId, maxAttempts = 400, interval = 3000, modelNa
     }
   }
 
-  // Остання спроба: затримка + ще один запит
   await new Promise(resolve => setTimeout(resolve, interval));
   try {
     const job = await fetchTaskRecordInfo(taskId);
@@ -96,17 +79,13 @@ async function pollJobStatus(taskId, maxAttempts = 400, interval = 3000, modelNa
       return job;
     }
   } catch (e) {
-    // ігноруємо
   }
 
-  // Повертаємо sentinel замість throw — caller обробить як pending
   console.warn(`⏱️ ${modelName} task ${taskId} timed out after polling. Returning pending state.`);
   return { _timeout: true, taskId };
 }
 
-/**
- * Нормалізувати зображення input
- */
+
 function normalizeImageInput(imageInput, maxImages = 3) {
   if (!imageInput) return [];
 
@@ -121,14 +100,10 @@ function normalizeImageInput(imageInput, maxImages = 3) {
   return [imageInput];
 }
 
-/**
- * Витягти URL зображення з результату KIE.AI
- * Формат може бути різний залежно від моделі
- */
+
 function extractImageUrl(result) {
   if (!result) return null;
 
-  // Масив URL (напр. від KIE: ["https://..."])
   if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'string') {
     return result[0];
   }
@@ -165,12 +140,8 @@ function extractImageUrl(result) {
   return null;
 }
 
-/**
- * Отримати статус Veo задачі через /veo/record-detail (окремий endpoint, як Runway).
- * Fallback: /jobs/recordInfo
- */
+
 async function fetchVeoTaskInfo(taskId) {
-  // ===== METHOD 1: /veo/record-info (згідно з документацією KIE.AI) =====
   try {
     const recordInfoResp = await axios.get(
       `${KIE_API_BASE}/veo/record-info?taskId=${taskId}`,
@@ -184,7 +155,6 @@ async function fetchVeoTaskInfo(taskId) {
     );
     if (recordInfoResp.data?.code === 200 && recordInfoResp.data?.data) {
       const data = recordInfoResp.data.data;
-      // Veo record-info повертає successFlag: 1/0
       let state = (data.state || data.status || '').toLowerCase();
       if (!state && data.successFlag === 1) state = 'success';
       if (!state && data.successFlag === 0 && data.errorMessage) state = 'fail';
@@ -267,20 +237,13 @@ async function fetchVeoTaskInfo(taskId) {
   return fallbackResult;
 }
 
-/**
- * Витягти URL відео з результату KIE.AI
- * Підтримує формати: resultJson, info.resultUrls (Veo callback), output.resultUrls, output.video_url
- *
- * ⚠️ ВАЖЛИВО: Veo API повертає info.resultUrls як JSON STRING (не масив!)
- * Приклад: info.resultUrls = "[\"https://tempfile.aiquickdraw.com/v/xxx.mp4\"]"
- */
+
 function extractVideoUrl(result) {
   if (!result) return null;
 
   console.log(`🔍 extractVideoUrl: keys=${Object.keys(result).join(',')}, info=${!!result.info}, resultJson=${!!result.resultJson}, response=${!!result.response}`);
 
   // ✅ Veo record-detail format: { response: { resultUrls: ["url"], originUrls: ["url"] } }
-  // Згідно з документацією KIE.AI /veo/record-detail
   if (result.response?.resultUrls) {
     let urls = result.response.resultUrls;
     if (typeof urls === 'string') {
@@ -314,13 +277,11 @@ function extractVideoUrl(result) {
   // Veo callback/record-detail format: { info: { resultUrls: '["url"]' } }
   if (result.info?.resultUrls) {
     let urls = result.info.resultUrls;
-    // ⚠️ Veo API повертає resultUrls як JSON string — треба парсити!
     if (typeof urls === 'string') {
       try {
         urls = JSON.parse(urls);
         console.log(`📹 Veo info.resultUrls parsed from string: ${JSON.stringify(urls)}`);
       } catch (e) {
-        // Можливо це просто URL без JSON обгортки
         if (urls.startsWith('http')) {
           console.log(`📹 Veo info.resultUrls is plain URL: ${urls}`);
           return urls;
@@ -362,7 +323,6 @@ function extractVideoUrl(result) {
       const parsed = typeof result.resultJson === 'string' ? JSON.parse(result.resultJson) : result.resultJson;
       if (parsed.resultUrls) {
         let rUrls = parsed.resultUrls;
-        // resultUrls також може бути string
         if (typeof rUrls === 'string') {
           try { rUrls = JSON.parse(rUrls); } catch (e) {
             if (rUrls.startsWith('http')) return rUrls;
@@ -401,7 +361,6 @@ function extractVideoUrl(result) {
     return result.result_url;
   }
 
-  // Brute-force: шукаємо будь-який .mp4 URL в серіалізованому результаті
   try {
     const resultStr = JSON.stringify(result);
     const urlMatch = resultStr.match(/https?:\/\/[^\s"\\,\]]+\.mp4/);
@@ -409,16 +368,13 @@ function extractVideoUrl(result) {
       console.log(`📹 Video URL from brute-force regex: ${urlMatch[0]}`);
       return urlMatch[0];
     }
-  } catch (e) { /* ігноруємо */ }
+  } catch (e) {  }
 
   console.warn(`⚠️ extractVideoUrl: no video URL found in result. Full result keys: ${Object.keys(result).join(',')}, info keys: ${result.info ? Object.keys(result.info).join(',') : 'N/A'}, response keys: ${result.response ? Object.keys(result.response).join(',') : 'N/A'}`);
   return null;
 }
 
-/**
- * Fallback: отримати відео URL через /veo/get-1080p-video endpoint
- * Використовується коли extractVideoUrl повертає null
- */
+
 async function fetchVeo1080pUrl(taskId) {
   try {
     console.log(`🔄 Trying /veo/get-1080p-video for taskId=${taskId}...`);
@@ -452,35 +408,19 @@ async function fetchVeo1080pUrl(taskId) {
 
 // ==================== IMAGE GENERATION ====================
 
-/**
- * Генерація зображення через KIE.AI - Nano Banana (Base)
- *
- * Документація: https://docs.kie.ai/market/google/nano-banana
- *
- * Підтримує:
- * - text2img (без зображень)
- * - img2img (з референсами, до 3 зображень)
- *
- * Параметри:
- * - prompt: текстовий опис (обов'язково, max 20000 chars)
- * - imageInput: URL або масив URL зображень (до 3, опційно)
- * - image_size: "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9", "auto" (default: "1:1")
- * - output_format: "png" або "jpeg" (default: "png")
- */
+
 async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageSize = "1:1", outputFormat = "png") {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!prompt) {
-      throw new Error('Prompt є обов\'язковим для Nano Banana');
+      throw new Error('Prompt is required for Nano Banana');
     }
 
-    // Обрізаємо промпт до максимальної довжини
     const truncatedPrompt = prompt.length > 20000 ? prompt.substring(0, 20000) : prompt;
 
-    // Нормалізуємо зображення (до 3 штук для базової моделі, або пустий масив для text2img)
     const images = imageInput ? normalizeImageInput(imageInput, 3) : [];
     const isText2Img = images.length === 0;
 
@@ -491,7 +431,6 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
       imageCount: images.length
     });
 
-    // ✅ Структура за документацією KIE.AI
     // https://docs.kie.ai/market/google/nano-banana
     const payload = {
       model: 'google/nano-banana',
@@ -509,7 +448,6 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
       imageSize
     });
 
-    // Логуємо актуальну ціну KIE.AI
     try {
       const kiePricingSync = require('./kie-pricing-sync');
       const kiePrice = kiePricingSync.getModelPriceSync('nano_banana');
@@ -517,10 +455,8 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
         console.log(`💰 KIE.AI price: $${kiePrice}`);
       }
     } catch (err) {
-      // Не критично
     }
 
-    // Створюємо таск на KIE.AI
     const createResponse = await axios.post(
       `${KIE_API_BASE}/jobs/createTask`,
       payload,
@@ -534,33 +470,29 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
 
     console.log(`📥 KIE.AI Nano Banana Base response:`, JSON.stringify(createResponse.data, null, 2));
 
-    // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
 
-      // Спеціальна обробка для 500 помилок
       if (responseCode === 500) {
         console.error('❌ KIE.AI Nano Banana Base - Server Error 500:', createResponse?.data);
         return {
           success: false,
-          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
           provider: 'kie-ai',
           serverError: true
         };
       }
 
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
+      throw new Error(`Unexpected response from KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    // Очікуємо на результат (polling)
     const result = await pollJobStatus(taskId, 600, 5000, 'Nano Banana Base (KIE.AI)');
 
-    // Отримуємо URL зображення з результату
     const imageUrl = extractImageUrl(result);
     if (!imageUrl) {
       throw new Error('KIE.AI returned no image in output');
@@ -576,11 +508,10 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
   } catch (error) {
     console.error('❌ KIE.AI Nano Banana Base Error:', error.response?.data || error.message);
 
-    // Спеціальна обробка 500 помилок
     if (error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
         provider: 'kie-ai',
         serverError: true
       };
@@ -594,26 +525,17 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
   }
 }
 
-/**
- * Генерація зображення через KIE.AI - Z-Image (Qwen)
- *
- * Документація: https://docs.kie.ai/market/qwen/z-image
- *
- * Параметри:
- * - prompt: текстовий опис (обов'язково, max 1000 chars)
- * - aspectRatio: "1:1", "4:3", "3:4", "16:9", "9:16" (default: "1:1")
- */
+
 async function generateWithZImageKieAI(prompt, aspectRatio = "1:1") {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!prompt) {
-      throw new Error('Prompt є обов\'язковим для Z-Image');
+      throw new Error('Prompt is required for Z-Image');
     }
 
-    // Обрізаємо промпт до максимальної довжини
     const truncatedPrompt = prompt.length > 1000 ? prompt.substring(0, 1000) : prompt;
 
     console.log(`⚡ KIE.AI Z-Image (text2img):`, {
@@ -621,7 +543,6 @@ async function generateWithZImageKieAI(prompt, aspectRatio = "1:1") {
       aspectRatio
     });
 
-    // ✅ Структура за документацією KIE.AI
     const payload = {
       model: 'z-image',
       input: {
@@ -635,7 +556,6 @@ async function generateWithZImageKieAI(prompt, aspectRatio = "1:1") {
       aspectRatio
     });
 
-    // Логуємо актуальну ціну KIE.AI
     try {
       const kiePricingSync = require('./kie-pricing-sync');
       const kiePrice = kiePricingSync.getModelPriceSync('z_image');
@@ -643,10 +563,8 @@ async function generateWithZImageKieAI(prompt, aspectRatio = "1:1") {
         console.log(`💰 KIE.AI Z-Image price: $${kiePrice}`);
       }
     } catch (err) {
-      // Не критично
     }
 
-    // Створюємо таск на KIE.AI
     const createResponse = await axios.post(
       `${KIE_API_BASE}/jobs/createTask`,
       payload,
@@ -660,7 +578,6 @@ async function generateWithZImageKieAI(prompt, aspectRatio = "1:1") {
 
     console.log(`📥 KIE.AI Z-Image response:`, JSON.stringify(createResponse.data, null, 2));
 
-    // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
@@ -669,23 +586,21 @@ async function generateWithZImageKieAI(prompt, aspectRatio = "1:1") {
         console.error('❌ KIE.AI Z-Image - Server Error 500:', createResponse?.data);
         return {
           success: false,
-          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини.',
+          error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes.',
           provider: 'kie-ai',
           serverError: true
         };
       }
 
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
+      throw new Error(`Unexpected response from KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Z-Image task created: ${taskId}`);
 
-    // Очікуємо на результат (polling)
     const result = await pollJobStatus(taskId, 600, 5000, 'Z-Image (KIE.AI)');
 
-    // Отримуємо URL зображення з результату
     const imageUrl = extractImageUrl(result);
     if (!imageUrl) {
       throw new Error('KIE.AI returned no image in output');
@@ -704,7 +619,7 @@ async function generateWithZImageKieAI(prompt, aspectRatio = "1:1") {
     if (error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes.',
         provider: 'kie-ai',
         serverError: true
       };
@@ -718,32 +633,17 @@ async function generateWithZImageKieAI(prompt, aspectRatio = "1:1") {
   }
 }
 
-/**
- * Генерація зображення через KIE.AI - Nano Banana Pro
- *
- * Документація: https://docs.kie.ai/market/google/nano-banana-pro
- *
- * Підтримує:
- * - text2img (без зображень) - image_input: []
- * - img2img (з референсами) - image_input: [url1, url2, ...]
- *
- * Параметри:
- * - prompt: текстовий опис (обов'язково)
- * - imageInput: URL або масив URL зображень (до 8, опційно)
- * - resolution: "1K", "2K" або "4K" (default: "2K")
- * - aspectRatio: "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "auto"
- */
+
 async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution = "2K", aspectRatio = "1:1") {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!prompt) {
-      throw new Error('Prompt є обов\'язковим для Nano Banana Pro');
+      throw new Error('Prompt is required for Nano Banana Pro');
     }
 
-    // Нормалізуємо зображення (до 8 штук, або пустий масив для text2img)
     const images = imageInput ? normalizeImageInput(imageInput, 8) : [];
     const isText2Img = images.length === 0;
 
@@ -754,14 +654,13 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
       imageCount: images.length
     });
 
-    // ✅ Структура за документацією KIE.AI
     // https://docs.kie.ai/market/google/nano-banana-pro
     const payload = {
       model: 'nano-banana-pro',
       callBackUrl: `${process.env.APP_URL || 'http://localhost:5500'}/webhook/kie-ai`,
       input: {
         prompt: prompt,
-        image_input: images,  // масив URL або [] для text2img
+        image_input: images,  
         aspect_ratio: aspectRatio || '1:1',
         resolution: resolution,  // "1K", "2K", "4K"
         output_format: 'png'
@@ -776,7 +675,6 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
       aspectRatio
     });
 
-    // Логуємо актуальну ціну KIE.AI
     try {
       const kiePricingSync = require('./kie-pricing-sync');
       let modelKey;
@@ -785,17 +683,15 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
       } else if (resolution === '2K') {
         modelKey = 'nano_banana_2k';
       } else {
-        modelKey = 'nano_banana';  // 1K - базовий
+        modelKey = 'nano_banana';  
       }
       const kiePrice = kiePricingSync.getModelPriceSync(modelKey);
       if (kiePrice) {
         console.log(`💰 KIE.AI price: $${kiePrice} (${resolution})`);
       }
     } catch (err) {
-      // Не критично
     }
 
-    // Створюємо таск на KIE.AI
     const createResponse = await axios.post(
       `${KIE_API_BASE}/jobs/createTask`,
       payload,
@@ -809,33 +705,29 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
 
     console.log(`📥 KIE.AI Nano Banana response:`, JSON.stringify(createResponse.data, null, 2));
 
-    // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
 
-      // Спеціальна обробка для 500 помилок
       if (responseCode === 500) {
         console.error('❌ KIE.AI Nano Banana - Server Error 500:', createResponse?.data);
         return {
           success: false,
-          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
           provider: 'kie-ai',
           serverError: true
         };
       }
 
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
+      throw new Error(`Unexpected response from KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    // Очікуємо на результат (polling): до ~50 хв (KIE асинхронна; іноді статус довго "running")
     const result = await pollJobStatus(taskId, 600, 5000, 'Nano Banana Pro (KIE.AI)');
 
-    // Отримуємо URL зображення з результату
     const imageUrl = extractImageUrl(result);
     if (!imageUrl) {
       throw new Error('KIE.AI returned no image in output');
@@ -851,11 +743,10 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
   } catch (error) {
     console.error('❌ KIE.AI Nano Banana Error:', error.response?.data || error.message);
 
-    // Спеціальна обробка 500 помилок
     if (error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
         provider: 'kie-ai',
         serverError: true
       };
@@ -869,19 +760,7 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
   }
 }
 
-/**
- * Генерація через KIE.AI - Seedream 4.5
- *
- * Seedream family helper:
- * - Seedream 4.5: seedream/4.5-text-to-image + seedream/4.5-edit
- * - Seedream 5.0 Lite: seedream/5-lite-text-to-image + seedream/5-lite-image-to-image
- *
- * Параметри:
- * - prompt: текстовий опис (обов'язково)
- * - imageInput: URL або масив URL зображень (опційно, якщо є - використовуємо edit)
- * - aspectRatio: "1:1", "16:9", "9:16", etc
- * - quality: "basic" або "high"
- */
+
 async function generateWithSeedreamVariantKieAI({
   prompt,
   imageInput = null,
@@ -897,11 +776,11 @@ async function generateWithSeedreamVariantKieAI({
 }) {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!prompt) {
-      throw new Error(`Prompt є обов'язковим для ${modelLabel}`);
+      throw new Error(`Prompt is required for ${modelLabel}`);
     }
 
     // ✅ GUARD: Detect swapped parameters (aspectRatio got a resolution, quality got a ratio)
@@ -984,7 +863,6 @@ async function generateWithSeedreamVariantKieAI({
         }
       }
     } catch (err) {
-      // Не критично
     }
 
     const createResponse = await axios.post(
@@ -1008,14 +886,14 @@ async function generateWithSeedreamVariantKieAI({
         console.error(`❌ KIE.AI ${modelLabel} - Server Error 500:`, createResponse?.data);
         return {
           success: false,
-          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
           provider: 'kie-ai',
           serverError: true
         };
       }
 
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
+      throw new Error(`Unexpected response from KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
@@ -1041,7 +919,7 @@ async function generateWithSeedreamVariantKieAI({
     if (error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
         provider: 'kie-ai',
         serverError: true
       };
@@ -1055,11 +933,7 @@ async function generateWithSeedreamVariantKieAI({
   }
 }
 
-/**
- * Генерація через KIE.AI - Seedream 4.5
- *
- * Документація: https://docs.kie.ai/market/bytedance/seedream-4.5
- */
+
 async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio = "1:1", quality = "basic") {
   return generateWithSeedreamVariantKieAI({
     prompt,
@@ -1073,13 +947,7 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
   });
 }
 
-/**
- * Генерація через KIE.AI - Seedream 5.0 Lite
- *
- * Документація:
- * - seedream/5-lite-text-to-image
- * - seedream/5-lite-image-to-image
- */
+
 async function generateWithSeedream5LiteKieAI(prompt, imageInput = null, aspectRatio = "1:1", quality = "basic") {
   return generateWithSeedreamVariantKieAI({
     prompt,
@@ -1095,40 +963,29 @@ async function generateWithSeedream5LiteKieAI(prompt, imageInput = null, aspectR
   });
 }
 
-/**
- * ❌ Stable Diffusion НЕ підтримується на KIE.AI
- * Використовуйте Replicate для цієї моделі
- */
+
 async function generateWithStableDiffusionKieAI(prompt, imageInput = null, aspectRatio = "1:1") {
   return {
     success: false,
-    error: 'Stable Diffusion не підтримується на KIE.AI. Використовуйте Replicate.',
+    error: 'Stable Diffusion is not supported on KIE.AI. Use Replicate instead.',
     provider: 'kie-ai',
     notSupported: true
   };
 }
 
-/**
- * Генерація через KIE.AI - Recraft Crisp Upscale
- *
- * Документація: https://docs.kie.ai/market/recraft/crisp-upscale
- *
- * Параметри:
- * - imageUrl: URL зображення для апскейлу (обов'язково)
- */
+
 async function generateWithRecraftUpscaleKieAI(imageUrl) {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!imageUrl) {
-      throw new Error('Recraft Upscale вимагає зображення');
+      throw new Error('Recraft Upscale requires an image');
     }
 
     console.log(`✨ KIE.AI Recraft Crisp Upscale`);
 
-    // ✅ Структура за документацією KIE.AI
     const payload = {
       model: 'recraft/crisp-upscale',
       callBackUrl: `${process.env.APP_URL || 'http://localhost:5500'}/webhook/kie-ai`,
@@ -1152,10 +1009,9 @@ async function generateWithRecraftUpscaleKieAI(imageUrl) {
 
     console.log(`📥 KIE.AI Recraft response:`, JSON.stringify(createResponse.data, null, 2));
 
-    // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+      throw new Error(`Unexpected response from KIE.AI: ${JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
@@ -1185,44 +1041,27 @@ async function generateWithRecraftUpscaleKieAI(imageUrl) {
   }
 }
 
-/**
- * Генерація через KIE.AI - Ideogram v3
- *
- * Документація: https://docs.kie.ai/market/ideogram/v3
- *
- * Моделі:
- * - ideogram/v3-reframe - для reframe (зміна розміру/співвідношення)
- * - ideogram/v3-remix - для remix (редагування)
- * - ideogram/v3-edit - для edit (редагування з маскою)
- *
- * Параметри:
- * - imageUrl: URL зображення (обов'язково)
- * - imageSize: 'square_hd', 'landscape_hd', 'portrait_hd', etc
- * - renderingSpeed: 'TURBO', 'BALANCED', 'QUALITY'
- * - style: 'AUTO', 'REALISTIC', 'DESIGN', etc
- * - numImages: '1' - '4'
- */
+
 async function generateWithIdeogramKieAI(imageUrl, options = {}) {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!imageUrl) {
-      throw new Error('Ideogram вимагає зображення');
+      throw new Error('Ideogram requires an image');
     }
 
     const {
       mode = 'reframe',         // 'reframe', 'remix', 'edit'
       imageSize = 'square_hd',  // 'square_hd', 'landscape_hd', 'portrait_hd'
-      renderingSpeed = 'TURBO',  // 'TURBO' (3.5 credits = $0.0175) - найдешевший і найшвидший!
+      renderingSpeed = 'TURBO',  
       style = 'AUTO',           // 'AUTO', 'REALISTIC', 'DESIGN', etc
       numImages = '1',          // '1' - '4'
       seed = 0,
-      prompt = ''               // для remix/edit
+      prompt = ''               
     } = options;
 
-    // Вибираємо модель
     const modelName = `ideogram/v3-${mode}`;
 
     console.log(`🎨 KIE.AI Ideogram v3 (${mode}):`, {
@@ -1232,7 +1071,6 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
       numImages
     });
 
-    // ✅ Структура за документацією KIE.AI
     const input = {
       image_url: imageUrl,
       image_size: imageSize,
@@ -1242,7 +1080,6 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
       seed: seed
     };
 
-    // Для remix/edit можна додати prompt
     if (prompt && (mode === 'remix' || mode === 'edit')) {
       input.prompt = prompt;
     }
@@ -1272,7 +1109,6 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
 
     console.log(`📥 KIE.AI Ideogram response:`, JSON.stringify(createResponse.data, null, 2));
 
-    // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
@@ -1281,14 +1117,14 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
         console.error('❌ KIE.AI Ideogram - Server Error 500:', createResponse?.data);
         return {
           success: false,
-          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
           provider: 'kie-ai',
           serverError: true
         };
       }
 
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
+      throw new Error(`Unexpected response from KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
@@ -1296,7 +1132,6 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
 
     const result = await pollJobStatus(taskId, 400, 3000, 'Ideogram (KIE.AI)');
 
-    // Отримуємо URL зображення
     const resultImageUrl = extractImageUrl(result);
     if (!resultImageUrl) {
       throw new Error('KIE.AI returned no image in output');
@@ -1315,7 +1150,7 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
     if (error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
         provider: 'kie-ai',
         serverError: true
       };
@@ -1331,26 +1166,15 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
 
 // ==================== VIDEO GENERATION ====================
 
-/**
- * Генерація через KIE.AI - Kling Motion Control
- *
- * Документація: https://docs.kie.ai/market/kling/motion-control
- *
- * Параметри:
- * - prompt: текстовий опис руху
- * - imageUrl: URL зображення персонажа
- * - videoUrl: URL відео з референсними рухами
- * - mode: '720p' або '1080p'
- * - characterOrientation: 'image' (до 10s) або 'video' (до 30s)
- */
+
 async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p', characterOrientation = 'image') {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!imageUrl || !videoUrl) {
-      throw new Error('KIE.AI Kling Motion вимагає і зображення і відео');
+      throw new Error('KIE.AI Kling Motion requires both an image and a video');
     }
 
     console.log(`🎥 KIE.AI Kling Motion Control:`, {
@@ -1359,17 +1183,16 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
       characterOrientation
     });
 
-    // ✅ Структура за документацією KIE.AI
     // https://docs.kie.ai/market/kling/motion-control
     const payload = {
       model: 'kling-2.6/motion-control',
       callBackUrl: `${process.env.APP_URL || 'http://localhost:5500'}/webhook/kie-ai`,
       input: {
         prompt: prompt || '',
-        input_urls: [imageUrl],  // зображення персонажа
-        video_urls: [videoUrl],  // відео з рухами
-        mode: mode,  // '720p' або '1080p'
-        character_orientation: characterOrientation  // 'image' або 'video'
+        input_urls: [imageUrl],  
+        video_urls: [videoUrl],  
+        mode: mode,  
+        character_orientation: characterOrientation  
       }
     };
 
@@ -1392,17 +1215,14 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
 
     console.log(`📥 KIE.AI Kling Motion response:`, JSON.stringify(createResponse.data, null, 2));
 
-    // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+      throw new Error(`Unexpected response from KIE.AI: ${JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    // Kling Motion може займати довше часу
-    // Відео: до ~50 хв (Kling Motion може генерувати довго)
     const result = await pollJobStatus(taskId, 600, 5000, 'Kling Motion (KIE.AI)');
 
     if (result && result._timeout) {
@@ -1410,7 +1230,6 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
       return { success: false, pending: true, taskId, provider: 'kie-ai' };
     }
 
-    // Отримуємо URL відео
     const videoResultUrl = extractVideoUrl(result);
     if (!videoResultUrl) {
       throw new Error('KIE.AI returned no video in output');
@@ -1433,63 +1252,31 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
   }
 }
 
-/**
- * Генерація через KIE.AI - Kling 3.0
- *
- * Документація: https://docs.kie.ai/market/kling/kling-3.0
- *
- * 🆕 Нові можливості Kling 3.0:
- * - Multi-shot mode: кілька сцен в одному відео
- * - Element references: використання @element_name в промпті
- * - Тривалість 3-15 секунд
- * - Режими std (стандарт) та pro (висока якість)
- *
- * Режими:
- * - Single-shot (multi_shots: false): звичайна генерація
- * - Multi-shot (multi_shots: true): кілька сцен з різними промптами
- *
- * Element References:
- * - Використовуйте @element_name в промпті
- * - Визначте елементи в kling_elements масиві
- * - Image elements: 2-4 зображення (JPG/PNG, max 10MB)
- * - Video elements: 1 відео (MP4/MOV, max 50MB)
- *
- * Параметри:
- * - prompt: текстовий опис (для single-shot)
- * - imageUrls: масив URL зображень [first_frame, last_frame] (опційно)
- * - sound: true/false (звукові ефекти)
- * - duration: '3'-'15' (string!)
- * - aspectRatio: '16:9', '9:16', '1:1'
- * - mode: 'std' або 'pro'
- * - multiShots: true/false
- * - multiPrompt: масив {prompt, duration} для multi-shot
- * - klingElements: масив елементів для @references
- */
+
 async function generateKling3VideoKieAI(options = {}) {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     const {
-      prompt = '',              // Промпт для single-shot
-      imageUrls = [],           // [first_frame, last_frame] або [first_frame]
-      sound = true,             // Звукові ефекти
+      prompt = '',              
+      imageUrls = [],           
+      sound = true,             
       duration = '5',           // '3'-'15'
       aspectRatio = '16:9',     // '16:9', '9:16', '1:1'
-      mode = 'pro',             // 'std' або 'pro'
+      mode = 'pro',             
       multiShots = false,       // Multi-shot mode
-      multiPrompt = [],         // [{prompt, duration}, ...] для multi-shot
+      multiPrompt = [],         
       klingElements = []        // Element references
     } = options;
 
-    // Валідація
     if (!multiShots && !prompt) {
-      throw new Error('Prompt є обов\'язковим для single-shot режиму');
+      throw new Error('Prompt is required for single-shot mode');
     }
 
     if (multiShots && (!multiPrompt || multiPrompt.length === 0)) {
-      throw new Error('multiPrompt є обов\'язковим для multi-shot режиму');
+      throw new Error('multiPrompt is required for multi-shot mode');
     }
 
     console.log(`🎥 KIE.AI Kling 3.0 (${multiShots ? 'multi-shot' : 'single-shot'}):`, {
@@ -1504,7 +1291,6 @@ async function generateKling3VideoKieAI(options = {}) {
       hasImages: imageUrls?.length || 0
     });
 
-    // ✅ Структура за документацією KIE.AI (sound — boolean; при multi_shots обов'язково true)
     const input = {
       sound: multiShots ? true : Boolean(sound),
       duration: String(duration),
@@ -1512,7 +1298,6 @@ async function generateKling3VideoKieAI(options = {}) {
       multi_shots: multiShots
     };
 
-    // Aspect ratio (auto-adapt якщо є image_urls)
     if (!imageUrls || imageUrls.length === 0) {
       input.aspect_ratio = aspectRatio || '1:1';
     }
@@ -1528,12 +1313,11 @@ async function generateKling3VideoKieAI(options = {}) {
         prompt: shot.prompt,
         duration: parseInt(shot.duration) || 3
       }));
-      // Для multi-shot prompt не використовується
       input.prompt = '';
     } else {
       // Single-shot mode
       input.prompt = prompt;
-      input.multi_prompt = []; // Пустий масив для single-shot
+      input.multi_prompt = []; 
     }
 
     // Element references
@@ -1587,42 +1371,47 @@ async function generateKling3VideoKieAI(options = {}) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
 
-      // Спеціальна обробка для 500 помилок
       if (responseCode === 500) {
         console.error('❌ KIE.AI Kling 3.0 - Server Error 500:', createResponse?.data);
-        console.error('📋 Request payload for support:', JSON.stringify(payload, null, 2));
+        console.error('📋 Request metadata for support:', {
+          model: payload.model,
+          duration: payload?.input?.duration,
+          aspectRatio: payload?.input?.aspect_ratio
+        });
         console.error('💡 Possible reasons: 1) Temporary server issue, 2) API parameters changed, 3) Invalid input values');
         return {
           success: false,
-          error: '⚠️ Тимчасова проблема на сервері KIE.AI.\n\n' +
-                 'Можливі причини:\n' +
-                 '• Сервер KIE.AI перевантажений\n' +
-                 '• Зміни в API\n' +
-                 '• Невалідні параметри запиту\n\n' +
-                 'Спробуйте:\n' +
-                 '1. Почекати 1-2 хвилини\n' +
-                 '2. Спробувати іншу модель\n' +
-                 '3. Звернутись до адміністратора',
+          error: '⚠️ Temporary KIE.AI server issue.\n\n' +
+                 'Possible causes:\n' +
+                 '• The KIE.AI server is overloaded\n' +
+                 '• API changes\n' +
+                 '• Invalid request parameters\n\n' +
+                 'Try the following:\n' +
+                 '1. Wait 1-2 minutes\n' +
+                 '2. Try another model\n' +
+                 '3. Contact support',
           provider: 'kie-ai',
           serverError: true,
           requestPayload: payload
         };
       }
 
-      const errText = typeof apiMsg === 'string' ? apiMsg : (createResponse?.data ? JSON.stringify(createResponse.data) : 'KIE.AI не повернув taskId');
+      const errText = typeof apiMsg === 'string' ? apiMsg : (createResponse?.data ? JSON.stringify(createResponse.data) : 'KIE.AI did not return a taskId');
       console.error('❌ KIE.AI Kling 3.0 createTask: no taskId', createResponse?.data);
-      console.error('📋 Request payload for support:', JSON.stringify(payload, null, 2));
+      console.error('📋 Request metadata for support:', {
+        model: payload.model,
+        duration: payload?.input?.duration,
+        aspectRatio: payload?.input?.aspect_ratio
+      });
       return {
         success: false,
-        error: errText || 'Сервер не повернув ідентифікатор завдання. Спробуйте ще раз.',
+        error: errText || 'The server did not return a task identifier. Please try again.',
         provider: 'kie-ai'
       };
     }
     console.log(`✅ KIE.AI Kling 3.0 task created`);
     console.log(`📋 Task ID for KIE.AI support: ${taskId}`);
 
-    // Kling 3.0 може займати довше (до 15 сек відео)
-    // Відео: до ~50 хв
     const result = await pollJobStatus(taskId, 600, 5000, 'Kling 3.0 (KIE.AI)');
 
     if (result && result._timeout) {
@@ -1648,11 +1437,10 @@ async function generateKling3VideoKieAI(options = {}) {
     const res = error.response?.data;
     console.error('❌ KIE.AI Kling 3.0 Error:', res || error.message);
 
-    // Спеціальна обробка 500 помилок
     if (res?.code === 500 || error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
         provider: 'kie-ai',
         serverError: true
       };
@@ -1667,51 +1455,24 @@ async function generateKling3VideoKieAI(options = {}) {
   }
 }
 
-/**
- * Генерація через KIE.AI - Kling v2.5 / v2.6
- *
- * Документація:
- * - v2.5: https://docs.kie.ai/market/kling/v2.5
- * - v2.6: https://docs.kie.ai/market/kling/v2.6
- *
- * Моделі v2.6:
- * - kling-2.6/text-to-video - для text2video (без зображень)
- * - kling-2.6/image-to-video - для image2video (з image_urls)
- *
- * Моделі v2.5:
- * - kling/v2-5-turbo-image-to-video-pro - для image2video з розширеними параметрами
- *
- * Параметри:
- * - prompt: текстовий опис (обов'язково)
- * - imageUrl: URL зображення (опційно)
- * - tailImageUrl: URL кінцевого кадру (тільки v2.5)
- * - duration: '5' або '10' (string!)
- * - aspectRatio: '1:1', '16:9', '9:16' (тільки для text-to-video)
- * - sound: true/false (генерація аудіо)
- * - version: 'v2.5' або 'v2.6' (default: 'v2.6')
- * - negativePrompt: що виключити (тільки v2.5)
- * - cfgScale: 0-1 (тільки v2.5)
- */
+
 async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', aspectRatio = '16:9', sound = false, version = 'v2.6', options = {}) {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!prompt) {
-      throw new Error('Prompt є обов\'язковим для Kling');
+      throw new Error('Prompt is required for Kling');
     }
 
     const isImage2Video = !!imageUrl;
     const { tailImageUrl = '', negativePrompt = '', cfgScale = 0.5 } = options;
 
-    // Вибираємо модель залежно від версії та типу
     let modelName;
     if (version === 'v2.5') {
-      // v2.5 - тільки image-to-video з розширеними параметрами
-      // ⚠️ ОБОВ'ЯЗКОВО потрібне початкове зображення!
       if (!imageUrl) {
-        throw new Error('Kling v2.5 підтримує тільки image-to-video. Будь ласка, завантажте початкове зображення.');
+        throw new Error('Kling v2.5 only supports image-to-video. Please upload a start image.');
       }
       modelName = 'kling/v2-5-turbo-image-to-video-pro';
     } else {
@@ -1731,7 +1492,6 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
     let input;
 
     if (version === 'v2.5') {
-      // ✅ Структура v2.5 за документацією
       input = {
         prompt: prompt,
         image_url: imageUrl || '',
@@ -1741,7 +1501,6 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
         cfg_scale: cfgScale
       };
     } else {
-      // ✅ Структура v2.6 за документацією
       input = {
         prompt: prompt,
         sound: sound,
@@ -1784,16 +1543,14 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
 
     console.log(`📥 KIE.AI response:`, JSON.stringify(createResponse.data, null, 2));
 
-    // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI: ${JSON.stringify(createResponse.data)}`);
+      throw new Error(`Unexpected response from KIE.AI: ${JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    // Відео Kling v2.5/v2.6: до ~50 хв
     const result = await pollJobStatus(taskId, 600, 5000, `Kling ${version} (KIE.AI)`);
 
     if (result && result._timeout) {
@@ -1823,17 +1580,15 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
       stack: error.stack
     });
 
-    // Спеціальна обробка 500 помилок
     if (error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
         provider: 'kie-ai',
         serverError: true
       };
     }
 
-    // Формуємо зрозуміле повідомлення для користувача
     let errorMessage = error.message;
 
     if (error.response?.data) {
@@ -1855,48 +1610,28 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
   }
 }
 
-/**
- * Генерація через KIE.AI - Runway
- *
- * Документація: https://docs.kie.ai/runway-api/quickstart
- *
- * ⚠️ УВАГА: Runway використовує ІНШИЙ endpoint: /runway/generate (не /jobs/createTask)
- * ⚠️ УВАГА: Статус перевіряється через /runway/record-detail?taskId=...
- *
- * Типи генерації:
- * - Text-to-Video: тільки prompt
- * - Image-to-Video: prompt + imageUrl
- *
- * Параметри:
- * - prompt: текстовий опис (обов'язково)
- * - imageUrl: URL зображення (опційно, для image-to-video)
- * - duration: 5 або 10 (number!)
- * - quality: '720p' або '1080p' (1080p тільки для 5 сек)
- * - aspectRatio: '16:9', '9:16', '1:1', '4:3', '3:4'
- * - waterMark: текст водяного знаку (опційно)
- */
+
 async function generateRunwayVideoKieAI(prompt, options = {}) {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!prompt) {
-      throw new Error('Prompt є обов\'язковим для Runway');
+      throw new Error('Prompt is required for Runway');
     }
 
     const {
-      imageUrl = null,         // URL зображення для image-to-video
-      duration = 5,            // 5 або 10 (number!)
-      quality = '720p',        // '720p' або '1080p'
+      imageUrl = null,         
+      duration = 5,            
+      quality = '720p',        
       aspectRatio = '16:9',    // '16:9', '9:16', '1:1', '4:3', '3:4'
-      waterMark = '',          // текст водяного знаку
+      waterMark = '',          
       callBackUrl = null       // callback URL
     } = options;
 
-    // Перевірка: 1080p тільки для 5 секунд
     if (quality === '1080p' && duration !== 5) {
-      console.warn('⚠️ 1080p доступний тільки для 5-секундних відео, змінюємо на 720p');
+      console.warn('⚠️ 1080p is available only for 5-second videos. Falling back to 720p.');
     }
 
     const actualQuality = (quality === '1080p' && duration !== 5) ? '720p' : quality;
@@ -1909,17 +1644,15 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
       hasImage: !!imageUrl
     });
 
-    // ✅ Структура за документацією KIE.AI
     // https://docs.kie.ai/runway-api/generate-ai-video
     const payload = {
       prompt: prompt,
-      duration: duration,  // number, не string!
+      duration: duration,  
       quality: actualQuality,
       aspectRatio: aspectRatio,
       waterMark: waterMark
     };
 
-    // Для image-to-video додаємо imageUrl
     if (imageUrl) {
       payload.imageUrl = imageUrl;
     }
@@ -1938,9 +1671,8 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
       aspectRatio
     });
 
-    // ⚠️ УВАГА: Runway використовує ІНШИЙ endpoint!
     const createResponse = await axios.post(
-      `${KIE_API_BASE}/runway/generate`,  // НЕ /jobs/createTask!
+      `${KIE_API_BASE}/runway/generate`,  
       payload,
       {
         headers: {
@@ -1952,16 +1684,14 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
 
     console.log(`📥 KIE.AI Runway response:`, JSON.stringify(createResponse.data, null, 2));
 
-    // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       console.error('❌ Invalid KIE.AI Runway response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI Runway: ${JSON.stringify(createResponse.data)}`);
+      throw new Error(`Unexpected response from KIE.AI Runway: ${JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Runway task created: ${taskId}`);
 
-    // Runway відео: до ~50 хв
     const result = await pollRunwayStatus(taskId, 600, 5000, 'Runway (KIE.AI)');
 
     if (result && result._timeout) {
@@ -1969,7 +1699,6 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
       return { success: false, pending: true, taskId, provider: 'kie-ai', _runwayPending: true };
     }
 
-    // Отримуємо URL відео
     const videoUrl = result.videoInfo?.videoUrl;
     if (!videoUrl) {
       throw new Error('KIE.AI Runway returned no video in output');
@@ -1989,7 +1718,7 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
     if (error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
         provider: 'kie-ai',
         serverError: true
       };
@@ -2003,18 +1732,12 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
   }
 }
 
-/**
- * Polling для Runway - використовує ІНШИЙ endpoint!
- * /runway/record-detail?taskId=...
- *
- * Статуси: wait, queueing, generating, success, fail
- */
+
 async function pollRunwayStatus(taskId, maxAttempts = 600, interval = 5000, modelName = 'Runway') {
   let attempts = 0;
 
   while (attempts < maxAttempts) {
     try {
-      // ⚠️ Runway має свій endpoint для статусу!
       const response = await axios.get(
         `${KIE_API_BASE}/runway/record-detail?taskId=${taskId}`,
         {
@@ -2035,7 +1758,6 @@ async function pollRunwayStatus(taskId, maxAttempts = 600, interval = 5000, mode
         const errorMsg = task.failMsg || 'Unknown error';
         throw new Error(`Task failed: ${errorMsg}`);
       }
-      // wait, queueing, generating - продовжуємо polling
 
       await new Promise(resolve => setTimeout(resolve, interval));
       attempts++;
@@ -2051,7 +1773,6 @@ async function pollRunwayStatus(taskId, maxAttempts = 600, interval = 5000, mode
     }
   }
 
-  // Остання спроба перед таймаутом
   try {
     const last = await axios.get(`${KIE_API_BASE}/runway/record-detail?taskId=${taskId}`, {
       headers: { 'Authorization': `Bearer ${KIE_API_KEY}` }
@@ -2061,61 +1782,38 @@ async function pollRunwayStatus(taskId, maxAttempts = 600, interval = 5000, mode
       console.log(`📊 ${modelName} got result on final check`);
       return task;
     }
-  } catch (e) { /* ігноруємо */ }
+  } catch (e) {  }
 
-  // Повертаємо sentinel замість throw — caller обробить як pending
   console.warn(`⏱️ ${modelName} task ${taskId} timed out. Returning pending state.`);
   return { _timeout: true, taskId };
 }
 
-/**
- * Генерація через KIE.AI - OpenAI Sora 2 (звичайна версія, не Pro)
- *
- * Документація: https://kie.ai/sora-2
- *
- * Моделі:
- * - sora-2-text-to-video: текст → відео (15s)
- * - sora-2-image-to-video: зображення + текст → відео (10s або 15s)
- *
- * KIE.AI Pricing:
- * - Text-to-video 15s: 40 credits = $0.20
- * - Image-to-video 10s: 35 credits = $0.175
- * - Image-to-video 15s: 40 credits = $0.20
- *
- * 🔥 80%+ дешевше ніж Fal.ai!
- *
- * Параметри:
- * - prompt: текстовий опис (обов'язково)
- * - imageUrl: URL зображення (тільки для image-to-video)
- * - duration: тривалість (10 або 15 секунд, для text-to-video тільки 15)
- * - aspectRatio: 'portrait' або 'landscape'
- */
+
 async function generateSora2KieAI(prompt, options = {}) {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!prompt) {
-      throw new Error('Prompt є обов\'язковим для Sora 2');
+      throw new Error('Prompt is required for Sora 2');
     }
 
     const {
-      imageUrl = null,           // URL зображення для image-to-video
-      duration = null,           // 10 або 15 секунд (auto-select based on mode)
-      aspectRatio = 'landscape'  // 'portrait' або 'landscape'
+      imageUrl = null,           
+      duration = null,           
+      aspectRatio = 'landscape'  
     } = options;
 
     const isImageToVideo = !!imageUrl;
 
-    // Вибираємо модель і тривалість
     let modelName, actualDuration;
     if (isImageToVideo) {
       modelName = 'sora-2-image-to-video';
-      actualDuration = duration || 15;  // За замовчуванням 15s для image-to-video
+      actualDuration = duration || 15;  
     } else {
       modelName = 'sora-2-text-to-video';
-      actualDuration = 15;  // Text-to-video тільки 15s
+      actualDuration = 15;  
     }
 
     console.log(`🌌 KIE.AI Sora 2 (${isImageToVideo ? 'image2video' : 'text2video'}):`, {
@@ -2125,13 +1823,11 @@ async function generateSora2KieAI(prompt, options = {}) {
       hasImage: isImageToVideo
     });
 
-    // ✅ Структура за документацією KIE.AI
     const input = {
       prompt: prompt,
-      aspect_ratio: aspectRatio  // "portrait" або "landscape"
+      aspect_ratio: aspectRatio  
     };
 
-    // Для image-to-video додаємо image_urls
     if (isImageToVideo) {
       input.image_urls = [imageUrl];
     }
@@ -2170,7 +1866,6 @@ async function generateSora2KieAI(prompt, options = {}) {
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Sora 2 task created: ${taskId}`);
 
-    // Sora 2 може займати 5-10 хвилин
     const result = await pollJobStatus(taskId, 120, 5000, 'Sora 2 (KIE.AI)');
 
     if (result && result._timeout) {
@@ -2178,7 +1873,6 @@ async function generateSora2KieAI(prompt, options = {}) {
       return { success: false, pending: true, taskId, provider: 'kie-ai', duration: actualDuration };
     }
 
-    // Отримуємо URL відео
     const videoResultUrl = extractVideoUrl(result);
     if (!videoResultUrl) {
       throw new Error('KIE.AI Sora 2 returned no video in output');
@@ -2198,7 +1892,7 @@ async function generateSora2KieAI(prompt, options = {}) {
     if (error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes.',
         provider: 'kie-ai',
         serverError: true
       };
@@ -2212,23 +1906,15 @@ async function generateSora2KieAI(prompt, options = {}) {
   }
 }
 
-/**
- * Генерація через KIE.AI - ByteDance Seedance 2 / Seedance 2 Fast
- *
- * Документація:
- * - https://docs.kie.ai/market/bytedance/seedance-2
- * - https://docs.kie.ai/market/bytedance/seedance-2-fast
- *
- * Обидві моделі працюють через стандартний endpoint /jobs/createTask.
- */
+
 async function generateSeedanceVideoKieAI(prompt, options = {}) {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!prompt) {
-      throw new Error('Prompt є обов\'язковим для Seedance');
+      throw new Error('Prompt is required for Seedance');
     }
 
     const {
@@ -2316,7 +2002,7 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
       if (createResponse?.data?.code === 500) {
         return {
           success: false,
-          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини.',
+          error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes.',
           provider: 'kie-ai',
           serverError: true
         };
@@ -2364,7 +2050,7 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
     if (error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes.',
         provider: 'kie-ai',
         serverError: true
       };
@@ -2378,51 +2064,27 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
   }
 }
 
-/**
- * Генерація через KIE.AI - Google Veo 3.1
- *
- * Документація: https://docs.kie.ai/market/google/veo-3.1
- *
- * ⚠️ УВАГА: Veo використовує ІНШИЙ endpoint: /veo/generate (не /jobs/createTask)
- *
- * Моделі:
- * - veo3: Veo 3.1 Quality - найвища якість
- * - veo3_fast: Veo 3.1 Fast - швидший, дешевший
- *
- * Режими генерації (generationType):
- * - TEXT_2_VIDEO: тільки текст → відео
- * - FIRST_AND_LAST_FRAMES_2_VIDEO: 1-2 зображення (перший/останній кадр)
- * - REFERENCE_2_VIDEO: 1-3 референс зображення (тільки veo3_fast, тільки 16:9)
- *
- * Параметри:
- * - prompt: текстовий опис (обов'язково)
- * - imageUrls: масив URL зображень (опційно, 1-3 залежно від режиму)
- * - model: 'veo3' або 'veo3_fast' (default: 'veo3_fast')
- * - aspectRatio: '16:9', '9:16', 'Auto'
- * - generationType: режим генерації (auto якщо не вказано)
- * - enableTranslation: true/false (автопереклад на англійську)
- */
+
 async function generateVeoKieAI(prompt, options = {}) {
   try {
     if (!KIE_API_KEY) {
-      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+      throw new Error('KIE_AI_API_KEY is not set in .env');
     }
 
     if (!prompt) {
-      throw new Error('Prompt є обов\'язковим для Veo');
+      throw new Error('Prompt is required for Veo');
     }
 
     const {
-      imageUrls = [],           // масив URL зображень
-      model = 'veo3_fast',      // 'veo3' або 'veo3_fast'
+      imageUrls = [],           
+      model = 'veo3_fast',      
       aspectRatio = '16:9',     // '16:9', '9:16', 'Auto'
       generationType = null,    // TEXT_2_VIDEO, FIRST_AND_LAST_FRAMES_2_VIDEO, REFERENCE_2_VIDEO
-      enableTranslation = true, // автопереклад промпту на англійську
-      watermark = null,         // текст водяного знаку
+      enableTranslation = true, 
+      watermark = null,         
       seeds = null              // random seed 10000-99999
     } = options;
 
-    // Визначаємо режим генерації автоматично якщо не вказано
     let actualGenerationType = generationType;
     if (!actualGenerationType) {
       if (imageUrls.length === 0) {
@@ -2434,13 +2096,12 @@ async function generateVeoKieAI(prompt, options = {}) {
       }
     }
 
-    // Перевірки для REFERENCE_2_VIDEO
     if (actualGenerationType === 'REFERENCE_2_VIDEO') {
       if (model !== 'veo3_fast') {
-        console.warn('⚠️ REFERENCE_2_VIDEO підтримує тільки veo3_fast, змінюємо модель');
+        console.warn('⚠️ REFERENCE_2_VIDEO supports only veo3_fast. Switching the model automatically.');
       }
       if (aspectRatio !== '16:9' && aspectRatio !== '9:16') {
-        console.warn('⚠️ REFERENCE_2_VIDEO підтримує тільки 16:9 та 9:16');
+        console.warn('⚠️ REFERENCE_2_VIDEO supports only 16:9 and 9:16 aspect ratios');
       }
     }
 
@@ -2453,7 +2114,6 @@ async function generateVeoKieAI(prompt, options = {}) {
       enableTranslation
     });
 
-    // ✅ Структура за документацією KIE.AI
     // https://docs.kie.ai/market/google/veo-3.1
     const payload = {
       prompt: prompt,
@@ -2464,12 +2124,10 @@ async function generateVeoKieAI(prompt, options = {}) {
       callBackUrl: `${process.env.APP_URL || 'http://localhost:5500'}/webhook/kie-ai`
     };
 
-    // Додаємо зображення якщо є
     if (imageUrls.length > 0) {
-      payload.imageUrls = imageUrls.slice(0, 3); // максимум 3
+      payload.imageUrls = imageUrls.slice(0, 3); 
     }
 
-    // Опційні параметри
     if (watermark) {
       payload.watermark = watermark;
     }
@@ -2486,11 +2144,15 @@ async function generateVeoKieAI(prompt, options = {}) {
       callBackUrl: payload.callBackUrl
     });
 
-    console.log(`📤 KIE.AI Veo FULL payload: ${JSON.stringify(payload).substring(0, 1500)}`);
+    console.log(`📤 KIE.AI Veo request metadata: ${JSON.stringify({
+      model: payload.model,
+      generationType: payload?.input?.generationType,
+      aspectRatio: payload?.input?.aspectRatio,
+      duration: payload?.input?.duration
+    })}`);
 
-    // ⚠️ УВАГА: Veo використовує ІНШИЙ endpoint!
     const createResponse = await axios.post(
-      `${KIE_API_BASE}/veo/generate`,  // НЕ /jobs/createTask!
+      `${KIE_API_BASE}/veo/generate`,  
       payload,
       {
         headers: {
@@ -2502,7 +2164,6 @@ async function generateVeoKieAI(prompt, options = {}) {
 
     console.log(`📥 KIE.AI Veo response:`, JSON.stringify(createResponse.data, null, 2));
 
-    // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
@@ -2511,21 +2172,19 @@ async function generateVeoKieAI(prompt, options = {}) {
         console.error('❌ KIE.AI Veo - Server Error 500:', createResponse?.data);
         return {
           success: false,
-          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+          error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
           provider: 'kie-ai',
           serverError: true
         };
       }
 
       console.error('❌ Invalid KIE.AI Veo response structure:', createResponse.data);
-      throw new Error(`Неочікувана відповідь від KIE.AI Veo: ${apiMsg || JSON.stringify(createResponse.data)}`);
+      throw new Error(`Unexpected response from KIE.AI Veo: ${apiMsg || JSON.stringify(createResponse.data)}`);
     }
 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI Veo task created: ${taskId}`);
 
-    // 🔔 Викликаємо callback щоб caller міг зареєструвати taskId в kieCallbackMap
-    // ДО початку polling — щоб не пропустити webhook від KIE.AI
     if (options.onTaskCreated) {
       try {
         options.onTaskCreated(taskId);
@@ -2534,12 +2193,10 @@ async function generateVeoKieAI(prompt, options = {}) {
       }
     }
 
-    // Veo відео: до ~60 хв (720 * 5s)
     const result = await pollVeoStatus(taskId, 720, 5000, 'Veo 3.1 (KIE.AI)');
 
     console.log(`📋 Veo pollVeoStatus returned: _timeout=${!!result?._timeout}, type=${typeof result}, keys=${result ? Object.keys(result).join(',') : 'null'}`);
 
-    // Якщо polling завершився таймаутом — відео ще генерується, повертаємо pending
     if (result && result._timeout) {
       console.warn(`⏱️ Veo task ${taskId} still pending after timeout — returning pending state`);
       return {
@@ -2551,28 +2208,22 @@ async function generateVeoKieAI(prompt, options = {}) {
       };
     }
 
-    // Отримуємо URL відео
     let videoUrl = extractVideoUrl(result);
     console.log(`📹 Veo extractVideoUrl result: ${videoUrl ? videoUrl.substring(0, 150) : 'NULL'}`);
 
-    // ✅ Fallback: спробувати /veo/get-1080p-video endpoint
     if (!videoUrl) {
       console.log(`🔄 Veo: extractVideoUrl returned null, trying get-1080p-video fallback... taskId=${taskId}`);
-      // Перша спроба
       videoUrl = await fetchVeo1080pUrl(taskId);
-      // Якщо ще processing — чекаємо 90с і пробуємо ще раз
       if (!videoUrl) {
         console.log(`⏳ Veo: 1080p not ready yet, waiting 90s before retry... taskId=${taskId}`);
         await new Promise(r => setTimeout(r, 90000));
         videoUrl = await fetchVeo1080pUrl(taskId);
       }
-      // Ще раз
       if (!videoUrl) {
         console.log(`⏳ Veo: 1080p still not ready, waiting 60s more... taskId=${taskId}`);
         await new Promise(r => setTimeout(r, 60000));
         videoUrl = await fetchVeo1080pUrl(taskId);
       }
-      // Ще одна спроба через 60с
       if (!videoUrl) {
         console.log(`⏳ Veo: 1080p STILL not ready, last try in 60s... taskId=${taskId}`);
         await new Promise(r => setTimeout(r, 60000));
@@ -2604,7 +2255,7 @@ async function generateVeoKieAI(prompt, options = {}) {
     if (error.response?.data?.code === 500) {
       return {
         success: false,
-        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes or contact support.',
         provider: 'kie-ai',
         serverError: true
       };
@@ -2618,9 +2269,7 @@ async function generateVeoKieAI(prompt, options = {}) {
   }
 }
 
-/**
- * Polling для Veo (може мати інший endpoint для статусу)
- */
+
 async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelName = 'Veo') {
   let attempts = 0;
   console.log(`🔁 ${modelName}: Starting polling for taskId=${taskId}, maxAttempts=${maxAttempts}, interval=${interval}ms (max ~${Math.round(maxAttempts * interval / 60000)}min)`);
@@ -2639,7 +2288,6 @@ async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelNa
 
       const state = (job.state || job.status || '').toLowerCase();
 
-      // Логуємо перші 10 спроб, потім кожну хвилину, або при фінальних статусах
       if (attempts < 10 || attempts % 12 === 0 || state === 'success' || state === 'completed' || state === 'fail' || state === 'failed') {
         console.log(`📊 ${modelName} poll (${attempts + 1}/${maxAttempts}): state=${state || 'EMPTY'}, successFlag=${job.successFlag}, completeTime=${job.completeTime || 'null'}, hasResponse=${!!job.response}, hasInfo=${!!job.info}, hasResultJson=${!!job.resultJson}, errorMessage=${job.errorMessage || 'null'}`);
       }
@@ -2647,7 +2295,6 @@ async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelNa
       if (state === 'success' || state === 'completed') {
         console.log(`✅ ${modelName} task ${taskId} completed! Full result keys: ${Object.keys(job).join(',')}`);
         console.log(`✅ ${modelName} task ${taskId} FULL DATA: ${JSON.stringify(job).substring(0, 2000)}`);
-        // Пробуємо витягти URL для перевірки
         const testUrl = extractVideoUrl(job);
         console.log(`📹 ${modelName} extracted video URL: ${testUrl ? testUrl.substring(0, 150) : 'NULL'}`);
         return job;
@@ -2675,7 +2322,6 @@ async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelNa
     }
   }
 
-  // Остання спроба перед таймаутом
   try {
     const job = await fetchVeoTaskInfo(taskId);
     const state = (job?.state || job?.status || '').toLowerCase();
@@ -2685,9 +2331,8 @@ async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelNa
       console.log(`📹 ${modelName} final check extracted URL: ${testUrl ? testUrl.substring(0, 100) : 'NULL'}`);
       return job;
     }
-  } catch (e) { /* ігноруємо */ }
+  } catch (e) {  }
 
-  // Повертаємо sentinel замість throw — caller обробить як pending
   console.warn(`⏱️ ${modelName} task ${taskId} timed out after ${maxAttempts} attempts. Returning pending state.`);
   return { _timeout: true, taskId };
 }
@@ -2695,11 +2340,7 @@ async function pollVeoStatus(taskId, maxAttempts = 720, interval = 5000, modelNa
 
 // ==================== EXPORT ====================
 
-/**
- * Отримати інформацію про модель з кешу цін KIE.AI
- * @param {string} modelKey - ключ моделі (наприклад 'sora-watermark-remover')
- * @returns {Object|null} - { cost: number, apiCost: number } або null
- */
+
 function getModelInfo(modelKey) {
   try {
     const fs = require('fs');
@@ -2713,7 +2354,6 @@ function getModelInfo(modelKey) {
 
     const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
 
-    // Шукаємо модель в кеші (по anchor URL для точності)
     const allPricing = cache.pricing?.all || [];
     const model = allPricing.find(m =>
       m.anchor?.includes(`model=${modelKey}`) ||
@@ -2725,9 +2365,8 @@ function getModelInfo(modelKey) {
       return null;
     }
 
-    // Розраховуємо ціну з 65% націнкою (1.65)
     const apiCost = parseFloat(model.usdPrice) || 0;
-    const cost = Math.ceil(apiCost * 1.65 / 0.01); // Конвертуємо в токени
+    const cost = Math.ceil(apiCost * 1.65 / 0.01); 
 
     return {
       cost,
@@ -2743,29 +2382,25 @@ function getModelInfo(modelKey) {
 }
 
 module.exports = {
-  // Перевірки
   isAdminUser,
 
-  // Генерація зображень
   generateWithNanoBananaBaseKieAI,   // ✅ Nano Banana (Base)
   generateWithNanoBananaKieAI,
   generateWithSeedreamKieAI,
   generateWithSeedream5LiteKieAI,
-  generateWithStableDiffusionKieAI,  // ❌ Повертає помилку - не підтримується
+  generateWithStableDiffusionKieAI,  
   generateWithIdeogramKieAI,         // ✅ Ideogram v3
   generateWithRecraftUpscaleKieAI,   // ✅ Recraft Crisp Upscale
   generateWithZImageKieAI,           // ✅ Z-Image (Qwen)
 
-  // Генерація відео
   generateKlingMotionKieAI,          // ✅ Kling Motion Control
   generateKling3VideoKieAI,          // ✅ Kling 3.0 (multi-shot, element refs)
   generateKlingVideoKieAI,           // ✅ Kling v2.5 + v2.6
   generateRunwayVideoKieAI,          // ✅ Runway (endpoint: /runway/generate)
-  generateSora2KieAI,                // ✅ Sora 2 (звичайна, не Pro) 🔥 80%+ знижка!
+  generateSora2KieAI,                
   generateSeedanceVideoKieAI,        // ✅ Seedance 2 / Seedance 2 Fast
   generateVeoKieAI,                  // ✅ Veo 3.1 (endpoint: /veo/generate)
 
-  // Утиліти
   getModelInfo,
   fetchTaskRecordInfoExported: fetchTaskRecordInfo,
   fetchVeoTaskInfoExported: fetchVeoTaskInfo,
@@ -2778,17 +2413,15 @@ module.exports = {
     );
     return response.data?.data || null;
   },
-  // Інформація про провайдер
   KIE_API_BASE,
   KIE_API_KEY: !!KIE_API_KEY,
   isKieAIEnabled: !!KIE_API_KEY,
 
-  // Підтримувані моделі на KIE.AI
   SUPPORTED_MODELS: {
     image: [
-      'nano_banana',      // ✅ google/nano-banana (base) на KIE.AI
-      'nano_banana_2k',   // ✅ nano-banana-pro (2K) на KIE.AI
-      'nano_banana_4k',   // ✅ nano-banana-pro (4K) на KIE.AI
+      'nano_banana',      
+      'nano_banana_2k',   
+      'nano_banana_4k',   
       'seedream_4k',      // ✅ seedream/4.5-text-to-image, seedream/4.5-edit
       'seedream_5_lite',  // ✅ seedream/5-lite-text-to-image, seedream/5-lite-image-to-image
       'ideogram',         // ✅ ideogram/v3-reframe, v3-remix, v3-edit
@@ -2805,26 +2438,21 @@ module.exports = {
       'seedance_2',
       'seedance_2_fast'
     ],
-    // Моделі які ТІЛЬКИ на KIE.AI - немає на Replicate!
     kieAIOnly: [
-      'kling_3',           // ⚠️ Kling 3.0 - немає на Replicate
+      'kling_3',           
       'seedance_2',        // ⚠️ Seedance 2 - KIE only
       'seedance_2_fast',   // ⚠️ Seedance 2 Fast - KIE only
       'seedream_5_lite',   // ⚠️ Seedream 5.0 Lite - KIE.AI only
-      'z_image'            // ⚠️ Z-Image - немає на Replicate
+      'z_image'            
     ],
-    // Моделі які НЕ підтримуються на KIE.AI — ціна та запуск через Replicate
     notSupported: [
-      'stable_diffusion', // ❌ Немає на KIE.AI
-      'clarity',          // ❌ Немає на KIE.AI
-      'sora_2'            // ⏸️ Тимчасово вимкнено на KIE.AI (використовуємо Replicate)
+      'stable_diffusion', 
+      'clarity',          
+      'sora_2'            
     ]
   },
 
-  /**
-   * Чи є реалізація моделі на KIE.AI (ціна KIE + виклик KIE).
-   * Якщо false — показуємо/списуємо ціну Replicate і запускаємо Replicate.
-   */
+  
   isKieAIImplemented(modelKey) {
     const img = this.SUPPORTED_MODELS.image.includes(modelKey);
     const vid = this.SUPPORTED_MODELS.video.includes(modelKey);
@@ -2832,7 +2460,6 @@ module.exports = {
     return (img || vid) && !not;
   },
 
-  // Маппінг наших ключів моделей на KIE.AI моделі
   MODEL_MAPPING: {
     // Image
     nano_banana: { model: 'google/nano-banana' },  // Base model
@@ -2855,7 +2482,6 @@ module.exports = {
     seedance_2_fast: { model: 'bytedance/seedance-2-fast' }
   },
 
-  // Endpoints для різних моделей (статус — офіційно GET /jobs/recordInfo?taskId=)
   SPECIAL_ENDPOINTS: {
     runway: '/runway/generate',
     runway_status: '/runway/record-detail',

@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { getTelegramBotToken } = require('../utils/telegramFiles');
 
 const REPLICATE_API = 'https://api.replicate.com/v1';
 const Replicate = require('replicate');
@@ -10,7 +11,7 @@ const replicate = new Replicate({
 // ==================== HELPER FUNCTIONS ====================
 
 async function sendTelegramMessage(chatId, message) {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const botToken = getTelegramBotToken();
   if (!botToken || !chatId) return;
 
   try {
@@ -25,7 +26,7 @@ async function sendTelegramMessage(chatId, message) {
 }
 
 /**
- * Конвертувати URL зображення в base64 data URI
+ * Convert an image URL to a base64 data URI.
  */
 async function convertImageToBase64(imageUrl) {
   try {
@@ -40,7 +41,7 @@ async function convertImageToBase64(imageUrl) {
 }
 
 /**
- * Нормалізувати image input (підтримка до 14 зображень)
+ * Normalize image input and enforce the provider limit.
  */
 function normalizeImageInput(imageInput, maxImages = 14) {
   if (!imageInput) return [];
@@ -57,8 +58,7 @@ function normalizeImageInput(imageInput, maxImages = 14) {
 }
 
 /**
- * Polling для очікування результату від Replicate API.
- * Дефолт: до ~20 хв для зображень (400×3с); для відео передавати більші maxAttempts/interval.
+ * Poll Replicate until a prediction completes.
  */
 async function pollPrediction(predictionId, maxAttempts = 400, interval = 3000, modelName = 'Model') {
   let result = null;
@@ -88,7 +88,7 @@ async function pollPrediction(predictionId, maxAttempts = 400, interval = 3000, 
     attempts++;
   }
 
-  // Остання спроба перед таймаутом
+  // Perform one final status check before returning a timeout error.
   if (!result) {
     try {
       const last = await axios.get(`${REPLICATE_API}/predictions/${predictionId}`, {
@@ -98,7 +98,7 @@ async function pollPrediction(predictionId, maxAttempts = 400, interval = 3000, 
         console.log(`📊 ${modelName} got result on final check`);
         return last.data;
       }
-    } catch (e) { /* ігноруємо */ }
+    } catch (e) { /* ignore final status errors */ }
     throw new Error(`Timeout waiting for ${modelName} generation`);
   }
 
@@ -108,7 +108,7 @@ async function pollPrediction(predictionId, maxAttempts = 400, interval = 3000, 
 // ==================== IMAGE GENERATION ====================
 
 /**
- * Генерація зображення через FLUX
+ * Generate an image with FLUX.
  */
 async function generateWithFlux(prompt) {
   try {
@@ -155,7 +155,7 @@ async function generateWithFlux(prompt) {
 }
 
 /**
- * Stable Diffusion 3.5 Large (text2img + img2img)
+ * Stable Diffusion 3.5 Large (text-to-image + image-to-image).
  */
 async function generateWithStableDiffusion(prompt, imageUrl = null, strength = 0.8, aspectRatio = '1:1') {
   try {
@@ -211,7 +211,7 @@ async function generateWithStableDiffusion(prompt, imageUrl = null, strength = 0
 }
 
 /**
- * Генерувати зображення через Nano Banana Pro (підтримка до 14 зображень)
+ * Generate an image with Nano Banana Pro.
  */
 async function generateWithNanoBanana(prompt, imageInput = null, resolution = "2K", aspectRatio = "match_input_image") {
   try {
@@ -246,9 +246,7 @@ async function generateWithNanoBanana(prompt, imageInput = null, resolution = "2
   }
 }
 
-/**
- * Генерувати зображення через Nano Banana (base)
- */
+
 async function generateWithNanoBananaBase(prompt, imageInput = null, aspectRatio = "match_input_image", outputFormat = "jpg") {
   try {
     console.log('Generating with Nano Banana:', prompt, `aspect_ratio: ${aspectRatio}`);
@@ -280,9 +278,7 @@ async function generateWithNanoBananaBase(prompt, imageInput = null, aspectRatio
   }
 }
 
-/**
- * Генерувати зображення через Seedream 4.5 (підтримка до 14 зображень)
- */
+
 async function generateWithSeedream(prompt, imageInput = null, size = "4K", aspectRatio = "match_input_image") {
   try {
     console.log('Generating with Seedream 4.5:', prompt, `aspect_ratio: ${aspectRatio}`);
@@ -328,7 +324,6 @@ async function generateWithIdeogram(prompt, imageInput = null, imageWeight = 0.5
       magic_prompt_option: "Auto"
     };
 
-    // ✅ Ideogram v3 Turbo: для референсів використовуємо URL (style_reference_images)
     if (imageInput) {
       const imageUrl = Array.isArray(imageInput) ? imageInput[0] : imageInput;
       if (!imageUrl) {
@@ -356,9 +351,7 @@ async function generateWithIdeogram(prompt, imageInput = null, imageWeight = 0.5
   }
 }
 
-/**
- * Покращення зображення через Clarity Upscaler
- */
+
 async function generateWithClarityUpscaler(imageUrl, prompt = '') {
   try {
     console.log('Upscaling with Clarity:', imageUrl);
@@ -436,14 +429,7 @@ async function generateWithRecraftCrispUpscale(imageUrl) {
 
 // ==================== VIDEO GENERATION ====================
 
-/**
- * Генерація відео через Kling v2.5 Turbo Pro
- * Підтримує:
- * - start_image: перший кадр відео
- * - end_image: останній кадр відео (для інтерполяції)
- * - duration: 5 або 10 секунд
- * - aspect_ratio: 16:9 або 9:16 (ігнорується якщо є start_image)
- */
+
 async function generateVideoWithKling(prompt, startImage = null, endImage = null, duration = 5, aspectRatio = '16:9') {
   try {
     console.log('Starting Kling v2.5 Turbo Pro video generation:', {
@@ -456,19 +442,16 @@ async function generateVideoWithKling(prompt, startImage = null, endImage = null
 
     const input = {
       prompt: prompt,
-      duration: duration  // 5 або 10 секунд
+      duration: duration  
     };
 
-    // Додаємо start_image якщо є
     if (startImage) {
       input.start_image = startImage;
       console.log('✅ Adding start_image (first frame)');
     } else {
-      // aspect_ratio ігнорується якщо є start_image
       input.aspect_ratio = aspectRatio;
     }
 
-    // Додаємо end_image якщо є (для інтерполяції)
     if (endImage) {
       input.end_image = endImage;
       console.log('✅ Adding end_image (last frame) for interpolation');
@@ -492,13 +475,7 @@ async function generateVideoWithKling(prompt, startImage = null, endImage = null
   }
 }
 
-/**
- * Генерація відео через Kling v2.6
- * Підтримує:
- * - start_image: перший кадр відео
- * - duration: 5 або 10 секунд
- * - aspect_ratio: 16:9 або 9:16 (ігнорується якщо є start_image)
- */
+
 async function generateVideoWithKling26(prompt, startImage = null, duration = 5, aspectRatio = '16:9', generateAudio = false, audioParam = 'generate_audio') {
   try {
     console.log('Starting Kling v2.6 video generation:', {
@@ -511,19 +488,16 @@ async function generateVideoWithKling26(prompt, startImage = null, duration = 5,
 
     const input = {
       prompt: prompt,
-      duration: duration  // 5 або 10 секунд
+      duration: duration  
     };
 
-    // Додаємо start_image якщо є
     if (startImage) {
       input.start_image = startImage;
       console.log('✅ Adding start_image (first frame)');
     } else {
-      // aspect_ratio ігнорується якщо є start_image
       input.aspect_ratio = aspectRatio;
     }
 
-    // Аудіо (якщо підтримується моделлю)
     if (audioParam) {
       input[audioParam] = !!generateAudio;
     }
@@ -546,9 +520,7 @@ async function generateVideoWithKling26(prompt, startImage = null, duration = 5,
   }
 }
 
-/**
- * Генерація відео через Runway Gen-4 Aleph
- */
+
 async function generateVideoWithRunway(prompt, imageUrl = null) {
   try {
     console.log('Starting Runway Gen-4 video generation:', prompt);
@@ -578,9 +550,7 @@ async function generateVideoWithRunway(prompt, imageUrl = null) {
   }
 }
 
-/**
- * Генерація відео через Runway Gen-4 Turbo
- */
+
 async function generateVideoWithRunwayTurbo(prompt, imageUrl = null, duration = 5, aspectRatio = '16:9') {
   try {
     console.log('Starting Runway Gen-4 Turbo video generation:', prompt);
@@ -611,9 +581,7 @@ async function generateVideoWithRunwayTurbo(prompt, imageUrl = null, duration = 
   }
 }
 
-/**
- * Генерація відео через OpenAI Sora 2 (Replicate)
- */
+
 async function generateVideoWithSora2(prompt, seconds = 4, aspectRatio = 'portrait', inputReference = null) {
   try {
     console.log('Starting Sora 2 video generation:', prompt);
@@ -646,9 +614,7 @@ async function generateVideoWithSora2(prompt, seconds = 4, aspectRatio = 'portra
 
 // ==================== AUDIO GENERATION ====================
 
-/**
- * Генерувати аудіо через Suno AI Bark
- */
+
 async function generateWithSuno(text, voice = 'announcer') {
   try {
     console.log('Generating audio with Suno AI Bark:', text);
@@ -689,21 +655,7 @@ async function generateWithSuno(text, voice = 'announcer') {
   }
 }
 
-/**
- * Генерація відео через Kling v2.6 Motion Control (image + reference video)
- * @param {string} imageUrl - URL зображення персонажа
- * @param {string} videoUrl - URL референсного відео
- * @param {string} modelKey - тип моделі: 'kling_motion' або 'kling_motion_minimal'
- * @param {string} prompt - додатковий промпт
-/**
- * Генерація відео через Kling Motion Control v2.6
- * @param {string} imageUrl - URL референсного зображення
- * @param {string} videoUrl - URL референсного відео з рухами
- * @param {string} mode - "std" (Standard) або "pro" (Professional)
- * @param {string} characterOrientation - "image" (до 10с) або "video" (до 30с)
- * @param {string} prompt - текстовий опис (опціонально)
- * @param {boolean} keepOriginalSound - зберігати звук оригінального відео
- */
+
 async function generateVideoWithKlingMotion(imageUrl, videoUrl, mode = 'pro', characterOrientation = 'image', prompt = '', keepOriginalSound = false) {
   try {
     if (!imageUrl || !videoUrl) {
@@ -711,14 +663,13 @@ async function generateVideoWithKlingMotion(imageUrl, videoUrl, mode = 'pro', ch
     }
 
     const input = {
-      mode: mode,                           // "std" або "pro"
+      mode: mode,                           
       image: imageUrl,
       video: videoUrl,
-      character_orientation: characterOrientation,  // "image" (до 10с) або "video" (до 30с)
+      character_orientation: characterOrientation,  
       keep_original_sound: keepOriginalSound
     };
 
-    // Додаємо prompt якщо є
     if (prompt && prompt.trim()) {
       input.prompt = prompt;
     }
@@ -745,15 +696,7 @@ async function generateVideoWithKlingMotion(imageUrl, videoUrl, mode = 'pro', ch
   }
 }
 
-/**
- * Генерація відео через Google Veo 3.1
- * Підтримує:
- * - startImage: перший кадр відео (image-to-video)
- * - reference_images: до 3 зображень для консистентності (тільки 16:9)
- * - last_frame: кінцевий кадр для інтерполяції
- * - duration: 4, 6 або 8 секунд
- * - generate_audio: true/false
- */
+
 async function generateVideoWithVeo(prompt, referenceImages = [], lastFrame = null, aspectRatio = '16:9', duration = 8, negativePrompt = '', startImage = null, generateAudio = true) {
   try {
     console.log(`Starting Veo 3.1 video generation:`, {
@@ -768,26 +711,22 @@ async function generateVideoWithVeo(prompt, referenceImages = [], lastFrame = nu
 
     const input = {
       prompt: prompt,
-      aspect_ratio: aspectRatio,  // "16:9" або "9:16"
-      duration: Math.min(Math.max(duration, 4), 8),  // 4, 6 або 8 секунд
+      aspect_ratio: aspectRatio,  
+      duration: Math.min(Math.max(duration, 4), 8),  
       resolution: '1080p',
       generate_audio: generateAudio  // true/false
     };
 
-    // Додаємо start image (перший кадр) якщо є
     if (startImage) {
       input.image = startImage;
       console.log(`✅ Adding start image (first frame) for image-to-video`);
     }
 
-    // Додаємо reference images якщо вони є (тільки для 16:9!)
     if (referenceImages && referenceImages.length > 0 && aspectRatio === '16:9') {
       input.reference_images = referenceImages.slice(0, 3);  // Max 3 reference images
       console.log(`✅ Adding ${input.reference_images.length} reference image(s) for subject-consistent generation`);
     }
 
-    // Додаємо last_frame якщо немає reference images
-    // (last_frame ігнорується якщо є reference images)
     if (!input.reference_images || input.reference_images.length === 0) {
       if (lastFrame) {
         input.last_frame = lastFrame;
@@ -795,7 +734,6 @@ async function generateVideoWithVeo(prompt, referenceImages = [], lastFrame = nu
       }
     }
 
-    // Додаємо negative prompt якщо є
     if (negativePrompt && negativePrompt.trim()) {
       input.negative_prompt = negativePrompt;
     }
@@ -830,22 +768,7 @@ async function generateVideoWithVeo(prompt, referenceImages = [], lastFrame = nu
   }
 }
 
-/**
- * Генерація/редагування відео через Kling O1 Edit (Replicate)
- * Модель: kwaivgi/kling-o1
- * 
- * Параметри:
- * - prompt: текстовий опис редагування (required)
- * - referenceVideo: URL відео для редагування (optional, але потрібен для редагування)
- * - startImage: перший кадр (optional)
- * - endImage: останній кадр (optional, потребує startImage)
- * - referenceImages: масив референсних зображень (до 7 без відео, 4 з відео)
- * - videoReferenceType: 'feature' (стиль/камера) або 'base' (редагування відео)
- * - keepOriginalSound: зберігати оригінальний звук (boolean)
- * - mode: 'std' або 'pro'
- * - aspectRatio: пропорції відео (optional, required для text-to-video)
- * - duration: тривалість у секундах (3-10, optional, ігнорується для base type)
- */
+
 async function generateVideoWithKlingO1Edit(options = {}) {
   try {
     const {
@@ -854,45 +777,40 @@ async function generateVideoWithKlingO1Edit(options = {}) {
       startImage = null,
       endImage = null,
       referenceImages = [],
-      videoReferenceType = 'feature',  // 'feature' або 'base'
-      keepOriginalSound = true,  // default true згідно з API
-      mode = 'pro',  // default 'pro' згідно з API
+      videoReferenceType = 'feature',  
+      keepOriginalSound = true,  
+      mode = 'pro',  
       aspectRatio = null,
       duration = 5
     } = options;
 
     if (!prompt || prompt.trim().length === 0) {
-      throw new Error('Prompt є обов\'язковим для Kling O1 Edit');
+      throw new Error('Prompt is required for Kling O1 Edit');
     }
 
     const input = {
       prompt: prompt,
-      mode: mode  // 'std' або 'pro'
+      mode: mode  
     };
 
-    // Додаємо відео якщо є
     if (referenceVideo) {
       input.reference_video = referenceVideo;
-      input.video_reference_type = videoReferenceType;  // 'feature' або 'base'
+      input.video_reference_type = videoReferenceType;  
       input.keep_original_sound = keepOriginalSound;
       
-      // Для base type duration ігнорується
       if (videoReferenceType === 'feature' && duration) {
         input.duration = Math.min(Math.max(parseInt(duration), 3), 10);
       }
     } else {
-      // Text-to-video: потрібен aspectRatio та duration (тільки 5 або 10)
       if (aspectRatio) {
         input.aspect_ratio = aspectRatio;
       }
       if (duration) {
-        // Для text-to-video duration має бути тільки 5 або 10
         const validDuration = duration === 5 || duration === 10 ? duration : 5;
         input.duration = validDuration;
       }
     }
 
-    // Додаємо start_image та end_image
     if (startImage) {
       input.start_image = startImage;
       if (endImage) {
@@ -900,7 +818,6 @@ async function generateVideoWithKlingO1Edit(options = {}) {
       }
     }
 
-    // Додаємо reference_images (до 7 без відео, 4 з відео)
     if (referenceImages && referenceImages.length > 0) {
       const maxRefs = referenceVideo ? 4 : 7;
       input.reference_images = referenceImages.slice(0, maxRefs);

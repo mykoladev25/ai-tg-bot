@@ -7,11 +7,8 @@ const { logPaymentEvent } = require('../monitoring/loggers');
 
 module.exports = function(bot) {
 
-    // ⚠️ ВАЖЛИВО: WayForPay надсилає raw JSON, не urlencoded!
-    // Потрібен спеціальний парсер
     router.post('/wayforpay', express.text({ type: '*/*' }), async (req, res) => {
         try {
-            // WayForPay може надсилати дані різними способами
             let data;
 
             if (typeof req.body === 'string') {
@@ -24,10 +21,8 @@ module.exports = function(bot) {
                     return res.status(400).json({ error: 'Invalid JSON' });
                 }
             } else if (typeof req.body === 'object') {
-                // Перевіряємо чи це "JSON як ключ" проблема
                 const keys = Object.keys(req.body);
                 if (keys.length === 1 && keys[0].startsWith('{')) {
-                    // JSON прийшов як ключ об'єкта (неправильна обробка urlencoded)
                     console.log('📥 Extracting JSON from form key...');
                     try {
                         data = JSON.parse(keys[0]);
@@ -36,7 +31,6 @@ module.exports = function(bot) {
                         return res.status(400).json({ error: 'Invalid JSON format' });
                     }
                 } else {
-                    // Нормальний об'єкт
                     data = req.body;
                 }
             } else {
@@ -44,7 +38,6 @@ module.exports = function(bot) {
                 return res.status(400).json({ error: 'Invalid request body' });
             }
 
-            console.log('📥 WayForPay webhook received (full data):', JSON.stringify(data, null, 2));
             console.log('📥 WayForPay webhook summary:', {
                 orderReference: data.orderReference,
                 transactionStatus: data.transactionStatus,
@@ -54,7 +47,6 @@ module.exports = function(bot) {
                 reason: data.reason
             });
 
-            // Верифікуємо підпис
             if (!wayforpay.verifySignature(data)) {
                 console.error('❌ WayForPay: Invalid signature');
                 return res.status(400).json({ error: 'Invalid signature' });
@@ -62,7 +54,6 @@ module.exports = function(bot) {
 
             const { orderReference, transactionStatus, amount } = data;
 
-            // Парсимо order_id: userId_plan_timestamp
             const parts = orderReference.split('_');
             if (parts.length < 3) {
                 console.error('❌ Invalid orderReference format:', orderReference);
@@ -72,7 +63,6 @@ module.exports = function(bot) {
             const userId = parseInt(parts[0]);
             const planKey = parts[1];
 
-            // ✅ Визначаємо токени з плану на СЕРВЕРІ!
             const sub = models.subscriptions[planKey];
             if (!sub) {
                 console.error('❌ Invalid plan:', planKey);
@@ -81,11 +71,8 @@ module.exports = function(bot) {
 
             const tokens = sub.tokensWayForPay || sub.tokens;
 
-            // ✅ WayForPay може надсилати 'Approved' або 'Completed' як статус успішного платежу
-            // (Підтримуємо обидва для максимальної надійності)
             if (transactionStatus === 'Approved' || transactionStatus === 'Completed') {
                 console.log(`✅ Processing SUCCESSFUL payment: ${orderReference} (status: ${transactionStatus})`);
-                // Перевіряємо чи вже оброблено (ідемпотентність)
                 const Transaction = require('../database/models/Transaction');
                 const existing = await Transaction.findOne({
                     'metadata.orderId': orderReference,
@@ -95,17 +82,15 @@ module.exports = function(bot) {
                 if (existing) {
                     console.log(`⚠️ WayForPay: Order ${orderReference} already processed`);
 
-                    // ✅ ВАЖЛИВО: Все одно відправляємо повідомлення користувачу
-                    // (можливо webhook прийшов пізніше ніж користувач попав на success page)
                     try {
                         const user = await userBalance.getUser(userId, { id: userId });
                         await bot.telegram.sendMessage(
                             userId,
-                            `✅ <b>Оплату підтверджено!</b>\n\n` +
-                            `💳 Метод: WayForPay\n` +
-                            `💎 Тариф: ${sub.name}\n` +
-                            `⚡ Токенів на балансі: ${user.tokens.toFixed(2)}\n\n` +
-                            `Дякуємо за покупку! 🎉`,
+                            `✅ <b>Payment confirmed.</b>\n\n` +
+                            `💳 Method: WayForPay\n` +
+                            `💎 Plan: ${sub.name}\n` +
+                            `⚡ Tokens on balance: ${user.tokens.toFixed(2)}\n\n` +
+                            `Thank you for your purchase.`,
                             { parse_mode: 'HTML' }
                         );
                         console.log(`📨 Confirmation message sent to user ${userId}`);
@@ -113,7 +98,6 @@ module.exports = function(bot) {
                         console.error('Error sending confirmation message:', err.message);
                     }
                 } else {
-                    // Нараховуємо токени
                     await userBalance.addTokens(
                         userId,
                         tokens,
@@ -141,17 +125,16 @@ module.exports = function(bot) {
                         raw: data
                     });
 
-                    // Повідомляємо користувача
                     try {
                         const user = await userBalance.getUser(userId, { id: userId });
                         await bot.telegram.sendMessage(
                             userId,
-                            `✅ <b>Оплату отримано!</b>\n\n` +
-                            `💳 Метод: WayForPay\n` +
-                            `💎 Тариф: ${sub.name}\n` +
-                            `⚡ Токенів нараховано: ${tokens}\n` +
-                            `💰 Новий баланс: ${user.tokens.toFixed(2)}⚡\n\n` +
-                            `Дякуємо за покупку! 🎉`,
+                            `✅ <b>Payment received.</b>\n\n` +
+                            `💳 Method: WayForPay\n` +
+                            `💎 Plan: ${sub.name}\n` +
+                            `⚡ Tokens credited: ${tokens}\n` +
+                            `💰 New balance: ${user.tokens.toFixed(2)}⚡\n\n` +
+                            `Thank you for your purchase.`,
                             { parse_mode: 'HTML' }
                         );
                         console.log(`📨 Success message sent to user ${userId}`);
@@ -160,24 +143,23 @@ module.exports = function(bot) {
                     }
                 }
             } else if (transactionStatus === 'Declined' || transactionStatus === 'Failed') {
-                // Платіж відхилений
                 console.log(`❌ Processing DECLINED/FAILED payment: ${orderReference} (${transactionStatus})`);
                 console.log(`⚠️ NOT adding tokens for declined payment`);
 
                 try {
                     await bot.telegram.sendMessage(
                         userId,
-                        `❌ <b>Платіж не був успішним</b>\n\n` +
-                        `💳 Метод: WayForPay\n` +
-                        `💎 Тариф: ${sub.name}\n` +
-                        `💰 Сума: ${amount} UAH\n` +
-                        `🔴 Статус: ${transactionStatus}\n\n` +
-                        `Будь ласка:\n` +
-                        `• Перевірте реквізити картки\n` +
-                        `• Переконайтесь, що карта активна\n` +
-                        `• Спробуйте іншу карту\n` +
-                        `• Зверніться до вашого банку\n\n` +
-                        `Замовлення: ${orderReference}`,
+                        `❌ <b>Payment was not successful</b>\n\n` +
+                        `💳 Method: WayForPay\n` +
+                        `💎 Plan: ${sub.name}\n` +
+                        `💰 Amount: ${amount} UAH\n` +
+                        `🔴 Status: ${transactionStatus}\n\n` +
+                        `Please:\n` +
+                        `• Check your card details\n` +
+                        `• Make sure the card is active\n` +
+                        `• Try another card\n` +
+                        `• Contact your bank\n\n` +
+                        `Order: ${orderReference}`,
                         { parse_mode: 'HTML' }
                     );
                     console.log(`📨 Decline message sent to user ${userId}`);
@@ -185,21 +167,18 @@ module.exports = function(bot) {
                     console.error('Error sending decline message:', err.message);
                 }
             } else if (transactionStatus === 'Refunded') {
-                // ⚠️ Платіж був повернений (chargeback, fraud, тощо)
                 console.log(`⚠️ Processing REFUNDED payment: ${orderReference}`);
                 console.log(`⚠️ Refund reason: ${data.reason} (code: ${data.reasonCode})`);
 
                 try {
                     const Transaction = require('../database/models/Transaction');
 
-                    // Перевіряємо чи існує такий платіж
                     const transaction = await Transaction.findOne({
                         'metadata.orderId': orderReference,
                         type: 'wayforpay_purchase'
                     });
 
                     if (transaction && transaction.status === 'completed') {
-                        // Якщо платіж був оброблений як успішний, то потрібно забрати токени
                         console.log(`💔 Refunding ${tokens}⚡ to user ${userId}`);
                         console.log(`📝 Refund details:`, {
                             orderId: orderReference,
@@ -208,7 +187,6 @@ module.exports = function(bot) {
                             authCode: data.authCode
                         });
 
-                        // Забираємо токени
                         const user = await userBalance.getUser(userId, { id: userId });
                         const tokensToRemove = Math.min(tokens, user.tokens || 0);
 
@@ -227,23 +205,21 @@ module.exports = function(bot) {
                                 }
                             );
 
-                            // Повідомляємо користувача про повернення
                             const updatedUser = await userBalance.getUser(userId, { id: userId });
                             await bot.telegram.sendMessage(
                                 userId,
-                                `⚠️ <b>Платіж був повернений</b>\n\n` +
-                                `💳 Метод: WayForPay\n` +
-                                `💎 Тариф: ${sub.name}\n` +
-                                `⚡ Повернено: ${tokensToRemove}\n` +
-                                `💰 Поточний баланс: ${updatedUser.tokens.toFixed(2)}⚡\n\n` +
-                                `Причина: ${data.reason}\n` +
-                                `Код: ${data.reasonCode}\n\n` +
-                                `Замовлення: ${orderReference}`,
+                                `⚠️ <b>Payment was refunded</b>\n\n` +
+                                `💳 Method: WayForPay\n` +
+                                `💎 Plan: ${sub.name}\n` +
+                                `⚡ Refunded: ${tokensToRemove}\n` +
+                                `💰 Current balance: ${updatedUser.tokens.toFixed(2)}⚡\n\n` +
+                                `Reason: ${data.reason}\n` +
+                                `Code: ${data.reasonCode}\n\n` +
+                                `Order: ${orderReference}`,
                                 { parse_mode: 'HTML' }
                             );
                         }
 
-                        // Оновлюємо статус транзакції в БД
                         await Transaction.updateOne(
                             { 'metadata.orderId': orderReference },
                             {
@@ -262,23 +238,21 @@ module.exports = function(bot) {
                     console.error('Error processing refund:', err.message);
                 }
             } else if (transactionStatus === 'Pending') {
-                // ⏳ Платіж очікує на 3DS верифікацію або банківське підтвердження
                 console.log(`⏳ Processing PENDING payment: ${orderReference}`);
                 console.log(`   Reason: ${data.reason} (code: ${data.reasonCode})`);
                 console.log(`   (Waiting for bank verification or next webhook update)`);
 
-                // Повідомляємо користувача що платіж очікує на підтвердження
                 try {
                     await bot.telegram.sendMessage(
                         userId,
-                        `⏳ <b>Очікування підтвердження</b>\n\n` +
-                        `💳 Метод: WayForPay\n` +
-                        `💎 Тариф: ${sub.name}\n` +
-                        `💰 Сума: ${amount} UAH\n\n` +
-                        `Ваш платіж очікує на підтвердження від банку.\n` +
-                        `Це може зайняти кілька хвилин (до 3DS верифікації).\n\n` +
-                        `⚡ Токени будуть нараховані автоматично після успішної верифікації.\n\n` +
-                        `Замовлення: ${orderReference}`,
+                        `⏳ <b>Awaiting confirmation</b>\n\n` +
+                        `💳 Method: WayForPay\n` +
+                        `💎 Plan: ${sub.name}\n` +
+                        `💰 Amount: ${amount} UAH\n\n` +
+                        `Your payment is awaiting bank confirmation.\n` +
+                        `This can take a few minutes, including 3DS verification.\n\n` +
+                        `⚡ Tokens will be credited automatically after successful verification.\n\n` +
+                        `Order: ${orderReference}`,
                         { parse_mode: 'HTML' }
                     );
                     console.log(`📨 Pending verification message sent to user ${userId}`);
@@ -286,38 +260,32 @@ module.exports = function(bot) {
                     console.error('Error sending pending message:', err.message);
                 }
             } else if (transactionStatus === 'Expired') {
-                // ⏳ Платіж закінчився (user не завершив операцію)
                 console.log(`⏳ [Expired] Order: ${orderReference}`);
 
-                // Перевіряємо чи транзакція взагалі існує (значить токени вже нараховані)
                 try {
                     const Transaction = require('../database/models/Transaction');
                     const existingTransaction = await Transaction.findOne({
                         'metadata.orderId': orderReference,
                         type: 'wayforpay_purchase'
-                        // ✅ Без status - цього поля немає в схемі
                     });
 
                     if (existingTransaction) {
-                        // Транзакція існує = токени вже нараховані = платіж був успішним
                         console.log(`ℹ️ [Expired] Ignoring - payment already completed: ${orderReference}`);
-                        // Не надсилаємо повідомлення, ігноруємо цей webhook
                         return;
                     }
 
-                    // Транзакції немає - платіж НЕ був успішним - надсилаємо повідомлення
                     console.log(`⚠️ [Expired] Payment was NOT completed, notifying user: ${orderReference}`);
 
                     try {
                         await bot.telegram.sendMessage(
                             userId,
-                            `⏳ <b>Сесія платежу закінчена</b>\n\n` +
-                            `💳 Метод: WayForPay\n` +
-                            `💎 Тариф: ${sub.name}\n` +
-                            `💰 Сума: ${amount} UAH\n\n` +
-                            `Ви не встигли завершити платіж вчасу.\n` +
-                            `Спробуйте знову, коли будете готові.\n\n` +
-                            `Замовлення: ${orderReference}`,
+                            `⏳ <b>Payment session expired</b>\n\n` +
+                            `💳 Method: WayForPay\n` +
+                            `💎 Plan: ${sub.name}\n` +
+                            `💰 Amount: ${amount} UAH\n\n` +
+                            `The payment session expired before completion.\n` +
+                            `Please try again when you are ready.\n\n` +
+                            `Order: ${orderReference}`,
                             { parse_mode: 'HTML' }
                         );
                         console.log(`📨 Expired message sent to user ${userId}`);
@@ -334,7 +302,6 @@ module.exports = function(bot) {
                 }
             }
 
-            // Відповідаємо WayForPay (обов'язково!)
             const time = Math.floor(Date.now() / 1000);
             const responseSignature = wayforpay.createResponseSignature(orderReference, 'accept', time);
 

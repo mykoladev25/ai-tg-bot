@@ -1,88 +1,84 @@
 const { Markup } = require('telegraf');
+const { t } = require('./i18n');
 
-/**
- * Головне меню бота
- */
-function createMainMenu() {
+function getAppUrl() {
+  return (process.env.APP_URL || 'http://127.0.0.1:5500').replace(/\/$/, '');
+}
+
+function getPublicUrl(envKey, fallbackPath) {
+  const configured = process.env[envKey];
+  if (configured) {
+    return configured;
+  }
+
+  return `${getAppUrl()}${fallbackPath}`;
+}
+
+function createMainMenu(localeSource = 'en') {
   return Markup.keyboard([
-    ['💰 Поповнити баланс', '🎨 Креативи'],
-    ['🎬 Відео', '🖼️ Зображення'],
-    ['👤 Профіль', '🧠 Помічники'],
-    ['⚙️ Налаштування', '❓ Допомога']
+    [t(localeSource, 'menu.topUpBalance'), t(localeSource, 'menu.creatives')],
+    [t(localeSource, 'menu.video'), t(localeSource, 'menu.images')],
+    [t(localeSource, 'menu.profile'), t(localeSource, 'menu.assistants')],
+    [t(localeSource, 'menu.settings'), t(localeSource, 'menu.help')]
   ]).resize();
 }
 
-/**
- * Inline меню (кнопки під повідомленням)
- */
 function createInlineMenu(buttons, columns = 1) {
-  const availableButtons = buttons.filter(btn => btn.available !== false);
+  const availableButtons = buttons.filter((button) => button.available !== false);
+  const keyboardRows = [];
 
-  const keyboard = [];
-
-  for (let i = 0; i < availableButtons.length; i += columns) {
-    const row = availableButtons.slice(i, i + columns).map(btn => {
+  for (let index = 0; index < availableButtons.length; index += columns) {
+    const row = availableButtons.slice(index, index + columns).map((button) => {
       let text;
 
-      // Для Veo показуємо діапазон цін
-      if (btn.key === 'veo' && btn.costPerSecondAudio && btn.costPerSecondNoAudio) {
-        const minCost = 4 * btn.costPerSecondNoAudio;  // 4 сек без аудіо
-        const maxCost = 8 * btn.costPerSecondAudio;    // 8 сек з аудіо
-        text = `${btn.name} (${minCost}—${maxCost}⚡)`;
-      }
-      // Для Kling 3.0 показуємо діапазон (3–15 сек, з/без аудіо)
-      else if (btn.key === 'kling_3' && btn.durations && (btn.costPerSecondNoAudio || btn.costPerSecondAudio)) {
-        const durs = btn.durations;
-        const minCost = Math.min(...durs) * (btn.costPerSecondNoAudio || 23);
-        const maxCost = Math.max(...durs) * (btn.costPerSecondAudio || 45);
-        text = `${btn.name} (${minCost}—${maxCost}⚡)`;
-      }
-      // Для Kling (v2.5, v2.6): v2.6 має costPerSecond (без аудіо) та costPerSecondAudio
-      else if (btn.key !== 'kling_motion' && btn.key.startsWith('kling') && (btn.costPerSecond != null || btn.costPerSecondAudio != null) && btn.durations) {
-        const rateNo = btn.costPerSecond ?? btn.costPerSecondNoAudio ?? 12;
-        const rateAud = btn.costPerSecondAudio ?? btn.costPerSecond ?? 12;
-        const minCost = Math.min(...btn.durations) * rateNo;
-        const maxCost = Math.max(...btn.durations) * rateAud;
-        text = `${btn.name} (${minCost}—${maxCost}⚡)`;
-      }
-      // Для Kling Motion показуємо діапазон цін
-      else if (btn.key === 'kling_motion' && btn.costs) {
-        const minCost = btn.cost || Math.min(...Object.values(btn.costs));
-        const maxCost = btn.maxCost || Math.max(...Object.values(btn.costs));
-        text = `${btn.name} (${minCost}—${maxCost}⚡)`;
-      }
-      // Для моделей з діапазоном вартості (наприклад, Nano Banana PRO 2K/4K)
-      else if (btn.maxCost && btn.cost > 0 && btn.maxCost > btn.cost) {
-        text = `${btn.name} (${btn.cost}—${btn.maxCost}⚡)`;
-      }
-      else if (btn.cost > 0) {
-        text = `${btn.name} (${btn.cost}⚡)`;
+      if (button.key === 'veo' && button.costPerSecondAudio && button.costPerSecondNoAudio) {
+        const minCost = 4 * button.costPerSecondNoAudio;
+        const maxCost = 8 * button.costPerSecondAudio;
+        text = `${button.name} (${minCost}—${maxCost}⚡)`;
+      } else if (button.key === 'kling_3' && button.durations && (button.costPerSecondNoAudio || button.costPerSecondAudio)) {
+        const minCost = Math.min(...button.durations) * (button.costPerSecondNoAudio || 23);
+        const maxCost = Math.max(...button.durations) * (button.costPerSecondAudio || 45);
+        text = `${button.name} (${minCost}—${maxCost}⚡)`;
+      } else if (
+        button.key !== 'kling_motion'
+        && button.key.startsWith('kling')
+        && (button.costPerSecond != null || button.costPerSecondAudio != null)
+        && button.durations
+      ) {
+        const rateWithoutAudio = button.costPerSecond ?? button.costPerSecondNoAudio ?? 12;
+        const rateWithAudio = button.costPerSecondAudio ?? button.costPerSecond ?? 12;
+        const minCost = Math.min(...button.durations) * rateWithoutAudio;
+        const maxCost = Math.max(...button.durations) * rateWithAudio;
+        text = `${button.name} (${minCost}—${maxCost}⚡)`;
+      } else if (button.key === 'kling_motion' && button.costs) {
+        const minCost = button.cost || Math.min(...Object.values(button.costs));
+        const maxCost = button.maxCost || Math.max(...Object.values(button.costs));
+        text = `${button.name} (${minCost}—${maxCost}⚡)`;
+      } else if (button.maxCost && button.cost > 0 && button.maxCost > button.cost) {
+        text = `${button.name} (${button.cost}—${button.maxCost}⚡)`;
+      } else if (button.cost > 0) {
+        text = `${button.name} (${button.cost}⚡)`;
       } else {
-        text = btn.name;
+        text = button.name;
       }
 
-      return Markup.button.callback(text, btn.key);
+      return Markup.button.callback(text, button.key);
     });
-    keyboard.push(row);
+
+    keyboardRows.push(row);
   }
 
-  return Markup.inlineKeyboard(keyboard);
+  return Markup.inlineKeyboard(keyboardRows);
 }
 
-/**
- * Кнопка "Назад до головного меню"
- */
-function createBackButton(callback = 'main_menu', text = '🏠 Головне меню') {
+function createBackButton(callback = 'main_menu', text = '🏠 Main menu') {
   return Markup.inlineKeyboard([
     [Markup.button.callback(text, callback)]
   ]);
 }
 
-/**
- * Меню GPT з діями
- */
 function createGPTActionsMenu(actions) {
-  const buttons = actions.map(action => {
+  const buttons = actions.map((action) => {
     const costText = action.cost > 0 ? ` (${action.cost}⚡)` : '';
     return [{ text: `${action.name}${costText}`, callback_data: `gpt_${action.key}` }];
   });
@@ -90,43 +86,17 @@ function createGPTActionsMenu(actions) {
   return { reply_markup: { inline_keyboard: buttons } };
 }
 
-/**
- * Меню покупки токенів
- */
-function createSubscriptionMenu() {
+function createSubscriptionMenu(localeSource = 'en') {
   return Markup.inlineKeyboard([
-    [Markup.button.callback('💰 Купити токени', 'buy_subscription')],
-    [Markup.button.callback('👥 Спільнота', 'community')],
-    [Markup.button.callback('🏠 Головне меню', 'main_menu')]
+    [Markup.button.callback(t(localeSource, 'common.buyTokens'), 'buy_subscription')],
+    [Markup.button.callback(t(localeSource, 'common.community'), 'community')],
+    [Markup.button.callback(t(localeSource, 'common.home'), 'main_menu')]
   ]);
 }
 
-/**
- * Меню оплати
- */
-function createPaymentMenu(price, plan = 'basic', userId = null, telegramId = null) {
-  const appUrl = process.env.APP_URL || 'http://127.0.0.1:5500';
-  const isProduction = process.env.NODE_ENV === 'production';
+function createPaymentMenu(price, plan = 'basic', userId = null, telegramId = null, localeSource = 'en') {
+  const appUrl = getAppUrl();
 
-  // Build URL with both userId and telegramId
-  let stripeUrl = `${appUrl}/pay/stripe?plan=${plan}`;
-  if (userId) {
-    stripeUrl += `&userId=${userId}`;
-  }
-  if (telegramId) {
-    stripeUrl += `&tg_id=${telegramId}`;
-  }
-
-  // LiqPay URL
-  let liqpayUrl = `${appUrl}/pay/liqpay?plan=${plan}`;
-  if (userId) {
-    liqpayUrl += `&userId=${userId}`;
-  }
-  if (telegramId) {
-    liqpayUrl += `&tg_id=${telegramId}`;
-  }
-
-  // WayForPay URL
   let wayforpayUrl = `${appUrl}/pay/wayforpay?plan=${plan}`;
   if (userId) {
     wayforpayUrl += `&userId=${userId}`;
@@ -136,21 +106,13 @@ function createPaymentMenu(price, plan = 'basic', userId = null, telegramId = nu
   }
 
   return Markup.inlineKeyboard([
-    [Markup.button.callback(`💫 Telegram Stars (${price}⭐)`, `pay_stars_${plan}`)],
-    [Markup.button.url(`💳 WayForPay (Карта/Apple/Google)`, wayforpayUrl)],
-    // Use webApp only in production (HTTPS), use regular URL for development
-    // [isProduction
-    //   ? Markup.button.webApp(`💳 Stripe (Card/Apple/Google)`, stripeUrl)
-    //   : Markup.button.url(`💳 Stripe (Card/Apple/Google)`, stripeUrl)
-    // ],
-    [Markup.button.callback('🔙 Назад', 'buy_subscription')],
-    [Markup.button.callback('🏠 Головне меню', 'main_menu')]
+    [Markup.button.callback(t(localeSource, 'payment.telegramStars', { price }), `pay_stars_${plan}`)],
+    [Markup.button.url(t(localeSource, 'payment.wayforpay'), wayforpayUrl)],
+    [Markup.button.callback(`🔙 ${t(localeSource, 'common.back')}`, 'buy_subscription')],
+    [Markup.button.callback(t(localeSource, 'common.home'), 'main_menu')]
   ]);
 }
 
-/**
- * Меню після генерації (для Midjourney з варіаціями)
- */
 function createGenerationActionsMenu(taskId) {
   return Markup.inlineKeyboard([
     [
@@ -167,41 +129,30 @@ function createGenerationActionsMenu(taskId) {
     ],
     [
       Markup.button.callback('🔄 Regenerate', `regen_${taskId}`),
-      Markup.button.callback('🏠 Меню', 'main_menu')
+      Markup.button.callback('🏠 Menu', 'main_menu')
     ]
   ]);
 }
 
-/**
- * Меню підтвердження
- */
-function createConfirmationMenu(action) {
+function createConfirmationMenu(action, localeSource = 'en') {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback('✅ Так', `confirm_${action}`),
-      Markup.button.callback('❌ Ні', 'cancel')
+      Markup.button.callback(t(localeSource, 'common.yes'), `confirm_${action}`),
+      Markup.button.callback(t(localeSource, 'common.no'), 'cancel')
     ]
   ]);
 }
 
-/**
- * Створити меню підписок динамічно
- */
-function createSubscriptionsMenu(userId = null) {
+function createSubscriptionsMenu(userId = null, localeSource = 'en') {
   const models = require('../config/models');
-  const subscriptions = models.subscriptions;
-  
   const accessControl = require('../config/access');
+  const subscriptions = models.subscriptions;
   const isAdmin = userId && accessControl.isAdmin(userId);
-
-  const paidPlans = ['starter', 'basic', 'pro', 'premium'];
   const emojis = { starter: '🚀', basic: '💎', pro: '🔥', premium: '👑', starter_test: '🧪' };
-
-  // По 2 кнопки в ряд
   const buttons = [];
 
   if (isAdmin && subscriptions.starter_test?.adminOnly) {
-    buttons.push([Markup.button.callback(`${emojis.starter_test} TEST 10⭐`, 'sub_starter_test')]);
+    buttons.push([Markup.button.callback(t(localeSource, 'subscription.starterTest'), 'sub_starter_test')]);
   }
 
   buttons.push(
@@ -213,51 +164,45 @@ function createSubscriptionsMenu(userId = null) {
       Markup.button.callback(`${emojis.pro} PRO`, 'sub_pro'),
       Markup.button.callback(`${emojis.premium} PREMIUM`, 'sub_premium')
     ],
-    [Markup.button.callback('← Назад', 'main_menu')]
+    [Markup.button.callback(t(localeSource, 'common.back'), 'main_menu')]
   );
 
   return Markup.inlineKeyboard(buttons);
 }
 
-/**
- * Меню з юридичною інформацією (Угода користувача, Політика приватності, Інформація про компанію)
- */
-function createLegalMenu() {
-  const termsUrl = process.env.TERMS_OF_SERVICE_URL || 'https://neurolab.fun/bot/terms';
-  const privacyUrl = process.env.PRIVACY_POLICY_URL || 'https://neurolab.fun/bot/privacy';
-  const infoUrl = process.env.COMPANY_INFO_URL || 'https://neurolab.fun/bot/info';
+function createLegalMenu(localeSource = 'en') {
+  const termsUrl = getPublicUrl('TERMS_OF_SERVICE_URL', '/bot/terms');
+  const privacyUrl = getPublicUrl('PRIVACY_POLICY_URL', '/bot/privacy');
+  const infoUrl = getPublicUrl('COMPANY_INFO_URL', '/bot/info');
 
   return Markup.inlineKeyboard([
-    [Markup.button.url('📋 Угода користувача', termsUrl)],
-    [Markup.button.url('🔒 Політика приватності', privacyUrl)],
-    [Markup.button.url('ℹ️ Інформація про компанію', infoUrl)],
-    [Markup.button.callback('🏠 Головне меню', 'main_menu')]
+    [Markup.button.url(t(localeSource, 'legal.terms'), termsUrl)],
+    [Markup.button.url(t(localeSource, 'legal.privacy'), privacyUrl)],
+    [Markup.button.url(t(localeSource, 'legal.company'), infoUrl)],
+    [Markup.button.callback(t(localeSource, 'common.home'), 'main_menu')]
   ]);
 }
 
-/**
- * Кнопки для профілю з доступом до юридичної інформації
- */
-function createProfileMenu() {
+function createProfileMenu(localeSource = 'en') {
   return Markup.inlineKeyboard([
-    [Markup.button.callback('💰 Купити токени', 'buy_subscription')],
-    [Markup.button.callback('⚙️ Вибір провайдера', 'provider_menu')],
-    [Markup.button.callback('👥 Спільнота', 'community')],
-    [Markup.button.callback('📋 Юридична інформація', 'legal_info')],
-    [Markup.button.callback('🏠 Головне меню', 'main_menu')]
+    [Markup.button.callback(t(localeSource, 'profile.buyTokens'), 'buy_subscription')],
+    [Markup.button.callback(t(localeSource, 'profile.providerChoice'), 'provider_menu')],
+    [Markup.button.callback(t(localeSource, 'profile.community'), 'community')],
+    [Markup.button.callback(t(localeSource, 'profile.legalInfo'), 'legal_info')],
+    [Markup.button.callback(t(localeSource, 'common.home'), 'main_menu')]
   ]);
 }
 
 module.exports = {
-  createMainMenu,
-  createInlineMenu,
   createBackButton,
-  createGPTActionsMenu,
-  createSubscriptionMenu,
-  createPaymentMenu,
-  createGenerationActionsMenu,
   createConfirmationMenu,
-  createSubscriptionsMenu,
+  createGPTActionsMenu,
+  createGenerationActionsMenu,
+  createInlineMenu,
   createLegalMenu,
-  createProfileMenu
+  createMainMenu,
+  createPaymentMenu,
+  createProfileMenu,
+  createSubscriptionMenu,
+  createSubscriptionsMenu
 };

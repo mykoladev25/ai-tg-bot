@@ -2,20 +2,17 @@ const mongoose = require('mongoose');
 const { TRIAL_TOKENS } = require('../../config/constants');
 
 const userSchema = new mongoose.Schema({
-  // Telegram user info
-  _id: { type: Number, required: true },  // Використовуємо Telegram ID як _id
+  _id: { type: Number, required: true },
   username: { type: String, index: true },
   firstName: String,
   lastName: String,
-  languageCode: { type: String, default: 'uk' },
-  
-  // Баланс токенів
-  tokens: { type: Number, default: TRIAL_TOKENS, required: true },  // Початковий баланс
+  languageCode: { type: String, default: 'en' },
+
+  tokens: { type: Number, default: TRIAL_TOKENS, required: true },
   totalTokensPurchased: { type: Number, default: 0 },
   totalTokensSpent: { type: Number, default: 0 },
-  totalTokensEarned: { type: Number, default: TRIAL_TOKENS },  // Включає початковий бонус
-  
-  // Trial usage tracking (для обмеження дорогих генерацій)
+  totalTokensEarned: { type: Number, default: TRIAL_TOKENS },
+
   trialUsage: {
     nano_banana_4k: { type: Number, default: 0 },
     kling: { type: Number, default: 0 },
@@ -25,7 +22,6 @@ const userSchema = new mongoose.Schema({
     kling_motion: { type: Number, default: 0 }
   },
 
-  // Free generation usage (безкоштовні генерації для всіх користувачів)
   freeUsage: {
     nano_banana_free: { type: Number, default: 0 }
   },
@@ -36,8 +32,7 @@ const userSchema = new mongoose.Schema({
     expiresAt: Date,
     isActive: Boolean
   },
-  
-  // Статистика використання
+
   stats: {
     totalGenerations: { type: Number, default: 0 },
     textRequests: { type: Number, default: 0 },
@@ -46,67 +41,56 @@ const userSchema = new mongoose.Schema({
     audioRequests: { type: Number, default: 0 },
     visionRequests: { type: Number, default: 0 }
   },
-  
-  // Поточна сесія
-  currentModel: String,  // Яка модель зараз обрана
-  
-  // Історія розмов Claude (останні 20)
+
+  currentModel: String,
+
   conversationHistory: [{
     role: { type: String, enum: ['user', 'assistant'] },
     content: String,
     timestamp: { type: Date, default: Date.now }
   }],
-  
-  // Статус
+
   isBanned: { type: Boolean, default: false },
   isAdmin: { type: Boolean, default: false },
   banReason: String,
   bannedAt: Date,
-  
+
   referralCode: { type: String },
   referredBy: { type: Number, ref: 'User' },
   referralEarnings: { type: Number, default: 0 },
-  
-  // Timestamps
+
   createdAt: { type: Date, default: Date.now },
   lastActivityAt: { type: Date, default: Date.now }
 }, {
-  _id: false,  // Вимикаємо автоматичний _id, бо використовуємо свій
-  timestamps: false  // Вимикаємо автоматичні timestamps
+  _id: false,
+  timestamps: false
 });
 
-// Індекси для швидкого пошуку
 userSchema.index({ lastActivityAt: -1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
 
-
-// Метод для оновлення останньої активності
-userSchema.methods.updateActivity = function() {
+userSchema.methods.updateActivity = function updateActivity() {
   this.lastActivityAt = new Date();
   return this.save();
 };
 
-// Метод для додавання повідомлення в історію розмови
-userSchema.methods.addToConversation = function(role, content) {
+userSchema.methods.addToConversation = function addToConversation(role, content) {
   this.conversationHistory.push({ role, content, timestamp: new Date() });
-  
-  // Обмежуємо історію до 20 останніх повідомлень
+
   if (this.conversationHistory.length > 20) {
     this.conversationHistory = this.conversationHistory.slice(-20);
   }
-  
+
   return this.save();
 };
 
-// Метод для очищення історії розмови
-userSchema.methods.clearConversation = function() {
+userSchema.methods.clearConversation = function clearConversation() {
   this.conversationHistory = [];
   return this.save();
 };
 
-// Static метод для отримання статистики
-userSchema.statics.getGlobalStats = async function() {
+userSchema.statics.getGlobalStats = async function getGlobalStats() {
   const totalUsers = await this.countDocuments();
   const activeUsers24h = await this.countDocuments({
     lastActivityAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
@@ -114,7 +98,7 @@ userSchema.statics.getGlobalStats = async function() {
   const activeUsers7d = await this.countDocuments({
     lastActivityAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
   });
-  
+
   const aggregateStats = await this.aggregate([
     {
       $group: {
@@ -126,7 +110,7 @@ userSchema.statics.getGlobalStats = async function() {
       }
     }
   ]);
-  
+
   return {
     totalUsers,
     activeUsers24h,
@@ -135,6 +119,4 @@ userSchema.statics.getGlobalStats = async function() {
   };
 };
 
-const User = mongoose.model('User', userSchema);
-
-module.exports = User;
+module.exports = mongoose.model('User', userSchema);

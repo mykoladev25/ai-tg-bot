@@ -1,8 +1,9 @@
 const axios = require('axios');
 
 const KIE_API_BASE = 'https://api.kie.ai';
-const KIE_API_KEY = process.env.KIE_AI_API_KEY;  // ✅ Виправлено: було KIE_API_KEY, має бути KIE_AI_API_KEY
-const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://neurolab.fun/webhook/kie-ai';
+const KIE_API_KEY = process.env.KIE_AI_API_KEY;
+const WEBHOOK_URL = process.env.WEBHOOK_URL
+  || (process.env.APP_URL ? `${process.env.APP_URL.replace(/\/$/, '')}/webhook/kie-ai` : null);
 
 /**
  * =====================================================
@@ -21,26 +22,12 @@ const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://neurolab.fun/webhook/kie
  * - Text-to-image (turbo): 16 credits = $0.08
  * - Image-to-image (same pricing as text-to-image)
  * - Image-to-video: 60 credits = $0.30
- * - Upscale: безкоштовно
- * - Vary: безкоштовно
+ * - Upscale: included
+ * - Vary: included
  */
 
 /**
- * Генерація зображення через Midjourney
- * @param {Object} options - Параметри генерації
- * @param {string} options.prompt - Текстовий опис
- * @param {string} options.taskType - Тип задачі (mj_txt2img, mj_img2img, mj_video, mj_style_reference, mj_omni_reference)
- * @param {string} [options.speed='fast'] - Швидкість (relaxed, fast, turbo)
- * @param {string} [options.fileUrl] - URL зображення (для img2img, video)
- * @param {string[]} [options.fileUrls] - Масив URL зображень (рекомендовано)
- * @param {string} [options.aspectRatio='1:1'] - Пропорції
- * @param {string} [options.version='7'] - Версія моделі
- * @param {number} [options.variety=10] - Різноманітність (0-100)
- * @param {number} [options.stylization=1] - Стилізація (0-1000)
- * @param {number} [options.weirdness=1] - Дивність (0-3000)
- * @param {number} [options.ow=500] - Omni intensity (для mj_omni_reference)
- * @param {string} [options.waterMark] - Водяний знак
- * @returns {Promise<Object>} Результат генерації з taskId
+ * Generate media with Midjourney through KIE.AI.
  */
 async function generateImage(options) {
   try {
@@ -77,22 +64,22 @@ async function generateImage(options) {
       stylization,
       weirdness,
       waterMark,
-      callBackUrl: WEBHOOK_URL
     };
 
-    // Додаємо файли якщо є
+    if (WEBHOOK_URL) {
+      payload.callBackUrl = WEBHOOK_URL;
+    }
+
     if (fileUrls && fileUrls.length > 0) {
       payload.fileUrls = fileUrls;
     } else if (fileUrl) {
       payload.fileUrl = fileUrl;
     }
 
-    // Додаємо ow для omni reference
     if (taskType === 'mj_omni_reference') {
       payload.ow = ow;
     }
 
-    // Не передаємо speed для video та omni reference
     if (taskType === 'mj_video' || taskType === 'mj_omni_reference') {
       delete payload.speed;
     }
@@ -131,9 +118,9 @@ async function generateImage(options) {
 }
 
 /**
- * Отримати статус задачі Midjourney
- * @param {string} taskId - ID задачі
- * @returns {Promise<Object>} Статус та результати
+ * Get Midjourney task status
+ * @param {string} taskId - Task ID
+ * @returns {Promise<Object>} Status and results
  */
 async function getTaskStatus(taskId) {
   try {
@@ -178,11 +165,11 @@ async function getTaskStatus(taskId) {
 }
 
 /**
- * Upscale зображення (безкоштовно)
- * @param {string} taskId - ID оригінальної задачі
- * @param {number} imageIndex - Індекс зображення (1-4)
- * @param {string} [waterMark] - Водяний знак
- * @returns {Promise<Object>} Результат з новим taskId
+ * Upscale image (free)
+ * @param {string} taskId - Original task ID
+ * @param {number} imageIndex - Image index (1-4)
+ * @param {string} [waterMark] - Watermark
+ * @returns {Promise<Object>} Result with new taskId
  */
 async function upscaleImage(taskId, imageIndex, waterMark = '') {
   try {
@@ -192,7 +179,7 @@ async function upscaleImage(taskId, imageIndex, waterMark = '') {
       `${KIE_API_BASE}/api/v1/mj/generateUpscale`,
       {
         taskId,
-        imageIndex: imageIndex - 1,  // API використовує 0-based index
+        imageIndex: imageIndex - 1,  // API uses a 0-based index
         waterMark,
         callBackUrl: WEBHOOK_URL
       },
@@ -225,11 +212,11 @@ async function upscaleImage(taskId, imageIndex, waterMark = '') {
 }
 
 /**
- * Створити варіації зображення (безкоштовно)
- * @param {string} taskId - ID оригінальної задачі
- * @param {number} imageIndex - Індекс зображення (1-4)
- * @param {string} [waterMark] - Водяний знак
- * @returns {Promise<Object>} Результат з новим taskId
+ * Create image variations (free)
+ * @param {string} taskId - Original task ID
+ * @param {number} imageIndex - Image index (1-4)
+ * @param {string} [waterMark] - Watermark
+ * @returns {Promise<Object>} Result with new taskId
  */
 async function variateImage(taskId, imageIndex, waterMark = '') {
   try {
@@ -239,7 +226,7 @@ async function variateImage(taskId, imageIndex, waterMark = '') {
       `${KIE_API_BASE}/api/v1/mj/generateVary`,
       {
         taskId,
-        imageIndex,  // API використовує 1-based index для vary
+        imageIndex,  // API uses a 1-based index for vary
         waterMark,
         callBackUrl: WEBHOOK_URL
       },
@@ -272,11 +259,11 @@ async function variateImage(taskId, imageIndex, waterMark = '') {
 }
 
 /**
- * Чекати завершення задачі (polling)
- * @param {string} taskId - ID задачі
- * @param {number} [maxAttempts=60] - Максимальна кількість спроб
- * @param {number} [interval=5000] - Інтервал між спробами (мс)
- * @returns {Promise<Object>} Результат задачі
+ * Wait for task completion (polling)
+ * @param {string} taskId - Task ID
+ * @param {number} [maxAttempts=60] - Maximum attempts
+ * @param {number} [interval=5000] - Interval between attempts (ms)
+ * @returns {Promise<Object>} Task result
  */
 async function waitForCompletion(taskId, maxAttempts = 60, interval = 5000) {
   console.log('⏳ Waiting for Midjourney task completion:', taskId);

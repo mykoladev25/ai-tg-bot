@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard</title>
+  <style>
+    :root {
+      --bg: #09101d;
+      --panel: rgba(17, 27, 46, 0.84);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --text: #edf2ff;
+      --muted: #98a8c9;
+      --accent: #4fd1c5;
+      --danger: #ff6b6b;
+      --warning: #ffb454;
+      --success: #59e390;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      padding: 28px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(79, 209, 197, 0.16), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(127, 156, 245, 0.16), transparent 32%),
+        linear-gradient(180deg, #08101d 0%, #0f1727 100%);
+      font: 15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .shell {
+      max-width: 1240px;
+      margin: 0 auto;
+    }
+
+    .header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      font-size: 32px;
+      line-height: 1.1;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(7, 12, 22, 0.54);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+    }
+
+    button.primary {
+      border: none;
+      color: #08101d;
+      font-weight: 700;
+      background: linear-gradient(135deg, #4fd1c5 0%, #7f9cf5 100%);
+    }
+
+    .periods {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .period.active {
+      border-color: rgba(79, 209, 197, 0.55);
+      color: #08101d;
+      background: var(--accent);
+    }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+      margin-bottom: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .panel {
+      padding: 18px;
+      border-radius: 18px;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(14px);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+    }
+
+    .label {
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .value {
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .two-column {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      margin-bottom: 20px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+    }
+
+    th, td {
+      padding: 12px 8px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .status.ok {
+      color: #06110a;
+      background: var(--success);
+    }
+
+    .status.warn {
+      color: #1d1300;
+      background: var(--warning);
+    }
+
+    .status.bad {
+      color: #210808;
+      background: var(--danger);
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 24px 0 8px;
+    }
+
+    .footer-note {
+      margin-top: 24px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 720px) {
+      body {
+        padding: 18px;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="header">
+      <div>
+        <h1>Bot operations dashboard</h1>
+        <div class="subtitle">Runtime metrics, revenue, provider pricing, and active generation visibility.</div>
+      </div>
+      <div class="actions">
+        <button id="refresh" class="primary">Refresh</button>
+        <button id="logout">Logout</button>
+      </div>
+    </header>
+
+    <div class="periods">
+      <button class="period active" data-days="1">24h</button>
+      <button class="period" data-days="7">7d</button>
+      <button class="period" data-days="30">30d</button>
+      <button class="period" data-days="90">90d</button>
+    </div>
+
+    <section class="grid" id="summary-grid">
+      <article class="panel">
+        <div class="label">Revenue</div>
+        <div class="value" id="revenue-value">...</div>
+        <div class="meta" id="revenue-meta"></div>
+      </article>
+      <article class="panel">
+        <div class="label">Estimated COGS</div>
+        <div class="value" id="cogs-value">...</div>
+        <div class="meta" id="cogs-meta"></div>
+      </article>
+      <article class="panel">
+        <div class="label">Gross Margin</div>
+        <div class="value" id="margin-value">...</div>
+        <div class="meta" id="margin-meta"></div>
+      </article>
+      <article class="panel">
+        <div class="label">Trial Burn</div>
+        <div class="value" id="trial-value">...</div>
+        <div class="meta" id="trial-meta"></div>
+      </article>
+    </section>
+
+    <section class="two-column">
+      <article class="panel">
+        <div class="label">Overview</div>
+        <table>
+          <tbody id="overview-body"></tbody>
+        </table>
+      </article>
+      <article class="panel">
+        <div class="label">Active Generations</div>
+        <div id="active-meta" class="meta"></div>
+        <table>
+          <thead>
+            <tr>
+              <th>Request</th>
+              <th>Model</th>
+              <th>User</th>
+              <th>Running</th>
+            </tr>
+          </thead>
+          <tbody id="active-body"></tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="two-column">
+      <article class="panel">
+        <div class="label">Top Models by COGS</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Generations</th>
+              <th>COGS</th>
+              <th>Share</th>
+            </tr>
+          </thead>
+          <tbody id="models-body"></tbody>
+        </table>
+      </article>
+      <article class="panel">
+        <div class="label">Top Users by Spend</div>
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Tokens</th>
+              <th>Generations</th>
+              <th>Spend</th>
+            </tr>
+          </thead>
+          <tbody id="users-body"></tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="label">Provider Pricing Audit</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Tokens</th>
+            <th>API Cost</th>
+            <th>Status</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody id="pricing-body"></tbody>
+      </table>
+      <div class="footer-note" id="pricing-note"></div>
+    </section>
+  </div>
+
+  <script>
+    let currentDays = 1;
+
+    const formatUsd = (value) => `$${(Number(value) || 0).toFixed(2)}`;
+    const formatPct = (value) => `${(Number(value) || 0).toFixed(1)}%`;
+    const emptyRow = (message, colspan) => `<tr><td colspan="${colspan}" class="empty">${message}</td></tr>`;
+
+    async function fetchJson(url) {
+      const response = await fetch(url, { credentials: 'same-origin' });
+      if (response.status === 401) {
+        window.location.href = '/admin/login';
+        return null;
+      }
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      return response.json();
+    }
+
+    function dateRange() {
+      const to = new Date();
+      const from = new Date(to.getTime() - currentDays * 24 * 60 * 60 * 1000);
+      return { from: from.toISOString(), to: to.toISOString() };
+    }
+
+    function updateSummary(summary) {
+      document.getElementById('revenue-value').textContent = formatUsd(summary.revenue.usd);
+      document.getElementById('revenue-meta').textContent = `${summary.revenue.purchases} purchase(s), ${summary.revenue.paidUsers} paid user(s)`;
+
+      document.getElementById('cogs-value').textContent = formatUsd(summary.cogs.estimated);
+      document.getElementById('cogs-meta').textContent = `${summary.cogs.generations} generation(s), success rate ${summary.cogs.successRate}%`;
+
+      document.getElementById('margin-value').textContent = `${summary.gross.marginPercent}%`;
+      document.getElementById('margin-meta').textContent = `Estimated gross ${formatUsd(summary.gross.estimated)}`;
+
+      document.getElementById('trial-value').textContent = formatUsd(summary.trial.burnUSD);
+      document.getElementById('trial-meta').textContent = `${summary.trial.users} trial user(s), ${summary.trial.generations} generation(s)`;
+    }
+
+    function updateOverview(summary, purchases) {
+      const rows = [
+        ['Success rate', `${summary.cogs.successRate}%`],
+        ['Average revenue per purchase', summary.revenue.purchases ? formatUsd(summary.revenue.usd / summary.revenue.purchases) : '$0.00'],
+        ['Trial users', summary.trial.users],
+        ['Trial generations', summary.trial.generations],
+        ['Starter purchases', purchases.starter || 0],
+        ['Basic purchases', purchases.basic || 0],
+        ['Pro purchases', purchases.pro || 0],
+        ['Premium purchases', purchases.premium || 0]
+      ];
+
+      document.getElementById('overview-body').innerHTML = rows
+        .map(([label, value]) => `<tr><td>${label}</td><td>${value}</td></tr>`)
+        .join('');
+    }
+
+    function updateActiveGenerations(data) {
+      document.getElementById('active-meta').textContent = data.message;
+      const body = document.getElementById('active-body');
+      if (!data.generations.length) {
+        body.innerHTML = emptyRow('No active generations', 4);
+        return;
+      }
+
+      body.innerHTML = data.generations.map((generation) => `
+        <tr>
+          <td>${generation.requestId}</td>
+          <td>${generation.model}</td>
+          <td>${generation.userId}</td>
+          <td>${generation.runningTime}s</td>
+        </tr>
+      `).join('');
+    }
+
+    function updateTopModels(models) {
+      const body = document.getElementById('models-body');
+      if (!models.length) {
+        body.innerHTML = emptyRow('No model usage for this period', 4);
+        return;
+      }
+
+      const totalCogs = models.reduce((sum, model) => sum + model.cogs, 0);
+      body.innerHTML = models.map((model) => `
+        <tr>
+          <td>${model.modelKey}</td>
+          <td>${model.count}</td>
+          <td>${formatUsd(model.cogs)}</td>
+          <td>${formatPct(totalCogs ? (model.cogs / totalCogs) * 100 : 0)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function updateTopUsers(users) {
+      const body = document.getElementById('users-body');
+      if (!users.length) {
+        body.innerHTML = emptyRow('No user spend for this period', 4);
+        return;
+      }
+
+      body.innerHTML = users.map((user) => `
+        <tr>
+          <td>${user.username || `User ${user.userId}`}</td>
+          <td>${user.totalTokens}</td>
+          <td>${user.generations}</td>
+          <td>${formatUsd(user.cogs)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function updatePricing(data) {
+      const body = document.getElementById('pricing-body');
+      const compare = data.compare || {};
+      const rows = Object.entries(compare);
+
+      if (!rows.length) {
+        body.innerHTML = emptyRow('No pricing data available', 5);
+        document.getElementById('pricing-note').textContent = '';
+        return;
+      }
+
+      body.innerHTML = rows.map(([modelKey, item]) => {
+        const badge = item.matches
+          ? '<span class="status ok">OK</span>'
+          : '<span class="status bad">Mismatch</span>';
+        return `
+          <tr>
+            <td>${modelKey}</td>
+            <td>${item.currentTokens || '—'}⚡</td>
+            <td>${item.currentApiCost != null ? `$${item.currentApiCost}` : '—'}</td>
+            <td>${badge}</td>
+            <td>${item.source || 'config'}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const discrepancyCount = (data.discrepancies || []).length;
+      document.getElementById('pricing-note').textContent = discrepancyCount
+        ? `${discrepancyCount} pricing discrepancy(s) detected. Review config/models.js before release.`
+        : 'No pricing discrepancies detected.';
+    }
+
+    async function loadDashboard() {
+      const range = dateRange();
+      const [summary, purchases, topModels, topUsers, active, pricing] = await Promise.all([
+        fetchJson(`/admin/metrics/summary?from=${range.from}&to=${range.to}`),
+        fetchJson(`/admin/metrics/purchases?from=${range.from}&to=${range.to}`),
+        fetchJson(`/admin/metrics/top-models?from=${range.from}&to=${range.to}&limit=10`),
+        fetchJson(`/admin/metrics/top-users?from=${range.from}&to=${range.to}&limit=10`),
+        fetchJson('/admin/generations/active'),
+        fetchJson('/admin/pricing/check')
+      ]);
+
+      if (!summary || !purchases || !topModels || !topUsers || !active || !pricing) {
+        return;
+      }
+
+      updateSummary(summary.data);
+      updateOverview(summary.data, purchases.data);
+      updateTopModels(topModels.data);
+      updateTopUsers(topUsers.data);
+      updateActiveGenerations(active.data);
+      updatePricing(pricing.data);
+    }
+
+    document.querySelectorAll('.period').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.period').forEach((item) => item.classList.remove('active'));
+        button.classList.add('active');
+        currentDays = Number(button.dataset.days);
+        loadDashboard().catch(console.error);
+      });
+    });
+
+    document.getElementById('refresh').addEventListener('click', () => {
+      loadDashboard().catch(console.error);
+    });
+
+    document.getElementById('logout').addEventListener('click', async () => {
+      await fetch('/admin/logout', {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
+      window.location.href = '/admin/login';
+    });
+
+    loadDashboard().catch(console.error);
+    setInterval(() => loadDashboard().catch(console.error), 5 * 60 * 1000);
+  </script>
+</body>
+</html>

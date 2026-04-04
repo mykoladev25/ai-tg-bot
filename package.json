@@ -1,11 +1,12 @@
 {
-  "name": "syntx-ai-bot",
+  "name": "neuro-lab-ai-bot",
   "version": "1.0.0",
-  "description": "Telegram bot with AI integrations (Claude, Midjourney, Flux, Runway)",
+  "description": "Open-source Telegram bot for AI text, image, video, and payment workflows",
   "main": "index.js",
   "scripts": {
-    "start": "NODE_ENV=production node index.js",
-    "dev": "NODE_ENV=development node index.js"
+    "start": "node index.js",
+    "dev": "NODE_ENV=development nodemon index.js",
+    "check": "node scripts/check-syntax.js"
   },
   "keywords": [
     "telegram",
@@ -16,6 +17,9 @@
   ],
   "author": "",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "@google/genai": "^1.42.0",

@@ -1,27 +1,12 @@
-/**
- * Довідник моделей KIE.AI
- * Базується на офіційній документації https://docs.kie.ai/ та https://kie.ai/pricing
- *
- * ⚠️ ВАЖЛИВО: Ціни в KIE.AI відрізняються від Replicate!
- * KIE.AI використовує систему "credits" де 1 credit = $0.005 USD
- *
- * Дані отримані з офіційного API: https://api.kie.ai/client/v1/model-pricing/page
- * Останнє оновлення: 13.02.2026
- *
- * Вартість у токенах за KIE-генерації визначається тут: usdToTokens(), getKling3TokenCostPerSecond().
- * kie-pricing-sync лише підставляє актуальні USD з кешу і викликає ці функції.
- */
 
-const KIE_CREDIT_USD = 0.005; // 1 кредит = $0.005
 
-/** Як у config/models.js: 1 токен = $0.01, націнка ~30% */
+const KIE_CREDIT_USD = 0.005; 
+
+
 const TOKEN_USD = 0.01;
 const PRICING_MULTIPLIER = 1.65;
 
-/**
- * Перевести ціну KIE (USD) у вартість у токенах для юзера.
- * Використовується для всіх KIE-генерацій (Kling 3.0, тощо).
- */
+
 function usdToTokens(usd) {
   if (usd == null || Number.isNaN(usd)) return 0;
   const n = typeof usd === 'string' ? parseFloat(usd) : usd;
@@ -36,28 +21,13 @@ module.exports = {
 
   // ==================== IMAGE MODELS ====================
 
-  /**
-   * Google Nano Banana (Base)
-   * https://docs.kie.ai/market/google/nano-banana
-   *
-   * KIE.AI Pricing (з pricing cache 13.02.2026):
-   * - 4.0 credits per image = $0.02
-   * - Підтримує text-to-image та image editing (до 3 референсів)
-   * - Image sizes: 1:1, 9:16, 16:9, 3:4, 4:3, 3:2, 2:3, 5:4, 4:5, 21:9, auto
-   *
-   * Replicate Pricing (для порівняння):
-   * - $0.039/image (fal.ai)
-   *
-   * З нашою націнкою 1.65x:
-   * - API cost: $0.02
-   * - User cost: $0.02 × 1.65 = $0.033 → 4 tokens (округлено вгору)
-   */
+  
   nano_banana: {
     kie_model: 'google/nano-banana',
     kie_pricing: {
       credits: 4.0,
       usd: 0.02,  // 4.0 × $0.005
-      note: 'Отримано з офіційного pricing API KIE.AI (13.02.2026)'
+      note: 'Fetched from the official KIE.AI pricing API (2026-02-13)'
     },
     replicate_model: 'google/nano-banana',
     replicate_pricing: {
@@ -68,22 +38,10 @@ module.exports = {
       image_sizes: ['1:1', '9:16', '16:9', '3:4', '4:3', '3:2', '2:3', '5:4', '4:5', '21:9', 'auto'],
       output_formats: ['png', 'jpeg']
     },
-    notes: '💡 Базова версія Nano Banana. Для вищої якості використовуйте nano_banana_2k або nano_banana_4k'
+    notes: '💡 Base Nano Banana model. Use nano_banana_2k or nano_banana_4k for higher quality.'
   },
 
-  /**
-   * Google Nano Banana Pro
-   * https://docs.kie.ai/market/google/nano-banana-pro
-   *
-   * KIE.AI Pricing:
-   * - Перевіряйте актуальні ціни на https://kie.ai/pricing
-   * - Ціни можуть змінюватись
-   *
-   * Replicate Pricing (для порівняння):
-   * - 1K: $0.15/image
-   * - 2K: $0.15/image
-   * - 4K: $0.30/image
-   */
+  
   nano_banana_pro: {
     kie_model: 'nano-banana-pro',
     replicate_model: 'google/nano-banana-pro',
@@ -97,36 +55,16 @@ module.exports = {
       aspect_ratios: ['match_input_image', '1:1', '4:5', '9:16'],
       resolutions: ['1K', '2K', '4K']
     },
-    notes: 'KIE.AI ціни можуть бути вигіднішими - перевіряйте на kie.ai/pricing'
+    notes: 'KIE.AI pricing may be lower. Check kie.ai/pricing.'
   },
 
-  /**
-   * ByteDance Seedream 4.5
-   * https://docs.kie.ai/market/bytedance/seedream-4.5
-   * https://kie.ai/seedream-4-5
-   *
-   * KIE.AI Pricing (офіційно від KIE support, 19.02.2026):
-   * - 6.5 credits per image
-   * - Ваш тариф: $5 = 1,000 credits → 1 credit = $0.005
-   * - API cost: 6.5 × $0.005 = $0.0325
-   * - ⚠️ Немає API для автоматичного отримання ціни
-   *
-   * Replicate Pricing (для порівняння):
-   * - API cost: $0.04
-   * - User cost: 7 tokens (multiplier 1.75x)
-   *
-   * Наша ціна (з тим же multiplier 1.75x):
-   * - API cost: $0.0325
-   * - User cost: $0.0325 × 1.75 = $0.0569 → 6 tokens
-   *
-   * 💰 Економія: $0.0075 API cost (-18.75%), 1 token user cost (-14%)
-   */
+  
   seedream: {
     kie_model: 'seedream-4.5',
     kie_pricing: {
       credits: 6.5,
       usd: 0.0325,  // 6.5 × $0.005
-      note: 'Підтверджено KIE support 19.02.2026. Немає API для отримання ціни.'
+      note: 'Confirmed by KIE support on 2026-02-19. There is no pricing API endpoint for this model.'
     },
     replicate_model: 'bytedance/seedream-4.5',
     replicate_pricing: {
@@ -139,22 +77,7 @@ module.exports = {
     }
   },
 
-  /**
-   * ByteDance Seedream 5.0 Lite
-   * https://docs.kie.ai/market/bytedance/seedream-5-lite
-   *
-   * KIE.AI Pricing:
-   * - 5.5 credits per image = $0.0275
-   * - text-to-image: seedream/5-lite-text-to-image
-   * - image-to-image: seedream/5-lite-image-to-image
-   * - Basic = 2K, High = 3K
-   *
-   * З нашою націнкою 1.65x:
-   * - API cost: $0.0275
-   * - User cost: $0.0275 × 1.65 = $0.045375 → 5 tokens
-   *
-   * 💰 High-tier top-ups на KIE можуть знижувати effective cost до ≈ $0.025/image
-   */
+  
   seedream_5_lite: {
     kie_model_text_to_image: 'seedream/5-lite-text-to-image',
     kie_model_image_to_image: 'seedream/5-lite-image-to-image',
@@ -162,7 +85,7 @@ module.exports = {
       per_image: {
         credits: 5.5,
         usd: 0.0275,
-        note: 'Офіційна KIE.AI ціна: 5.5 credits per image'
+        note: 'Official KIE.AI price: 5.5 credits per image'
       },
       discounted_effective_usd: 0.025
     },
@@ -180,7 +103,7 @@ module.exports = {
       max_prompt_length_text_to_image: 2995,
       max_prompt_length_image_to_image: 2996
     },
-    notes: 'KIE.AI only. Приблизно на 21% дешевше за official/Fal.ai rates.'
+    notes: 'KIE.AI only. Approximately 21% cheaper than official/Fal.ai rates.'
   },
 
   /**
@@ -200,68 +123,25 @@ module.exports = {
     }
   },
 
-  /**
-   * Qwen Z-Image
-   * https://docs.kie.ai/market/qwen/z-image
-   *
-   * ⚠️ Доступно ТІЛЬКИ на KIE.AI!
-   *
-   * KIE.AI Pricing (з pricing cache):
-   * - 0.8 credits per image = $0.004
-   * - text-to-image
-   * - Aspect ratios: 1:1, 4:3, 3:4, 16:9, 9:16
-   *
-   * З націнкою 1.65x:
-   * - API cost: $0.004
-   * - User cost: $0.004 × 1.65 = $0.0066 → 1 token (округлено вгору)
-   */
+  
   z_image: {
     kie_model: 'z-image',
     kie_pricing: {
       credits: 0.8,
       usd: 0.004,
-      note: 'Qwen Z-Image. Отримано з pricing API KIE.AI.'
+      note: 'Qwen Z-Image. Retrieved from the KIE.AI pricing API.'
     },
-    replicate_model: null,  // Немає на Replicate
+    replicate_model: null,  
     replicate_pricing: null,
     features: {
       max_images: 1,
       aspect_ratios: ['1:1', '4:3', '3:4', '16:9', '9:16'],
       max_prompt_length: 1000
     },
-    notes: '⚠️ Доступно ТІЛЬКИ на KIE.AI! Найдешевша модель зображень.'
+    notes: '⚠️ Available only on KIE.AI. This is the cheapest image model.'
   },
 
-  /**
-   * Midjourney
-   * https://docs.kie.ai/mj-api/generate-midjourney-image
-   * https://kie.ai/model-preview/features/mj-api
-   *
-   * ⚠️ Доступно ТІЛЬКИ на KIE.AI!
-   *
-   * KIE.AI Pricing (з офіційного pricing cache):
-   * Text-to-Image:
-   * - relaxed: 3 credits = $0.015
-   * - fast: 8 credits = $0.04
-   * - turbo: 16 credits = $0.08
-   *
-   * Image-to-Image:
-   * - relaxed: 3 credits = $0.015
-   * - fast: 8 credits = $0.04
-   * - turbo: 16 credits = $0.08
-   *
-   * Image-to-Video:
-   * - 60 credits = $0.30
-   *
-   * Upscale & Vary:
-   * - Безкоштовно (використовується з вже згенерованих зображень)
-   *
-   * З націнкою 1.65x (як в інших моделях):
-   * - relaxed: $0.015 × 1.65 = $0.025 → 3 tokens
-   * - fast: $0.04 × 1.65 = $0.066 → 7 tokens
-   * - turbo: $0.08 × 1.65 = $0.132 → 14 tokens
-   * - video: $0.30 × 1.65 = $0.495 → 50 tokens
-   */
+  
   midjourney: {
     kie_model: 'midjourney',
     kie_pricing: {
@@ -272,10 +152,10 @@ module.exports = {
       image_to_image_fast: { credits: 8, usd: 0.04 },
       image_to_image_turbo: { credits: 16, usd: 0.08 },
       image_to_video: { credits: 60, usd: 0.30 },
-      upscale: { credits: 0, usd: 0 },  // Безкоштовно
-      vary: { credits: 0, usd: 0 }      // Безкоштовно
+      upscale: { credits: 0, usd: 0 },  
+      vary: { credits: 0, usd: 0 }      
     },
-    replicate_model: null,  // Немає на Replicate
+    replicate_model: null,  
     replicate_pricing: null,
     features: {
       speeds: ['relaxed', 'fast', 'turbo'],
@@ -289,7 +169,7 @@ module.exports = {
       supports_vary: true,
       max_prompt_length: 2000
     },
-    notes: '⚠️ Доступно ТІЛЬКИ на KIE.AI! Немає на Replicate.'
+    notes: '⚠️ Available only on KIE.AI. Not available on Replicate.'
   },
 
   // ==================== VIDEO MODELS ====================
@@ -313,22 +193,7 @@ module.exports = {
     }
   },
 
-  /**
-   * Kling v2.6
-   * https://docs.kie.ai/market/kling/v2.6
-   *
-   * KIE.AI Pricing (з офіційного API):
-   * - 5s без аудіо: 55 credits = $0.275
-   * - 5s з аудіо: 110 credits = $0.55
-   * - 10s без аудіо: 110 credits = $0.55
-   * - 10s з аудіо: 220 credits = $1.10
-   *
-   * Replicate Pricing (для порівняння):
-   * - Video only: $0.07/second
-   * - With audio: $0.14/second
-   *
-   * ⚠️ KIE.AI дешевше на 21.43% порівняно з Fal.ai!
-   */
+  
   kling_v2_6: {
     kie_model: 'kling-2.6',
     kie_pricing: {
@@ -346,21 +211,10 @@ module.exports = {
       aspect_ratios: ['16:9', '9:16'],
       supports_audio: true
     },
-    notes: 'KIE.AI: 21.43% дешевше ніж Fal.ai'
+    notes: 'KIE.AI: 21.43% cheaper than Fal.ai'
   },
 
-  /**
-   * Kling 3.0 (НОВА МОДЕЛЬ!)
-   * https://kie.ai/kling-3-0
-   *
-   * KIE.AI Pricing (з офіційного API):
-   * - 720p без аудіо: 20 credits/sec = $0.10/sec
-   * - 720p з аудіо: 30 credits/sec = $0.15/sec
-   * - 1080p без аудіо: 27 credits/sec = $0.135/sec
-   * - 1080p з аудіо: 40 credits/sec = $0.20/sec
-   *
-   * ⚠️ Discount: 40.48% дешевше ніж Fal.ai!
-   */
+  
   kling_3_0: {
     kie_model: 'kling-3.0',
     kie_pricing: {
@@ -373,26 +227,17 @@ module.exports = {
       resolutions: ['720p', '1080p'],
       supports_audio: true
     },
-    notes: 'НОВА МОДЕЛЬ! 40.48% дешевше ніж Fal.ai'
+    notes: 'NEW MODEL. 40.48% cheaper than Fal.ai'
   },
 
-  /**
-   * Kling Motion Control
-   * https://docs.kie.ai/market/kling/motion-control
-   *
-   * Replicate Pricing (фіксовані ціни):
-   * - STD (720p) + Image orientation (до 10s): $0.50
-   * - STD (720p) + Video orientation (до 30s): $1.00
-   * - PRO (1080p) + Image orientation (до 10s): $1.00
-   * - PRO (1080p) + Video orientation (до 30s): $2.00
-   */
+  
   kling_motion: {
     kie_model: 'kling-2.6/motion-control',
     replicate_pricing: {
-      std_image: 0.50,    // 720p, до 10s
-      std_video: 1.00,    // 720p, до 30s
-      pro_image: 1.00,    // 1080p, до 10s
-      pro_video: 2.00     // 1080p, до 30s
+      std_image: 0.50,    
+      std_video: 1.00,    
+      pro_image: 1.00,    
+      pro_video: 2.00     
     },
     features: {
       modes: ['720p', '1080p'],  // STD=720p, PRO=1080p
@@ -430,17 +275,7 @@ module.exports = {
     }
   },
 
-  /**
-   * OpenAI Sora 2 (доступна на KIE.AI!)
-   * https://kie.ai/sora-2
-   *
-   * KIE.AI Pricing (з офіційного API):
-   * - Text-to-video 15s stable: 40 credits = $0.20
-   * - Image-to-video 10s stable: 35 credits = $0.175
-   * - Image-to-video 15s stable: 40 credits = $0.20
-   *
-   * ⚠️ Discount: 80-82.5% дешевше ніж Fal.ai ($1.00 на Fal vs $0.20 на KIE)!
-   */
+  
   sora_2: {
     kie_model_text_to_video: 'sora-2-text-to-video',
     kie_model_image_to_video: 'sora-2-image-to-video',
@@ -450,19 +285,19 @@ module.exports = {
       'image_to_video_15s': { credits: 40, usd: 0.20, fal_price: 1.00, discount: '80%' }
     },
     replicate_pricing: {
-      per_second: 0.10,  // Standard quality на Replicate
+      per_second: 0.10,  
       '4s': 0.40,
       '8s': 0.80,
       '12s': 1.20
     },
     features: {
-      durations: [10, 15],  // KIE.AI: 10s або 15s
+      durations: [10, 15],  
       replicate_durations: [4, 8, 12],  // Replicate: 4, 8, 12s
       modes: ['text-to-video', 'image-to-video'],
-      qualities: ['stable'],  // Тільки stable на KIE.AI (без Pro)
+      qualities: ['stable'],  
       aspect_ratios: ['portrait', 'landscape']
     },
-    notes: '🔥 ВЕЛИЧЕЗНА ЗНИЖКА! 80%+ дешевше ніж Fal.ai! Це звичайна Sora 2, не Pro версія.'
+    notes: '🔥 Major discount. More than 80% cheaper than Fal.ai. This is the standard Sora 2 model, not the Pro version.'
   },
 
   /**
@@ -545,9 +380,7 @@ module.exports = {
 
   // ==================== HELPER FUNCTIONS ====================
 
-  /**
-   * Отримати назву моделі для KIE.AI API
-   */
+  
   getKieAIModelName(modelKey) {
     const mapping = {
       'nano_banana_2k': 'nano-banana-pro',
@@ -569,11 +402,7 @@ module.exports = {
     return mapping[modelKey] || modelKey;
   },
 
-  /**
-   * Отримати ціну моделі з Replicate (для розрахунків)
-   * ⚠️ ВАЖЛИВО: KIE.AI ціни можуть відрізнятись!
-   * Ці ціни використовуються тільки для розрахунку токенів у нашій системі
-   */
+  
   getReplicatePrice(modelKey, options = {}) {
     const {
       resolution = '2K',
@@ -591,11 +420,11 @@ module.exports = {
         return 0.30;
       case 'seedream_2k':
       case 'seedream_4k':
-        return 0.0325;  // KIE.AI: 6.5 credits × $0.005 = $0.0325 (18.75% дешевше ніж Replicate $0.04)
+        return 0.0325;  
       case 'seedream_5_lite':
         return 0.0275;  // KIE.AI only: 5.5 credits × $0.005 = $0.0275
       case 'ideogram':
-        return 0.0175;  // KIE.AI TURBO: 3.5 credits × $0.005 = $0.0175 (42% дешевше ніж Replicate $0.03)
+        return 0.0175;  
       case 'stable_diffusion':
         return 0.07;
       case 'kling':
@@ -621,9 +450,7 @@ module.exports = {
     }
   },
 
-  /**
-   * Отримати ціну з KIE.AI (реальна ціна провайдера в USD)
-   */
+  
   getKieAIPrice(modelKey, options = {}) {
     const { duration = 5, audio = false, resolution = '1080p' } = options;
 
@@ -659,13 +486,7 @@ module.exports = {
     }
   },
 
-  /**
-   * Вартість Kling 3.0 у токенах за секунду (для списання з балансу).
-   * Джерело USD: з кешу (usdFromCache) якщо передано, інакше з this.kling_3_0.kie_pricing.
-   * @param {string} mode - 'pro' (1080p) або 'std' (720p)
-   * @param {Object} usdFromCache - опційно { costPerSecondAudio, costPerSecondNoAudio } з kie-pricing-cache (оновлення щорану)
-   * @returns {{ costPerSecondAudio: number, costPerSecondNoAudio: number }}
-   */
+  
   getKling3TokenCostPerSecond(mode = 'pro', usdFromCache = null) {
     const resolution = mode === 'pro' ? '1080p' : '720p';
     let usdAudio, usdNoAudio;
@@ -680,7 +501,6 @@ module.exports = {
       usdNoAudio = staticNoAudio;
     }
 
-    // Fallback ціни залежать від режиму
     const fallbackAudio = mode === 'pro' ? 0.20 : 0.15;      // 1080p: $0.20, 720p: $0.15
     const fallbackNoAudio = mode === 'pro' ? 0.135 : 0.10;   // 1080p: $0.135, 720p: $0.10
 
@@ -690,9 +510,7 @@ module.exports = {
     };
   },
 
-  /**
-   * Перевірити чи модель підтримується KIE.AI
-   */
+  
   isKieAISupported(modelKey) {
     const supported = [
       'nano_banana_2k', 'nano_banana_4k',
@@ -706,31 +524,29 @@ module.exports = {
     return supported.includes(modelKey);
   },
 
-  /**
-   * Інформація про систему ціноутворення
-   */
+  
   pricingInfo: {
     kie_ai: {
       credit_usd: KIE_CREDIT_USD,
-      note: '1 credit = $0.005 USD на KIE.AI',
+      note: '1 credit = $0.005 USD on KIE.AI',
       url: 'https://kie.ai/pricing',
       api_endpoint: 'https://api.kie.ai/client/v1/model-pricing/page',
       advantages: [
-        '✅ Kling 2.6: 21.43% дешевше ніж Fal.ai',
-        '✅ Kling 3.0: 40.48% дешевше ніж Fal.ai',
-        '✅ Sora 2: 80%+ дешевше ніж Fal.ai',
-        '✅ Seedance 2 / Fast: доступні напряму на KIE.AI',
-        '✅ Seedream 5.0 Lite: ~21% дешевше за official/Fal.ai',
-        '✅ Стабільні ціни без сюрпризів'
+        '✅ Kling 2.6: 21.43% cheaper than Fal.ai',
+        '✅ Kling 3.0: 40.48% cheaper than Fal.ai',
+        '✅ Sora 2: 80%+ cheaper than Fal.ai',
+        '✅ Seedance 2 / Fast: available directly on KIE.AI',
+        '✅ Seedream 5.0 Lite: about 21% cheaper than official/Fal.ai',
+        '✅ Stable pricing without surprises'
       ]
     },
     replicate: {
-      note: 'Ціни Replicate використовуються для розрахунку токенів у боті',
+      note: 'Replicate pricing is used to calculate bot token costs',
       our_multiplier: 1.65,
       our_token_usd: 0.01,
       formula: 'tokens = ceil(replicatePrice * 1.65 / 0.01)'
     },
-    important: '⚠️ KIE.AI часто дешевше за Replicate! Рекомендуємо використовувати KIE.AI'
+    important: '⚠️ KIE.AI is often cheaper than Replicate. KIE.AI is recommended when available.'
   }
 };
 

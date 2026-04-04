@@ -2,67 +2,49 @@ const mongoose = require('mongoose');
 
 const transactionSchema = new mongoose.Schema({
   userId: { type: Number, ref: 'User', required: true, index: true },
-  
-  // Тип транзакції
-  type: { 
-    type: String, 
+  type: {
+    type: String,
     enum: ['deduction', 'addition', 'purchase', 'refund', 'bonus'],
-    required: true 
+    required: true
   },
-  
   category: {
     type: String,
     enum: ['generation', 'subscription', 'bonus', 'admin', 'referral', 'initial'],
     required: true
   },
-  
-  // Сума
   amount: { type: Number, required: true },
   balanceBefore: { type: Number, required: true },
   balanceAfter: { type: Number, required: true },
-  
-  // Деталі
   description: String,
-  
-  // Інформація про модель (якщо це генерація)
   model: {
-    key: String,          // claude_text, midjourney, runway
-    name: String,         // "Claude Sonnet", "Runway Gen-4"
-    cost: Number,         // Вартість для користувача
-    apiCost: Number       // Реальна вартість API
+    key: String,
+    name: String,
+    cost: Number,
+    apiCost: Number
   },
-  
-  // Для Stripe платежів
   sessionId: { type: String, unique: true, sparse: true, index: true },
-
-  // Додаткові дані
   metadata: {
     type: Map,
     of: mongoose.Schema.Types.Mixed,
     default: {}
   },
-  
-  // Timestamp
   createdAt: { type: Date, default: Date.now, index: true }
 }, {
   timestamps: false
 });
 
-// Складені індекси для швидких запитів
 transactionSchema.index({ userId: 1, createdAt: -1 });
 transactionSchema.index({ type: 1, createdAt: -1 });
 transactionSchema.index({ category: 1 });
 
-// Static метод для отримання історії користувача
-transactionSchema.statics.getUserHistory = async function(userId, limit = 10) {
+transactionSchema.statics.getUserHistory = async function getUserHistory(userId, limit = 10) {
   return this.find({ userId })
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
 };
 
-// Static метод для агрегації по днях
-transactionSchema.statics.getDailyStats = async function(startDate, endDate) {
+transactionSchema.statics.getDailyStats = async function getDailyStats(startDate, endDate) {
   return this.aggregate([
     {
       $match: {
@@ -94,8 +76,7 @@ transactionSchema.statics.getDailyStats = async function(startDate, endDate) {
   ]);
 };
 
-// Static метод для топ моделей
-transactionSchema.statics.getTopModels = async function(limit = 10) {
+transactionSchema.statics.getTopModels = async function getTopModels(limit = 10) {
   return this.aggregate([
     {
       $match: {
@@ -128,6 +109,4 @@ transactionSchema.statics.getTopModels = async function(limit = 10) {
   ]);
 };
 
-const Transaction = mongoose.model('Transaction', transactionSchema);
-
-module.exports = Transaction;
+module.exports = mongoose.model('Transaction', transactionSchema);

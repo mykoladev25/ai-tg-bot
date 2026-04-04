@@ -1,9 +1,5 @@
-/**
- * Admin API Routes - protected metrics endpoints
- * Protected via ADMIN_TOKEN header or query param
- */
-
 const express = require('express');
+const path = require('path');
 const router = express.Router();
 const aggregations = require('../monitoring/aggregations');
 const DailySummary = require('../database/models/DailySummary');
@@ -13,24 +9,93 @@ const replicatePricing = require('../services/replicatePricing');
 const gracefulShutdown = require('../utils/gracefulShutdown');
 const { TRIAL_TOKENS } = require('../config/constants');
 
-// Auth middleware
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || process.env.ADMIN_TELEGRAM_ID;
+const ADMIN_COOKIE_NAME = 'admin_session';
+const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+function parseCookies(req) {
+  const header = req.headers.cookie || '';
+  return header
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((cookies, entry) => {
+      const [key, ...valueParts] = entry.split('=');
+      cookies[key] = decodeURIComponent(valueParts.join('='));
+      return cookies;
+    }, {});
+}
+
+function createSessionValue() {
+  return Buffer.from(JSON.stringify({ token: ADMIN_TOKEN, expiresAt: Date.now() + ADMIN_SESSION_TTL_MS })).toString('base64url');
+}
+
+function isValidSession(sessionValue) {
+  if (!sessionValue) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(sessionValue, 'base64url').toString('utf8'));
+    return parsed.token === ADMIN_TOKEN && Number(parsed.expiresAt) > Date.now();
+  } catch (error) {
+    return false;
+  }
+}
+
+router.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'admin-login.html'));
+});
+
+router.post('/login', express.json(), (req, res) => {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ success: false, error: 'ADMIN_TOKEN is not configured' });
+  }
+
+  const token = req.body?.token;
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ success: false, error: 'Invalid admin token' });
+  }
+
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.setHeader(
+    'Set-Cookie',
+    `${ADMIN_COOKIE_NAME}=${createSessionValue()}; HttpOnly; Path=/admin; SameSite=Strict; Max-Age=${ADMIN_SESSION_TTL_MS / 1000}${secure}`
+  );
+
+  return res.json({ success: true });
+});
+
+router.post('/logout', (req, res) => {
+  res.setHeader('Set-Cookie', `${ADMIN_COOKIE_NAME}=; HttpOnly; Path=/admin; SameSite=Strict; Max-Age=0`);
+  res.json({ success: true });
+});
 
 function adminAuth(req, res, next) {
-  const token = req.headers['x-admin-token'] || req.query.token;
+  const headerToken = req.headers['x-admin-token'];
+  const cookieToken = parseCookies(req)[ADMIN_COOKIE_NAME];
 
   if (!ADMIN_TOKEN) {
     return res.status(500).json({ error: 'ADMIN_TOKEN not configured' });
   }
 
-  if (token !== ADMIN_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorized' });
+  if (headerToken === ADMIN_TOKEN || isValidSession(cookieToken)) {
+    return next();
   }
 
-  next();
+  if (req.accepts('html')) {
+    return res.redirect('/admin/login');
+  }
+
+  if (req.path === '/dashboard') {
+    return res.redirect('/admin/login');
+  }
+
+  if (headerToken !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
 }
 
-// Apply auth to all routes
 router.use(adminAuth);
 
 /**
@@ -275,7 +340,7 @@ router.post('/metrics/compute-daily', async (req, res) => {
 
 /**
  * GET /admin/pricing/check
- * Перевірка актуальності цін Replicate
+ * Compare configured pricing against the provider pricing snapshot.
  */
 router.get('/pricing/check', (req, res) => {
   try {
@@ -291,8 +356,8 @@ router.get('/pricing/check', (req, res) => {
         suggestedUpdates,
         officialPrices,
         message: discrepancies.length === 0
-          ? '✅ Всі ціни актуальні!'
-          : `⚠️ Знайдено ${discrepancies.length} розбіжностей. Оновіть apiCost в models.js`
+          ? 'All configured prices match the current pricing snapshot.'
+          : `${discrepancies.length} pricing discrepancy(s) detected. Review apiCost values in config/models.js.`
       }
     });
   } catch (error) {
@@ -303,7 +368,7 @@ router.get('/pricing/check', (req, res) => {
 
 /**
  * GET /admin/generations/active
- * Перегляд активних генерацій (для моніторингу перед рестартом)
+ * Inspect active generations before a restart or deployment.
  */
 router.get('/generations/active', (req, res) => {
   try {
@@ -318,8 +383,8 @@ router.get('/generations/active', (req, res) => {
         isShuttingDown,
         generations,
         message: activeCount === 0
-          ? '✅ Немає активних генерацій. Можна робити restart.'
-          : `⚠️ ${activeCount} активних генерацій. Зачекайте або вони будуть перервані.`
+          ? 'No active generations. A restart is safe.'
+          : `${activeCount} generation(s) are still running. Wait for completion or expect interruption.`
       }
     });
   } catch (error) {
@@ -330,1006 +395,10 @@ router.get('/generations/active', (req, res) => {
 
 /**
  * GET /admin/dashboard
- * Serve admin dashboard HTML
+ * Serve the admin dashboard application.
  */
 router.get('/dashboard', (req, res) => {
-  // Token passed in query for dashboard access
-  const token = req.query.token;
-
-  res.send(`
-<!DOCTYPE html>
-<html lang="uk">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>neuro.lab.ai - Адмін панель</title>
-  <style>
-    :root {
-      --bg: #0f0f0f;
-      --card: #1a1a1a;
-      --border: #333;
-      --text: #e0e0e0;
-      --text-muted: #888;
-      --accent: #00d4ff;
-      --success: #00c853;
-      --warning: #ffab00;
-      --danger: #ff5252;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      padding: 20px;
-      min-height: 100vh;
-    }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--border);
-    }
-    .header h1 { font-size: 24px; color: var(--accent); }
-    .period-select {
-      display: flex;
-      gap: 8px;
-    }
-    .period-btn {
-      padding: 8px 16px;
-      background: var(--card);
-      border: 1px solid var(--border);
-      color: var(--text);
-      border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .period-btn:hover, .period-btn.active {
-      background: var(--accent);
-      color: var(--bg);
-      border-color: var(--accent);
-    }
-    .danger-btn {
-      padding: 10px 16px;
-      background: var(--danger);
-      border: 1px solid var(--danger);
-      color: #fff;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .danger-btn:hover {
-      filter: brightness(0.95);
-    }
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px;
-    }
-    .card-title {
-      font-size: 12px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 4px;
-    }
-    .card-hint {
-      font-size: 10px;
-      color: var(--text-muted);
-      margin-bottom: 8px;
-      font-style: italic;
-    }
-    .card-value {
-      font-size: 28px;
-      font-weight: 700;
-    }
-    .card-value.success { color: var(--success); }
-    .card-value.warning { color: var(--warning); }
-    .card-value.danger { color: var(--danger); }
-    .card-subtitle {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 4px;
-    }
-    .section {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 24px;
-    }
-    .section-title {
-      font-size: 18px;
-      margin-bottom: 8px;
-      color: var(--accent);
-    }
-    .section-hint {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-bottom: 16px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    th, td {
-      padding: 12px;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-    }
-    th {
-      font-size: 12px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      font-weight: 500;
-    }
-    td { font-size: 14px; }
-    details {
-      color: var(--text-muted);
-    }
-    details summary {
-      cursor: pointer;
-      color: var(--text);
-      font-size: 12px;
-      list-style: none;
-    }
-    details summary::-webkit-details-marker {
-      display: none;
-    }
-    .detail-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 6px 12px;
-      margin-top: 8px;
-      font-size: 12px;
-    }
-    .detail-item span {
-      color: var(--text);
-    }
-    .loading {
-      text-align: center;
-      padding: 40px;
-      color: var(--text-muted);
-    }
-    .error {
-      background: rgba(255, 82, 82, 0.1);
-      border: 1px solid var(--danger);
-      color: var(--danger);
-      padding: 16px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-    }
-    .badge {
-      display: inline-block;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-    .badge-success { background: rgba(0, 200, 83, 0.2); color: var(--success); }
-    .badge-warning { background: rgba(255, 171, 0, 0.2); color: var(--warning); }
-    .badge-danger { background: rgba(255, 82, 82, 0.2); color: var(--danger); }
-    .legend {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 24px;
-    }
-    .legend h3 {
-      font-size: 14px;
-      color: var(--accent);
-      margin-bottom: 12px;
-    }
-    .legend-item {
-      display: flex;
-      margin-bottom: 8px;
-      font-size: 12px;
-    }
-    .legend-term {
-      font-weight: bold;
-      min-width: 120px;
-      color: var(--text);
-    }
-    .legend-desc {
-      color: var(--text-muted);
-    }
-    /* Tabs */
-    .tabs {
-      display: flex;
-      gap: 4px;
-      margin-bottom: 24px;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 0;
-    }
-    .tab-btn {
-      padding: 12px 20px;
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      font-size: 14px;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      transition: all 0.2s;
-    }
-    .tab-btn:hover {
-      color: var(--text);
-    }
-    .tab-btn.active {
-      color: var(--accent);
-      border-bottom-color: var(--accent);
-    }
-    .tab-content {
-      display: none;
-    }
-    .tab-content.active {
-      display: block;
-    }
-    .price-status {
-      padding: 16px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-    }
-    .price-status.ok {
-      background: rgba(0, 200, 83, 0.1);
-      border: 1px solid var(--success);
-      color: var(--success);
-    }
-    .price-status.warning {
-      background: rgba(255, 171, 0, 0.1);
-      border: 1px solid var(--warning);
-      color: var(--warning);
-    }
-    .price-link {
-      color: var(--accent);
-      text-decoration: none;
-    }
-    .price-link:hover {
-      text-decoration: underline;
-    }
-    @media (max-width: 768px) {
-      .cards { grid-template-columns: 1fr 1fr; }
-      .header { flex-direction: column; gap: 16px; }
-      .tabs { overflow-x: auto; }
-    }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <h1>📊 Адмін панель neuro.lab.ai</h1>
-    <div class="period-select">
-      <button class="period-btn" data-days="1">Сьогодні</button>
-      <button class="period-btn" data-days="7">7 днів</button>
-      <button class="period-btn active" data-days="30">30 днів</button>
-      <button class="period-btn" data-days="90">90 днів</button>
-    </div>
-  </div>
-
-  <!-- Tabs -->
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="replicate">📊 Replicate</button>
-    <button class="tab-btn" data-tab="kie">🔥 KIE.AI</button>
-    <button class="tab-btn" data-tab="pricing">💰 Ціни</button>
-  </div>
-
-  <div id="error" class="error" style="display:none;"></div>
-
-  <!-- Tab: Replicate -->
-  <div id="tab-replicate" class="tab-content active">
-    <div class="legend">
-      <h3>📖 Словник термінів</h3>
-      <div class="legend-item">
-        <span class="legend-term">💰 Дохід</span>
-        <span class="legend-desc">— скільки грошей отримали від клієнтів (до fees, WayForPay 7%)</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-term">💸 Собівартість</span>
-        <span class="legend-desc">— скільки МИ платимо за API (Replicate, тощо)</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-term">💳 Replicate баланс</span>
-        <span class="legend-desc">— залишок коштів на Replicate (з моменту стартового депозита)</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-term">📈 Прибуток</span>
-        <span class="legend-desc">— Дохід після fees (WayForPay 7%) мінус Собівартість (включно з trial)</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-term">🔥 Trial витрати</span>
-        <span class="legend-desc">— собівартість генерацій безкоштовних юзерів (вони не платять, ми - платимо)</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-term">🆓 Безкоштовні</span>
-        <span class="legend-desc">— юзери, що запустили бота, але ще не купили жодного тарифу</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-term">📊 Маржа</span>
-        <span class="legend-desc">— відсоток прибутку від доходу після fees (чим більше - тим краще)</span>
-      </div>
-    </div>
-
-    <div class="cards" id="summary">
-      <div class="loading">Завантаження...</div>
-    </div>
-
-    <div class="section">
-      <h2 class="section-title">🧹 Управління статистикою</h2>
-      <p class="section-hint">Обнулити аналітику (usage_events, payment_events, daily_summaries). Баланси користувачів не чіпає.</p>
-      <button id="reset-stats-btn" class="danger-btn">Обнулити статистику</button>
-    </div>
-
-    <div class="section">
-      <h2 class="section-title">💳 Покупки по тарифах</h2>
-      <p class="section-hint">Скільки разів купили кожен пакет токенів</p>
-      <table id="purchases-table">
-        <thead>
-          <tr>
-            <th>Пакет</th>
-            <th>К-сть</th>
-            <th>Дохід $</th>
-            <th>Токенів</th>
-            <th>Юзерів</th>
-          </tr>
-        </thead>
-        <tbody id="purchases-body">
-          <tr><td colspan="5" class="loading">Завантаження...</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="section">
-      <h2 class="section-title">🤖 Топ моделей по витратах</h2>
-      <p class="section-hint">Які моделі найбільше "з'їдають" на API (собівартість)</p>
-      <table id="models-table">
-        <thead>
-          <tr>
-            <th>Модель</th>
-            <th>Генерацій</th>
-            <th>Собівартість $</th>
-            <th>Дохід $</th>
-            <th>Маржа</th>
-            <th>Помилок</th>
-          </tr>
-        </thead>
-        <tbody id="models-body">
-          <tr><td colspan="6" class="loading">Завантаження...</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="section">
-      <h2 class="section-title">👤 Топ юзерів по токенах</h2>
-      <p class="section-hint">Користувачі, які витратили найбільше токенів за період</p>
-      <table id="users-table">
-        <thead>
-          <tr>
-            <th>Юзер</th>
-            <th>Токенів</th>
-            <th>Генерацій</th>
-            <th>Собівартість $</th>
-            <th>Дохід $</th>
-            <th>Успішність</th>
-            <th>Деталі</th>
-          </tr>
-        </thead>
-        <tbody id="users-body">
-          <tr><td colspan="7" class="loading">Завантаження...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Tab: KIE.AI -->
-  <div id="tab-kie" class="tab-content">
-    <div class="legend">
-      <h3>📖 Словник термінів</h3>
-      <div class="legend-item">
-        <span class="legend-term">💸 Собівартість KIE.AI</span>
-        <span class="legend-desc">— скільки МИ платимо за KIE.AI API (kling-3.0, sora-2, тощо)</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-term">💰 Дохід KIE</span>
-        <span class="legend-desc">— скільки токенів витратили юзери на KIE моделі (в USD еквіваленті)</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-term">📈 Маржа KIE</span>
-        <span class="legend-desc">— відсоток прибутку від KIE генерацій</span>
-      </div>
-    </div>
-
-    <div class="cards" id="kie-summary">
-      <div class="loading">Завантаження...</div>
-    </div>
-
-    <div class="section">
-      <h2 class="section-title">🤖 KIE.AI моделі по витратах</h2>
-      <p class="section-hint">Які KIE моделі найбільше "з'їдають" на API</p>
-      <table id="kie-models-table">
-        <thead>
-          <tr>
-            <th>Модель</th>
-            <th>Генерацій</th>
-            <th>Собівартість $</th>
-            <th>Дохід $</th>
-            <th>Маржа</th>
-            <th>Помилок</th>
-          </tr>
-        </thead>
-        <tbody id="kie-models-body">
-          <tr><td colspan="6" class="loading">Завантаження...</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="section">
-      <h2 class="section-title">👤 Топ юзерів по KIE токенах</h2>
-      <p class="section-hint">Користувачі, які витратили найбільше токенів на KIE моделях</p>
-      <table id="kie-users-table">
-        <thead>
-          <tr>
-            <th>Юзер</th>
-            <th>Токенів</th>
-            <th>Генерацій</th>
-            <th>Собівартість $</th>
-            <th>Дохід $</th>
-            <th>Успішність</th>
-          </tr>
-        </thead>
-        <tbody id="kie-users-body">
-          <tr><td colspan="6" class="loading">Завантаження...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Tab: Pricing -->
-  <div id="tab-pricing" class="tab-content">
-    <div class="legend">
-      <h3>💡 Що це таке?</h3>
-      <div class="legend-item">
-        <span class="legend-desc">Перевірка чи наші ціни (apiCost в models.js) відповідають офіційним цінам Replicate.</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-desc">Якщо є розбіжності — треба оновити apiCost, інакше рахуємо прибуток неправильно!</span>
-      </div>
-    </div>
-
-    <div id="pricing-status" class="price-status ok">
-      Завантаження...
-    </div>
-
-    <div class="section">
-      <h2 class="section-title">📋 Офіційні ціни Replicate</h2>
-      <p class="section-hint">Ціни з офіційних сторінок моделей (перевірено: 2026-01-25)</p>
-      <table id="pricing-table">
-        <thead>
-          <tr>
-            <th>Модель</th>
-            <th>Наша ціна</th>
-            <th>Офіційна</th>
-            <th>Статус</th>
-            <th>Джерело</th>
-          </tr>
-        </thead>
-        <tbody id="pricing-body">
-          <tr><td colspan="5" class="loading">Завантаження...</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="section" id="discrepancies-section" style="display:none;">
-      <h2 class="section-title">⚠️ Розбіжності (потрібно виправити)</h2>
-      <p class="section-hint">Ці моделі мають неправильні apiCost в config/models.js</p>
-      <table id="discrepancies-table">
-        <thead>
-          <tr>
-            <th>Модель</th>
-            <th>Наша ціна</th>
-            <th>Офіційна</th>
-            <th>Різниця</th>
-            <th>Дія</th>
-          </tr>
-        </thead>
-        <tbody id="discrepancies-body"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <script>
-    const TOKEN = '${token || ''}';
-    const API_BASE = '/admin';
-    
-    let currentDays = 30;
-    
-    async function fetchAPI(endpoint) {
-      const url = API_BASE + endpoint + (endpoint.includes('?') ? '&' : '?') + 'token=' + TOKEN;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Помилка API: ' + res.status);
-      return res.json();
-    }
-
-    async function postAPI(endpoint, body) {
-      const url = API_BASE + endpoint + (endpoint.includes('?') ? '&' : '?') + 'token=' + TOKEN;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {})
-      });
-      if (!res.ok) throw new Error('Помилка API: ' + res.status);
-      return res.json();
-    }
-    
-    function formatUSD(val) {
-      const num = Number(val) || 0;
-      return '$' + num.toFixed(2);
-    }
-    
-    function formatPct(val) {
-      const num = Number(val) || 0;
-      return num.toFixed(1) + '%';
-    }
-
-    function formatDate(val) {
-      if (!val) return '—';
-      try {
-        return new Date(val).toLocaleString('uk-UA');
-      } catch (e) {
-        return '—';
-      }
-    }
-
-    // Tabs
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-        
-        if (btn.dataset.tab === 'pricing') {
-          loadPricing();
-        } else if (btn.dataset.tab === 'kie') {
-          loadKieDashboard();
-        }
-      });
-    });
-
-    async function loadPricing() {
-      try {
-        const data = await fetchAPI('/pricing/check');
-        if (!data.success) throw new Error(data.error);
-
-        const statusEl = document.getElementById('pricing-status');
-        if (data.data.status === 'OK') {
-          statusEl.className = 'price-status ok';
-          statusEl.textContent = '✅ Всі ціни актуальні! Розбіжностей немає.';
-        } else {
-          statusEl.className = 'price-status warning';
-          statusEl.textContent = '⚠️ ' + data.data.message;
-        }
-
-        // Pricing table
-        const tbody = document.getElementById('pricing-body');
-        const prices = data.data.officialPrices;
-        tbody.innerHTML = Object.entries(prices).map(([key, p]) => {
-          // Спеціальна обробка для Veo (два варіанти цін)
-          let priceDisplay = '';
-          let unit = '/run';
-          
-          if (p.pricePerSecondAudio && p.pricePerSecondNoAudio) {
-            // Veo - показуємо обидва варіанти
-            priceDisplay = \`$\${p.pricePerSecondAudio.toFixed(2)}/сек 🔊<br>$\${p.pricePerSecondNoAudio.toFixed(2)}/сек 🔇\`;
-          } else if (p.priceByMode) {
-            const modeLines = Object.entries(p.priceByMode).map(([mode, price]) => {
-              const label = mode.replace('_', ' ').toUpperCase();
-              return \`$\${price.toFixed(2)}/run <small>\${label}</small>\`;
-            });
-            priceDisplay = modeLines.join('<br>');
-          } else if (p.pricePerSecond) {
-            priceDisplay = \`$\${p.pricePerSecond.toFixed(2)}/сек\`;
-          } else if (p.pricePerRun) {
-            priceDisplay = \`$\${p.pricePerRun.toFixed(2)}/run\`;
-          }
-          
-          const isOk = !data.data.discrepancies.find(d => d.model === p.model);
-          return \`
-            <tr>
-              <td><strong>\${p.model}</strong></td>
-              <td>—</td>
-              <td>\${priceDisplay}</td>
-              <td><span class="badge badge-\${isOk ? 'success' : 'danger'}">\${isOk ? '✅ OK' : '❌'}</span></td>
-              <td><a href="\${p.source}" target="_blank" class="price-link">Replicate ↗</a></td>
-            </tr>
-          \`;
-        }).join('');
-
-        // Discrepancies
-        if (data.data.discrepancies.length > 0) {
-          document.getElementById('discrepancies-section').style.display = 'block';
-          const dBody = document.getElementById('discrepancies-body');
-          dBody.innerHTML = data.data.discrepancies.map(d => \`
-            <tr>
-              <td><strong>\${d.modelName}</strong><br><small>\${d.model}\${d.mode ? ' • ' + d.mode : ''}</small></td>
-              <td class="danger">$\${d.ourPrice || d.ourPricePerSec}</td>
-              <td class="success">$\${d.officialPrice || d.officialPricePerSec}</td>
-              <td><span class="badge badge-danger">\${d.differencePercent}</span></td>
-              <td><a href="\${d.source}" target="_blank" class="price-link">Перевірити ↗</a></td>
-            </tr>
-          \`).join('');
-        } else {
-          document.getElementById('discrepancies-section').style.display = 'none';
-        }
-
-      } catch (err) {
-        document.getElementById('pricing-status').className = 'price-status warning';
-        document.getElementById('pricing-status').textContent = 'Помилка: ' + err.message;
-      }
-    }
-    
-    async function loadDashboard() {
-      const now = new Date();
-      const from = new Date(now.getTime() - currentDays * 24 * 60 * 60 * 1000).toISOString();
-      const to = now.toISOString();
-      
-      try {
-        // Summary
-        const summary = await fetchAPI('/metrics/summary?from=' + from + '&to=' + to);
-        if (summary.success) {
-          const d = summary.data;
-          const freeUsersTotal = d.users?.freeTotal ?? 0;
-          const freeUsersNew = d.users?.freeNew ?? 0;
-          const trialBonus = d.trialBonus || {};
-          const trialBonusUSD = trialBonus.liabilityUSD || 0;
-          const trialBonusUsers = d.trial?.users ?? 0;
-          const trialTokensPerUser = Number.isFinite(trialBonus.tokensPerUser)
-            ? trialBonus.tokensPerUser
-            : TRIAL_TOKENS;
-          const rb = d.replicateBalance || {};
-          const remainingUSD = Number(rb.remainingUSD) || 0;
-          const remainingClass = remainingUSD < 0 ? 'danger' : remainingUSD < 20 ? 'warning' : 'success';
-          const remainingLabel = remainingUSD < 0 ? 'Потрібно поповнити' : 'Залишок на Replicate';
-          const remainingValue = formatUSD(Math.abs(remainingUSD));
-          const fundedValue = formatUSD(rb.fundedUSD || 0);
-          const spentValue = formatUSD(rb.spentUSD || 0);
-          document.getElementById('summary').innerHTML = \`
-            <div class="card">
-              <div class="card-title">💰 Дохід</div>
-              <div class="card-hint">Скільки заплатили клієнти (до fees)</div>
-              <div class="card-value success">\${formatUSD(d.revenue.usd)}</div>
-              <div class="card-subtitle">\${d.revenue.purchases} покупок</div>
-            </div>
-            <div class="card">
-              <div class="card-title">💸 Собівартість</div>
-              <div class="card-hint">Скільки ми платимо API</div>
-              <div class="card-value warning">\${formatUSD(d.cogs.estimated)}</div>
-              <div class="card-subtitle">\${d.cogs.generations} генерацій</div>
-            </div>
-            <div class="card">
-              <div class="card-title">💳 Replicate баланс</div>
-              <div class="card-hint">\${remainingLabel}</div>
-              <div class="card-value \${remainingClass}">\${remainingValue}</div>
-              <div class="card-subtitle">Поповнено \${fundedValue} • Витрачено \${spentValue}</div>
-            </div>
-            <div class="card">
-              <div class="card-title">📈 Прибуток</div>
-              <div class="card-hint">Дохід після fees (WayForPay 7%) - Собівартість (включно з trial)</div>
-              <div class="card-value">\${formatUSD(d.gross.estimated)}</div>
-              <div class="card-subtitle">\${d.gross.marginPercent}% маржа (після fees) • у т.ч. \${formatUSD(trialBonusUSD)} trial (\${trialBonusUsers} юз.)</div>
-            </div>
-            <div class="card">
-              <div class="card-title">🔥 Trial витрати</div>
-              <div class="card-hint">Безкоштовні юзери "з'їли"</div>
-              <div class="card-value danger">\${formatUSD(d.trial.burnUSD)}</div>
-              <div class="card-subtitle">\${d.trial.users} trial юзерів</div>
-            </div>
-            <div class="card">
-              <div class="card-title">🆓 Безкоштовні юзери</div>
-              <div class="card-hint">Запустили бота, але не купляли</div>
-              <div class="card-value">\${freeUsersTotal}</div>
-              <div class="card-subtitle">+\${freeUsersNew} за період</div>
-            </div>
-            <div class="card">
-              <div class="card-title">✅ Успішність</div>
-              <div class="card-hint">% вдалих генерацій</div>
-              <div class="card-value">\${d.cogs.successRate}%</div>
-              <div class="card-subtitle">\${d.cogs.activeUsers} активних юзерів</div>
-            </div>
-            <div class="card">
-              <div class="card-title">👥 Платних юзерів</div>
-              <div class="card-hint">Хто купив токени</div>
-              <div class="card-value success">\${d.revenue.paidUsers}</div>
-              <div class="card-subtitle">за період</div>
-            </div>
-          \`;
-        }
-        
-        // Purchases
-        const purchases = await fetchAPI('/metrics/purchases?from=' + from + '&to=' + to);
-        if (purchases.success) {
-          const tbody = document.getElementById('purchases-body');
-          if (purchases.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5">Немає покупок за період</td></tr>';
-          } else {
-            tbody.innerHTML = purchases.data.map(p => \`
-              <tr>
-                <td><strong>\${p._id}</strong></td>
-                <td>\${p.count}</td>
-                <td>\${formatUSD(p.totalUSD)}</td>
-                <td>\${p.totalTokens}⚡</td>
-                <td>\${p.uniqueUsers}</td>
-              </tr>
-            \`).join('');
-          }
-        }
-        
-        // Top models
-        const models = await fetchAPI('/metrics/top-models?from=' + from + '&to=' + to + '&limit=10');
-        if (models.success) {
-          const tbody = document.getElementById('models-body');
-          if (models.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6">Немає генерацій за період</td></tr>';
-          } else {
-            tbody.innerHTML = models.data.map(m => {
-              const marginClass = m.margin > 50 ? 'success' : m.margin > 30 ? 'warning' : 'danger';
-              const failClass = m.failRate < 5 ? 'success' : m.failRate < 15 ? 'warning' : 'danger';
-              return \`
-                <tr>
-                  <td><strong>\${m.modelKey}</strong></td>
-                  <td>\${m.count}</td>
-                  <td>\${formatUSD(m.cogs)}</td>
-                  <td>\${formatUSD(m.revenue)}</td>
-                  <td><span class="badge badge-\${marginClass}">\${formatPct(m.margin)}</span></td>
-                  <td><span class="badge badge-\${failClass}">\${formatPct(m.failRate)}</span></td>
-                </tr>
-              \`;
-            }).join('');
-          }
-        }
-
-        // Top users
-        const users = await fetchAPI('/metrics/top-users?from=' + from + '&to=' + to + '&limit=20');
-        if (users.success) {
-          const tbody = document.getElementById('users-body');
-          if (users.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7">Немає даних за період</td></tr>';
-          } else {
-            tbody.innerHTML = users.data.map(u => {
-              const user = u.user || {};
-              const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ');
-              const username = user.username ? '@' + user.username : '—';
-              const subscription = user.subscription?.type || 'TRIAL';
-              const subActive = user.subscription?.isActive ? 'active' : 'inactive';
-              const subExpires = formatDate(user.subscription?.expiresAt);
-              const createdAt = formatDate(user.createdAt);
-              const lastActivity = formatDate(user.lastActivityAt);
-              const locale = user.languageCode || '—';
-              const statusFlags = [
-                user.isAdmin ? 'admin' : null,
-                user.isBanned ? 'banned' : null
-              ].filter(Boolean).join(', ') || '—';
-
-              return \`
-                <tr>
-                  <td>
-                    <strong>\${fullName || 'Без імені'}</strong><br/>
-                    <span class="badge">\${username}</span><br/>
-                    <span class="card-subtitle">ID: \${u.userId}</span>
-                  </td>
-                  <td><strong>\${Number(u.tokensSpent || 0).toFixed(0)}⚡</strong></td>
-                  <td>\${u.generations || 0}</td>
-                  <td>\${formatUSD(u.cogs)}</td>
-                  <td>\${formatUSD(u.revenue)}</td>
-                  <td>\${formatPct(u.successRate)}</td>
-                  <td>
-                    <details>
-                      <summary>Деталі</summary>
-                      <div class="detail-grid">
-                        <div class="detail-item">Підписка: <span>\${subscription}</span></div>
-                        <div class="detail-item">Статус: <span>\${subActive}</span></div>
-                        <div class="detail-item">До: <span>\${subExpires}</span></div>
-                        <div class="detail-item">Мова: <span>\${locale}</span></div>
-                        <div class="detail-item">Баланс: <span>\${Number(user.tokens || 0).toFixed(2)}⚡</span></div>
-                        <div class="detail-item">Куплено: <span>\${user.totalTokensPurchased || 0}⚡</span></div>
-                        <div class="detail-item">Витрачено: <span>\${user.totalTokensSpent || 0}⚡</span></div>
-                        <div class="detail-item">Зароблено: <span>\${user.totalTokensEarned || 0}⚡</span></div>
-                        <div class="detail-item">Статус/ролі: <span>\${statusFlags}</span></div>
-                        <div class="detail-item">Referral: <span>\${user.referralCode || '—'}</span></div>
-                        <div class="detail-item">Referred by: <span>\${user.referredBy || '—'}</span></div>
-                        <div class="detail-item">Referral $: <span>\${formatUSD(user.referralEarnings || 0)}</span></div>
-                        <div class="detail-item">Створено: <span>\${createdAt}</span></div>
-                        <div class="detail-item">Остання активність: <span>\${lastActivity}</span></div>
-                      </div>
-                    </details>
-                  </td>
-                </tr>
-              \`;
-            }).join('');
-          }
-        }
-        
-        document.getElementById('error').style.display = 'none';
-      } catch (err) {
-        document.getElementById('error').textContent = 'Помилка: ' + err.message;
-        document.getElementById('error').style.display = 'block';
-      }
-    }
-    
-    async function loadKieDashboard() {
-      const now = new Date();
-      const from = new Date(now.getTime() - currentDays * 24 * 60 * 60 * 1000).toISOString();
-      const to = now.toISOString();
-      
-      try {
-        // KIE Summary
-        const summary = await fetchAPI('/metrics/kie-summary?from=' + from + '&to=' + to);
-        if (summary.success) {
-          const d = summary.data;
-          const kb = d.kieBalance || {};
-          const remainingUSD = Number(kb.remainingUSD) || 0;
-          const remainingClass = remainingUSD < 0 ? 'danger' : remainingUSD < 10 ? 'warning' : 'success';
-          const remainingLabel = remainingUSD < 0 ? 'Потрібно поповнити' : 'Залишок на KIE.AI';
-          const remainingValue = formatUSD(Math.abs(remainingUSD));
-          const fundedValue = formatUSD(kb.fundedUSD || 0);
-          const spentValue = formatUSD(kb.spentUSD || 0);
-          
-          document.getElementById('kie-summary').innerHTML = \`
-            <div class="card">
-              <div class="card-title">💸 Собівартість KIE</div>
-              <div class="card-hint">Скільки платимо KIE.AI API</div>
-              <div class="card-value danger">\${formatUSD(d.cogs.estimated)}</div>
-              <div class="card-subtitle">\${d.cogs.generations} генерацій</div>
-            </div>
-            <div class="card">
-              <div class="card-title">💰 Дохід KIE</div>
-              <div class="card-hint">Токени витрачені на KIE моделях</div>
-              <div class="card-value success">\${formatUSD(d.revenue.usd)}</div>
-              <div class="card-subtitle">\${d.revenue.tokens}⚡ токенів</div>
-            </div>
-            <div class="card">
-              <div class="card-title">💳 \${remainingLabel}</div>
-              <div class="card-hint">Депозит: \${fundedValue} • Витрачено: \${spentValue}</div>
-              <div class="card-value \${remainingClass}">\${remainingValue}</div>
-              <div class="card-subtitle">З \${kb.startDate || '—'}</div>
-            </div>
-            <div class="card">
-              <div class="card-title">📈 Прибуток KIE</div>
-              <div class="card-hint">Дохід мінус собівартість</div>
-              <div class="card-value \${d.gross.estimated >= 0 ? 'success' : 'danger'}">\${formatUSD(d.gross.estimated)}</div>
-              <div class="card-subtitle">Маржа: \${formatPct(d.gross.marginPercent)}</div>
-            </div>
-            <div class="card">
-              <div class="card-title">✅ Успішність</div>
-              <div class="card-hint">Відсоток успішних генерацій</div>
-              <div class="card-value \${d.cogs.successRate >= 95 ? 'success' : d.cogs.successRate >= 90 ? 'warning' : 'danger'}">\${formatPct(d.cogs.successRate)}</div>
-              <div class="card-subtitle">\${d.cogs.activeUsers} активних юзерів</div>
-            </div>
-            <div class="card">
-              <div class="card-title">🔥 Trial витрати KIE</div>
-              <div class="card-hint">Собівартість trial на KIE</div>
-              <div class="card-value warning">\${formatUSD(d.trial.burnUSD)}</div>
-              <div class="card-subtitle">\${d.trial.generations} trial gen • \${d.trial.users} юзерів</div>
-            </div>
-          \`;
-        }
-        
-        // Top KIE models
-        const models = await fetchAPI('/metrics/kie-top-models?from=' + from + '&to=' + to + '&limit=10');
-        if (models.success) {
-          const tbody = document.getElementById('kie-models-body');
-          if (models.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6">Немає KIE генерацій за період</td></tr>';
-          } else {
-            tbody.innerHTML = models.data.map(m => {
-              const marginPct = Number(m.marginPercent) || 0;
-              const marginClass = marginPct > 50 ? 'success' : marginPct > 30 ? 'warning' : 'danger';
-              const failRate = m.count > 0 ? ((m.failCount / m.count) * 100) : 0;
-              const failClass = failRate < 5 ? 'success' : failRate < 15 ? 'warning' : 'danger';
-              return \`
-                <tr>
-                  <td><strong>\${m.modelKey}</strong></td>
-                  <td>\${m.count}</td>
-                  <td>\${formatUSD(m.cogs)}</td>
-                  <td>\${formatUSD(m.revenue)}</td>
-                  <td><span class="badge badge-\${marginClass}">\${formatPct(marginPct)}</span></td>
-                  <td><span class="badge badge-\${failClass}">\${formatPct(failRate)}</span></td>
-                </tr>
-              \`;
-            }).join('');
-          }
-        }
-
-        // Top KIE users
-        const users = await fetchAPI('/metrics/kie-top-users?from=' + from + '&to=' + to + '&limit=20');
-        if (users.success) {
-          const tbody = document.getElementById('kie-users-body');
-          if (users.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6">Немає KIE юзерів за період</td></tr>';
-          } else {
-            tbody.innerHTML = users.data.map(u => {
-              const successClass = u.successRate >= 95 ? 'success' : u.successRate >= 90 ? 'warning' : 'danger';
-              return \`
-                <tr>
-                  <td><strong>\${u.userId}</strong></td>
-                  <td>\${u.tokensSpent}⚡</td>
-                  <td>\${u.count}</td>
-                  <td>\${formatUSD(u.cogs)}</td>
-                  <td>\${formatUSD(u.revenue)}</td>
-                  <td><span class="badge badge-\${successClass}">\${formatPct(u.successRate)}</span></td>
-                </tr>
-              \`;
-            }).join('');
-          }
-        }
-        
-        document.getElementById('error').style.display = 'none';
-      } catch (err) {
-        document.getElementById('error').textContent = 'Помилка KIE: ' + err.message;
-        document.getElementById('error').style.display = 'block';
-      }
-    }
-    
-    // Period buttons
-    document.querySelectorAll('.period-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentDays = parseInt(btn.dataset.days);
-        
-        // Reload current active tab
-        const activeTab = document.querySelector('.tab-btn.active');
-        if (activeTab && activeTab.dataset.tab === 'kie') {
-          loadKieDashboard();
-        } else if (activeTab && activeTab.dataset.tab === 'replicate') {
-          loadDashboard();
-        }
-      });
-    });
-    
-    // Initial load
-    loadDashboard();
-
-    // Reset stats button
-    const resetBtn = document.getElementById('reset-stats-btn');
-    resetBtn.addEventListener('click', async () => {
-      const confirmed = window.confirm('Це видалить аналітику (usage/payment/daily). Баланси користувачів не чіпає. Продовжити?');
-      if (!confirmed) return;
-      const phrase = window.prompt('Введіть RESET для підтвердження:');
-      if (phrase !== 'RESET') return;
-
-      try {
-        const resp = await postAPI('/metrics/reset', { scope: 'all', confirm: 'RESET' });
-        if (!resp.success) throw new Error(resp.error || 'Помилка');
-        await loadDashboard();
-        await loadKieDashboard();
-        alert('Статистику обнулено.');
-      } catch (err) {
-        alert('Помилка: ' + err.message);
-      }
-    });
-    
-    // Auto-refresh every 5 minutes (reload current active tab)
-    setInterval(() => {
-      const activeTab = document.querySelector('.tab-btn.active');
-      if (activeTab && activeTab.dataset.tab === 'kie') {
-        loadKieDashboard();
-      } else if (activeTab && activeTab.dataset.tab === 'replicate') {
-        loadDashboard();
-      }
-    }, 5 * 60 * 1000);
-  </script>
-</body>
-</html>
-  `);
+  res.sendFile(path.join(__dirname, '..', 'public', 'admin-dashboard.html'));
 });
 
 module.exports = router;

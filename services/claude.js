@@ -4,9 +4,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-/**
- * Чат з Claude (текстові повідомлення)
- */
+
 async function chatWithClaude(message, conversationHistory = []) {
   try {
     const messages = [
@@ -19,9 +17,9 @@ async function chatWithClaude(message, conversationHistory = []) {
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      system: `Ти Claude Sonnet 4.5 - найновіша модель від Anthropic (claude-sonnet-4-20250514).
-Якщо користувач запитає "яка ти версія", відповідай: "Я Claude Sonnet 4.5 - найновіша модель від Anthropic".
-Спілкуйся українською мовою якщо не попросять іншою, будь корисним та дружнім.`,
+      system: `You are Claude Sonnet 4.5, the latest Anthropic model (claude-sonnet-4-20250514).
+If the user asks which version you are, answer: "I am Claude Sonnet 4.5, the latest Anthropic model."
+Respond in English by default unless the user explicitly asks for another language. Be helpful and concise.`,
       max_tokens: 4096,
       messages: messages,
       temperature: 1.0
@@ -44,16 +42,14 @@ async function chatWithClaude(message, conversationHistory = []) {
   }
 }
 
-/**
- * Аналіз зображення з Claude Vision
- */
+
 async function analyzeImageWithClaude(imageBase64, prompt, mimeType = 'image/jpeg') {
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
-      system: `Ти Claude Sonnet 4.5 - найновіша модель від Anthropic.
-Аналізуй зображення детально українською мовою.`,
+      system: `You are Claude Sonnet 4.5, the latest Anthropic model.
+Analyze the image in detailed English.`,
       messages: [
         {
           role: 'user',
@@ -68,7 +64,7 @@ async function analyzeImageWithClaude(imageBase64, prompt, mimeType = 'image/jpe
             },
             {
               type: 'text',
-              text: prompt || 'Опишіть це зображення детально.'
+              text: prompt || 'Describe this image in detail.'
             }
           ],
         },
@@ -92,9 +88,7 @@ async function analyzeImageWithClaude(imageBase64, prompt, mimeType = 'image/jpe
   }
 }
 
-/**
- * Продовження розмови (зберігає контекст)
- */
+
 async function continueConversation(userMessage, conversationHistory) {
   const formattedHistory = conversationHistory.map(msg => ({
     role: msg.role,

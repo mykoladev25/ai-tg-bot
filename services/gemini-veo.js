@@ -72,7 +72,7 @@ function getModelCode(model) {
 
 function extractOperationError(operation) {
   const err = operation?.error;
-  if (!err) return 'Невідома помилка генерації Veo.';
+  if (!err) return 'Unknown Veo generation error.';
   if (typeof err.message === 'string' && err.message.trim()) return err.message.trim();
   if (typeof err.details === 'string' && err.details.trim()) return err.details.trim();
   return JSON.stringify(err).substring(0, 300);
@@ -103,8 +103,8 @@ async function generateVideo(prompt, options = {}) {
     return {
       success: false,
       error: generateAudio === false
-        ? 'Gemini Veo через Gemini API зараз не підтримує вимкнення audio.'
-        : 'Gemini Veo підтримує last frame тільки разом зі start image.'
+        ? 'Gemini Veo via the Gemini API does not currently support disabling audio.'
+        : 'Gemini Veo only supports a last frame when a start image is also provided.'
     };
   }
 
@@ -146,7 +146,7 @@ async function generateVideo(prompt, options = {}) {
     if (!operation.done) {
       return {
         success: false,
-        error: 'Google Gemini Veo не завершив генерацію вчасно. Спробуйте ще раз.'
+        error: 'Google Gemini Veo did not finish generation in time. Please try again.'
       };
     }
 
@@ -159,14 +159,14 @@ async function generateVideo(prompt, options = {}) {
       return {
         success: false,
         error: reasons
-          ? `Відео заблоковане політиками безпеки: ${reasons}`
-          : 'Відео заблоковане політиками безпеки.'
+          ? `The video was blocked by safety policies: ${reasons}`
+          : 'The video was blocked by safety policies.'
       };
     }
 
     const video = operation.response?.generatedVideos?.[0]?.video;
     if (!video) {
-      return { success: false, error: 'Google Gemini Veo не повернув відео.' };
+      return { success: false, error: 'Google Gemini Veo did not return a video.' };
     }
 
     const videoBuffer = await downloadVideoBuffer(ai, video);
@@ -180,7 +180,7 @@ async function generateVideo(prompt, options = {}) {
     const errMsg = error?.message || String(error);
     return {
       success: false,
-      error: `Помилка Gemini Veo: ${errMsg.substring(0, 200)}`
+      error: `Gemini Veo error: ${errMsg.substring(0, 200)}`
     };
   }
 }
