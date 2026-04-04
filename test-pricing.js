@@ -11,6 +11,7 @@ const imageModels = [
   { name: 'Nano Banana 2K', kiePrice: 0.05 },
   { name: 'Nano Banana 4K', kiePrice: 0.10 },
   { name: 'Seedream 4K', kiePrice: 0.032 },
+  { name: 'Seedream 5.0 Lite', kiePrice: kieAiModels.seedream_5_lite.kie_pricing.per_image.usd },
   { name: 'Ideogram v3', kiePrice: 0.0175 },
   { name: 'Recraft Upscale', kiePrice: 0.04 }
 ];
@@ -74,4 +75,3 @@ console.log('✅ ВИСНОВОК: Всі KIE.AI ціни мають маржу 
 console.log('💰 Це ТОЧНО ТА САМА маржа що і для Replicate!');
 console.log('🎯 Ви в профіті з KIE.AI так само як і з Replicate!');
 console.log('='.repeat(80));
-

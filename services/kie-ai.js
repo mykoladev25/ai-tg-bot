@@ -872,84 +872,93 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
 /**
  * Генерація через KIE.AI - Seedream 4.5
  *
- * Документація: https://docs.kie.ai/market/bytedance/seedream-4.5
- *
- * ДВІ МОДЕЛІ:
- * - seedream/4.5-text-to-image - для text2img (без зображень)
- * - seedream/4.5-edit - для img2img (з image_urls)
+ * Seedream family helper:
+ * - Seedream 4.5: seedream/4.5-text-to-image + seedream/4.5-edit
+ * - Seedream 5.0 Lite: seedream/5-lite-text-to-image + seedream/5-lite-image-to-image
  *
  * Параметри:
  * - prompt: текстовий опис (обов'язково)
  * - imageInput: URL або масив URL зображень (опційно, якщо є - використовуємо edit)
  * - aspectRatio: "1:1", "16:9", "9:16", etc
- * - quality: "basic" або "hd"
+ * - quality: "basic" або "high"
  */
-async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio = "1:1", quality = "basic") {
+async function generateWithSeedreamVariantKieAI({
+  prompt,
+  imageInput = null,
+  aspectRatio = "1:1",
+  quality = "basic",
+  textModel,
+  imageModel,
+  modelLabel = 'Seedream',
+  priceModelKey = null,
+  maxImages = 14,
+  maxPromptLengthText = null,
+  maxPromptLengthImage = null
+}) {
   try {
     if (!KIE_API_KEY) {
       throw new Error('KIE_AI_API_KEY не встановлена в .env');
     }
 
     if (!prompt) {
-      throw new Error('Prompt є обов\'язковим для Seedream');
+      throw new Error(`Prompt є обов'язковим для ${modelLabel}`);
     }
 
     // ✅ GUARD: Detect swapped parameters (aspectRatio got a resolution, quality got a ratio)
     const validAspectRatios = ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '21:9'];
     const resolutionValues = ['2K', '4K', '2k', '4k', 'basic', 'high'];
     if (resolutionValues.includes(aspectRatio) || (!validAspectRatios.includes(aspectRatio) && validAspectRatios.includes(quality))) {
-      console.warn(`⚠️ Seedream: SWAPPED params detected! aspectRatio='${aspectRatio}', quality='${quality}' → auto-swapping`);
+      console.warn(`⚠️ ${modelLabel}: SWAPPED params detected! aspectRatio='${aspectRatio}', quality='${quality}' → auto-swapping`);
       const tmp = aspectRatio;
-      // If aspectRatio has resolution value like '4K' → it should be quality
-      // If quality has ratio value like '1:1' → it should be aspectRatio
       if (validAspectRatios.includes(quality)) {
         aspectRatio = quality;
       } else {
-        aspectRatio = '1:1'; // safe default
+        aspectRatio = '1:1';
       }
       if (resolutionValues.includes(tmp)) {
-        // Map resolution to quality: '4K'→'high', '2K'→'basic'
         quality = (tmp === '4K' || tmp === '4k' || tmp === 'high') ? 'high' : 'basic';
       } else {
         quality = 'basic';
       }
-      console.log(`✅ Seedream: Corrected → aspectRatio='${aspectRatio}', quality='${quality}'`);
+      console.log(`✅ ${modelLabel}: Corrected → aspectRatio='${aspectRatio}', quality='${quality}'`);
     }
 
-    // ✅ Validate aspect_ratio is within allowed options
     if (!validAspectRatios.includes(aspectRatio)) {
-      console.warn(`⚠️ Seedream: invalid aspectRatio '${aspectRatio}', falling back to '1:1'`);
+      console.warn(`⚠️ ${modelLabel}: invalid aspectRatio '${aspectRatio}', falling back to '1:1'`);
       aspectRatio = '1:1';
     }
 
-    // ✅ Validate quality
     if (quality !== 'basic' && quality !== 'high') {
-      console.warn(`⚠️ Seedream: invalid quality '${quality}', falling back to 'basic'`);
+      console.warn(`⚠️ ${modelLabel}: invalid quality '${quality}', falling back to 'basic'`);
       quality = 'basic';
     }
 
-    // Нормалізуємо зображення
-    const images = imageInput ? normalizeImageInput(imageInput, 14) : [];
+    const images = imageInput ? normalizeImageInput(imageInput, maxImages) : [];
     const isEdit = images.length > 0;
+    const maxPromptLength = isEdit ? maxPromptLengthImage : maxPromptLengthText;
+    const finalPrompt = (maxPromptLength && prompt.length > maxPromptLength)
+      ? prompt.substring(0, maxPromptLength)
+      : prompt;
 
-    // Вибираємо модель залежно від наявності зображень
-    const modelName = isEdit ? 'seedream/4.5-edit' : 'seedream/4.5-text-to-image';
+    if (maxPromptLength && prompt.length > maxPromptLength) {
+      console.warn(`⚠️ ${modelLabel}: prompt truncated from ${prompt.length} to ${maxPromptLength} chars`);
+    }
 
-    console.log(`🎨 KIE.AI Seedream (${isEdit ? 'edit/img2img' : 'text2img'}):`, {
-      prompt: prompt.substring(0, 100),
+    const modelName = isEdit ? imageModel : textModel;
+
+    console.log(`🎨 KIE.AI ${modelLabel} (${isEdit ? 'edit/img2img' : 'text2img'}):`, {
+      prompt: finalPrompt.substring(0, 100),
       aspectRatio,
       quality,
       imageCount: images.length
     });
 
-    // ✅ Структура за документацією KIE.AI
     const input = {
-      prompt: prompt,
+      prompt: finalPrompt,
       aspect_ratio: aspectRatio || '1:1',
-      quality: quality  // "basic" (2K) або "high" (4K)
+      quality
     };
 
-    // Для edit моделі додаємо image_urls
     if (isEdit) {
       input.image_urls = images;
     }
@@ -960,11 +969,23 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
       input: input
     };
 
-    console.log(`📤 KIE.AI Seedream request:`, {
+    console.log(`📤 KIE.AI ${modelLabel} request:`, {
       model: payload.model,
       mode: isEdit ? 'edit' : 'text2img',
       images: images.length
     });
+
+    try {
+      const kiePricingSync = require('./kie-pricing-sync');
+      if (priceModelKey) {
+        const kiePrice = kiePricingSync.getModelPriceSync(priceModelKey);
+        if (kiePrice) {
+          console.log(`💰 KIE.AI ${modelLabel} price: $${kiePrice}`);
+        }
+      }
+    } catch (err) {
+      // Не критично
+    }
 
     const createResponse = await axios.post(
       `${KIE_API_BASE}/jobs/createTask`,
@@ -977,15 +998,14 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
       }
     );
 
-    console.log(`📥 KIE.AI Seedream response:`, JSON.stringify(createResponse.data, null, 2));
+    console.log(`📥 KIE.AI ${modelLabel} response:`, JSON.stringify(createResponse.data, null, 2));
 
-    // Перевіряємо структуру відповіді
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
 
       if (responseCode === 500) {
-        console.error('❌ KIE.AI Seedream - Server Error 500:', createResponse?.data);
+        console.error(`❌ KIE.AI ${modelLabel} - Server Error 500:`, createResponse?.data);
         return {
           success: false,
           error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини або зверніться до адміністратора.',
@@ -1001,9 +1021,8 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
     const taskId = createResponse.data.data.taskId;
     console.log(`✅ KIE.AI task created: ${taskId}`);
 
-    const result = await pollJobStatus(taskId, 400, 3000, 'Seedream (KIE.AI)');
+    const result = await pollJobStatus(taskId, 400, 3000, `${modelLabel} (KIE.AI)`);
 
-    // Отримуємо URL зображення
     const imageUrl = extractImageUrl(result);
     if (!imageUrl) {
       throw new Error('KIE.AI returned no image in output');
@@ -1017,7 +1036,7 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
     };
 
   } catch (error) {
-    console.error('❌ KIE.AI Seedream Error:', error.response?.data || error.message);
+    console.error(`❌ KIE.AI ${modelLabel} Error:`, error.response?.data || error.message);
 
     if (error.response?.data?.code === 500) {
       return {
@@ -1034,6 +1053,46 @@ async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio 
       provider: 'kie-ai'
     };
   }
+}
+
+/**
+ * Генерація через KIE.AI - Seedream 4.5
+ *
+ * Документація: https://docs.kie.ai/market/bytedance/seedream-4.5
+ */
+async function generateWithSeedreamKieAI(prompt, imageInput = null, aspectRatio = "1:1", quality = "basic") {
+  return generateWithSeedreamVariantKieAI({
+    prompt,
+    imageInput,
+    aspectRatio,
+    quality,
+    textModel: 'seedream/4.5-text-to-image',
+    imageModel: 'seedream/4.5-edit',
+    modelLabel: 'Seedream 4.5',
+    priceModelKey: 'seedream_4k'
+  });
+}
+
+/**
+ * Генерація через KIE.AI - Seedream 5.0 Lite
+ *
+ * Документація:
+ * - seedream/5-lite-text-to-image
+ * - seedream/5-lite-image-to-image
+ */
+async function generateWithSeedream5LiteKieAI(prompt, imageInput = null, aspectRatio = "1:1", quality = "basic") {
+  return generateWithSeedreamVariantKieAI({
+    prompt,
+    imageInput,
+    aspectRatio,
+    quality,
+    textModel: 'seedream/5-lite-text-to-image',
+    imageModel: 'seedream/5-lite-image-to-image',
+    modelLabel: 'Seedream 5.0 Lite',
+    priceModelKey: 'seedream_5_lite',
+    maxPromptLengthText: 2995,
+    maxPromptLengthImage: 2996
+  });
 }
 
 /**
@@ -2154,6 +2213,172 @@ async function generateSora2KieAI(prompt, options = {}) {
 }
 
 /**
+ * Генерація через KIE.AI - ByteDance Seedance 2 / Seedance 2 Fast
+ *
+ * Документація:
+ * - https://docs.kie.ai/market/bytedance/seedance-2
+ * - https://docs.kie.ai/market/bytedance/seedance-2-fast
+ *
+ * Обидві моделі працюють через стандартний endpoint /jobs/createTask.
+ */
+async function generateSeedanceVideoKieAI(prompt, options = {}) {
+  try {
+    if (!KIE_API_KEY) {
+      throw new Error('KIE_AI_API_KEY не встановлена в .env');
+    }
+
+    if (!prompt) {
+      throw new Error('Prompt є обов\'язковим для Seedance');
+    }
+
+    const {
+      modelKey = 'seedance_2',
+      referenceImageUrls = [],
+      referenceVideoUrls = [],
+      referenceAudioUrls = [],
+      returnLastFrame = false,
+      generateAudio = true,
+      resolution = '480p',
+      aspectRatio = '16:9',
+      duration = 4,
+      webSearch = false
+    } = options;
+
+    const apiModel = modelKey === 'seedance_2_fast'
+      ? 'bytedance/seedance-2-fast'
+      : 'bytedance/seedance-2';
+
+    const normalizeUrlList = (input, maxItems = 5) => {
+      if (!input) return [];
+      const list = Array.isArray(input) ? input : [input];
+      return list.filter(Boolean).slice(0, maxItems);
+    };
+
+    const safeDuration = Math.max(4, Math.min(15, Number(duration) || 4));
+    const safeResolution = ['480p', '720p'].includes(resolution) ? resolution : '480p';
+    const safeAspectRatio = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'].includes(aspectRatio)
+      ? aspectRatio
+      : '16:9';
+
+    const input = {
+      prompt,
+      return_last_frame: !!returnLastFrame,
+      generate_audio: !!generateAudio,
+      resolution: safeResolution,
+      aspect_ratio: safeAspectRatio,
+      duration: safeDuration,
+      web_search: !!webSearch
+    };
+
+    const imageRefs = normalizeUrlList(referenceImageUrls, 5);
+    const videoRefs = normalizeUrlList(referenceVideoUrls, 3);
+    const audioRefs = normalizeUrlList(referenceAudioUrls, 3);
+
+    if (imageRefs.length > 0) input.reference_image_urls = imageRefs;
+    if (videoRefs.length > 0) input.reference_video_urls = videoRefs;
+    if (audioRefs.length > 0) input.reference_audio_urls = audioRefs;
+
+    const payload = {
+      model: apiModel,
+      callBackUrl: `${process.env.APP_URL || 'http://localhost:5500'}/webhook/kie-ai`,
+      input
+    };
+
+    console.log(`🎥 KIE.AI Seedance request (${modelKey}):`, {
+      prompt: prompt.substring(0, 100),
+      resolution: safeResolution,
+      aspectRatio: safeAspectRatio,
+      duration: safeDuration,
+      generateAudio: !!generateAudio,
+      refs: {
+        images: imageRefs.length,
+        videos: videoRefs.length,
+        audio: audioRefs.length
+      }
+    });
+
+    const createResponse = await axios.post(
+      `${KIE_API_BASE}/jobs/createTask`,
+      payload,
+      {
+        headers: {
+          'Authorization': `Bearer ${KIE_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log(`📥 KIE.AI Seedance response:`, createResponse.data);
+
+    if (!createResponse.data?.data?.taskId) {
+      const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+
+      if (createResponse?.data?.code === 500) {
+        return {
+          success: false,
+          error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини.',
+          provider: 'kie-ai',
+          serverError: true
+        };
+      }
+
+      console.error('❌ Invalid KIE.AI Seedance response:', createResponse.data);
+      throw new Error(apiMsg || 'No taskId in response');
+    }
+
+    const taskId = createResponse.data.data.taskId;
+    console.log(`✅ KIE.AI Seedance task created: ${taskId}`);
+
+    const result = await pollJobStatus(taskId, 720, 5000, `${modelKey} (KIE.AI)`);
+
+    if (result && result._timeout) {
+      console.warn(`⏱️ Seedance task ${taskId} still pending after timeout`);
+      return {
+        success: false,
+        pending: true,
+        taskId,
+        provider: 'kie-ai',
+        model: apiModel,
+        duration: safeDuration,
+        resolution: safeResolution
+      };
+    }
+
+    const videoUrl = extractVideoUrl(result);
+    if (!videoUrl) {
+      throw new Error('KIE.AI Seedance returned no video in output');
+    }
+
+    return {
+      success: true,
+      videoUrl,
+      taskId,
+      provider: 'kie-ai',
+      model: apiModel,
+      duration: safeDuration,
+      resolution: safeResolution
+    };
+  } catch (error) {
+    console.error('❌ KIE.AI Seedance Error:', error.response?.data || error.message);
+
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Тимчасова проблема на сервері KIE.AI. Спробуйте через 1-2 хвилини.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
+    return {
+      success: false,
+      error: error.response?.data?.msg || error.response?.data?.message || error.message,
+      provider: 'kie-ai'
+    };
+  }
+}
+
+/**
  * Генерація через KIE.AI - Google Veo 3.1
  *
  * Документація: https://docs.kie.ai/market/google/veo-3.1
@@ -2525,6 +2750,7 @@ module.exports = {
   generateWithNanoBananaBaseKieAI,   // ✅ Nano Banana (Base)
   generateWithNanoBananaKieAI,
   generateWithSeedreamKieAI,
+  generateWithSeedream5LiteKieAI,
   generateWithStableDiffusionKieAI,  // ❌ Повертає помилку - не підтримується
   generateWithIdeogramKieAI,         // ✅ Ideogram v3
   generateWithRecraftUpscaleKieAI,   // ✅ Recraft Crisp Upscale
@@ -2536,6 +2762,7 @@ module.exports = {
   generateKlingVideoKieAI,           // ✅ Kling v2.5 + v2.6
   generateRunwayVideoKieAI,          // ✅ Runway (endpoint: /runway/generate)
   generateSora2KieAI,                // ✅ Sora 2 (звичайна, не Pro) 🔥 80%+ знижка!
+  generateSeedanceVideoKieAI,        // ✅ Seedance 2 / Seedance 2 Fast
   generateVeoKieAI,                  // ✅ Veo 3.1 (endpoint: /veo/generate)
 
   // Утиліти
@@ -2563,6 +2790,7 @@ module.exports = {
       'nano_banana_2k',   // ✅ nano-banana-pro (2K) на KIE.AI
       'nano_banana_4k',   // ✅ nano-banana-pro (4K) на KIE.AI
       'seedream_4k',      // ✅ seedream/4.5-text-to-image, seedream/4.5-edit
+      'seedream_5_lite',  // ✅ seedream/5-lite-text-to-image, seedream/5-lite-image-to-image
       'ideogram',         // ✅ ideogram/v3-reframe, v3-remix, v3-edit
       'recraft_upscale',  // ✅ recraft/crisp-upscale
       'z_image'           // ✅ z-image (Qwen)
@@ -2573,11 +2801,16 @@ module.exports = {
       'kling_3',          // ✅ kling-3.0/video (multi-shot, element refs) 🆕
       'kling_motion',     // ✅ kling-2.6/motion-control
       'runway_turbo',     // ✅ /runway/generate (endpoint!)
-      'veo'               // ✅ veo3, veo3_fast (/veo/generate endpoint!)
+      'veo',              // ✅ veo3, veo3_fast (/veo/generate endpoint!)
+      'seedance_2',
+      'seedance_2_fast'
     ],
     // Моделі які ТІЛЬКИ на KIE.AI - немає на Replicate!
     kieAIOnly: [
       'kling_3',           // ⚠️ Kling 3.0 - немає на Replicate
+      'seedance_2',        // ⚠️ Seedance 2 - KIE only
+      'seedance_2_fast',   // ⚠️ Seedance 2 Fast - KIE only
+      'seedream_5_lite',   // ⚠️ Seedream 5.0 Lite - KIE.AI only
       'z_image'            // ⚠️ Z-Image - немає на Replicate
     ],
     // Моделі які НЕ підтримуються на KIE.AI — ціна та запуск через Replicate
@@ -2606,6 +2839,7 @@ module.exports = {
     nano_banana_2k: { model: 'nano-banana-pro', resolution: '2K' },
     nano_banana_4k: { model: 'nano-banana-pro', resolution: '4K' },
     seedream_4k: { model: 'seedream/4.5-text-to-image', edit: 'seedream/4.5-edit' },
+    seedream_5_lite: { model: 'seedream/5-lite-text-to-image', edit: 'seedream/5-lite-image-to-image' },
     ideogram: { model: 'ideogram/v3-reframe', remix: 'ideogram/v3-remix', edit: 'ideogram/v3-edit' },
     recraft_upscale: { model: 'recraft/crisp-upscale' },
     z_image: { model: 'z-image' },
@@ -2616,7 +2850,9 @@ module.exports = {
     kling_3: { model: 'kling-3.0/video', features: ['multi-shot', 'element-refs'] },
     kling_motion: { model: 'kling-2.6/motion-control' },
     runway_turbo: { endpoint: '/runway/generate', quality: ['720p', '1080p'] },
-    veo: { model: 'veo3_fast', quality: 'veo3', endpoint: '/veo/generate' }
+    veo: { model: 'veo3_fast', quality: 'veo3', endpoint: '/veo/generate' },
+    seedance_2: { model: 'bytedance/seedance-2' },
+    seedance_2_fast: { model: 'bytedance/seedance-2-fast' }
   },
 
   // Endpoints для різних моделей (статус — офіційно GET /jobs/recordInfo?taskId=)

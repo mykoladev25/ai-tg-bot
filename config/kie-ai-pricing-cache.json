@@ -5330,6 +5330,7 @@
       "anchor": "https://kie.ai/nano-banana-pro",
       "discountPrice": false
     },
+    "seedream_5_lite": null,
     "ideogram": [
       {
         "modelDescription": "ideogram v3-remix, image-to-image, BALANCED",
@@ -6196,6 +6197,8 @@
         "discountPrice": false
       }
     ],
+    "seedance_2": [],
+    "seedance_2_fast": [],
     "runway": [
       {
         "modelDescription": "Runway Aleph",

@@ -2,15 +2,18 @@
  * Gemini Image Service — генерація зображень через Google Gemini REST API.
  *
  * Підтримувані моделі:
+ * - gemini-2.5-flash-image (Nano Banana)
  * - gemini-3-pro-image-preview (Nano Banana Pro)
  * - gemini-3.1-flash-image-preview (Nano Banana 2)
  */
-
+{"duration":"5","mode":"pro","multi_prompt":[],"sound":false,"image_urls":["https://api.telegram.org/file/bot8372899303:AAFLK-b2GwIbvNdoFRY0p_3dEXjOaQUg2Mo/photos/file_896.jpg"],"multi_shots":false,"prompt":"ultra realistic cinematic macro video in a luxury bathroom\n\nREFERENCE:\nuse exact same red intimate device from reference images\nstrict geometry, identical shape, identical proportions, no redesign\n\nSCENE:\nclose-up shot, feminine hands holding the device horizontally above a sink\nluxury bathroom background, softly blurred (marble, warm tones)\n\nACTION TIMELINE:\n\n[0–2 sec]\na transparent gel lubricant slowly pours from a minimal luxury tube onto the top curved part of the device\ngel flows naturally, thick, glossy, forming smooth layers and droplets\nrealistic liquid physics, catching soft highlights\n\n[2–4 sec]\ngel continues to spread across the surface\nsmall droplets slide down naturally\ndevice remains still\n\n[4–6 sec]\ndevice begins a subtle vibration\nvery soft, controlled micro-movements (not shaking wildly)\ngentle pulsing motion, premium feel\n\n[6–8 sec]\nvibration continues slightly\ngel reacts subtly to motion (tiny shifts, realistic behavior)\n\nOBJECT DETAILS:\nmatte red silicone texture, ultra detailed\ngold metallic insert with realistic reflections and micro-scratches\n\nHANDS:\nnatural feminine hands, аккуратные пальцы, короткие ногти\n\nFOCUS:\nsharp focus on device and gel\nbackground blurred\n\nLIGHTING:\nsoft diffused daylight, premium commercial lighting\nrealistic reflections on gel and gold surface\n\nCAMERA:\nmacro shot, 85mm lens look\nshallow depth of field\nslight handheld micro-movement or very slow push-in\n\nSTYLE:\nultra realistic, high-end commercial, luxury product video\n\nIMPORTANT:\nno deformation of object during vibration\nno cartoon motion\nkeep vibration subtle and elegant\n\nNEGATIVE:\nwrong shape, distortion, aggressive shaking, plastic gel, CGI artifacts, extra fingers"}
 const axios = require('axios');
 
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
 const FREE_GENERATIONS_LIMIT = 3;
 
+// gemini-2.5-flash-image
+const GEMINI_NANO_BANANA_MODEL = 'gemini-2.5-flash-image';
 // gemini-3-pro-image-preview
 const GEMINI_MODEL = 'gemini-3-pro-image-preview';
 // gemini-3.1-flash-image-preview
@@ -25,6 +28,12 @@ const REQUEST_TIMEOUT_WITH_IMAGES_MS = 240000; // 240с якщо є reference-з
 const BASE_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
 const MODEL_CAPABILITIES = {
+  [GEMINI_NANO_BANANA_MODEL]: {
+    aspectRatios: BASE_ASPECT_RATIOS,
+    imageSizes: ['1K'],
+    defaultSize: '1K',
+    supportsImageSize: false
+  },
   [GEMINI_MODEL]: {
     aspectRatios: BASE_ASPECT_RATIOS,
     imageSizes: ['1K', '2K', '4K'],
@@ -138,7 +147,10 @@ async function generateImage(
 
     // Маппінг aspect ratio / imageSize під модель
     const mappedAspectRatio = modelCaps.aspectRatios.includes(aspectRatio) ? aspectRatio : '1:1';
-    const mappedSize = modelCaps.imageSizes.includes(imageSize) ? imageSize : modelCaps.defaultSize;
+    const supportsImageSize = modelCaps.supportsImageSize !== false;
+    const mappedSize = supportsImageSize && modelCaps.imageSizes.includes(imageSize)
+      ? imageSize
+      : modelCaps.defaultSize;
 
     const refCount = parts.length - 1;
     console.log(`🖼️ Gemini Image: model=${modelCode}, aspect=${mappedAspectRatio}, size=${mappedSize}, refs=${refCount}`);
@@ -150,13 +162,18 @@ async function generateImage(
         parts
       }],
       generationConfig: {
-        responseModalities: ['TEXT', 'IMAGE'],
-        imageConfig: {
+        responseModalities: ['TEXT', 'IMAGE']
+      }
+    };
+
+    payload.generationConfig.imageConfig = supportsImageSize
+      ? {
           aspectRatio: mappedAspectRatio,
           imageSize: mappedSize
         }
-      }
-    };
+      : {
+          aspectRatio: mappedAspectRatio
+        };
 
     console.log(`📤 Gemini REST: POST ${modelCode}, parts=${parts.length}, timeout=${REQUEST_TIMEOUT_MS / 1000}s`);
     console.log(`📤 Gemini payload: model=${modelCode}, parts=${parts.length}, modalities=[TEXT,IMAGE], aspect=${mappedAspectRatio}, size=${mappedSize}, role=user`);
@@ -333,6 +350,7 @@ module.exports = {
   generateImage,
   FREE_GENERATIONS_LIMIT,
   MAX_REFERENCE_IMAGES,
+  GEMINI_NANO_BANANA_MODEL,
   GEMINI_MODEL,
   GEMINI_FLASH_IMAGE_MODEL,
   get isConfigured() {

@@ -69,6 +69,7 @@ function parseOurModels(pricing) {
     nano_banana_2k: findModel(pricing.image, 'nano banana pro', '1/2K'),
     nano_banana_4k: findModel(pricing.image, 'nano banana pro', '4K'),
     seedream_4k: findModel(pricing.image, 'seedream', '4K'),
+    seedream_5_lite: findSeedream5LiteModel(pricing.image),
     stable_diffusion: findModel(pricing.image, 'stable diffusion', '3.5'),
     ideogram: findModels(pricing.image, 'ideogram'),  // All ideogram variants
     recraft_upscale: findModel(pricing.image, 'recraft crisp upscale'),  // Recraft Crisp Upscale
@@ -81,6 +82,8 @@ function parseOurModels(pricing) {
     kling_motion: findModels(pricing.video, 'motion control'),
     veo: findModels(pricing.video, 'veo'),
     sora_2: findModels(pricing.video, 'sora 2'),
+    seedance_2: findSeedanceModels(pricing.video, false),
+    seedance_2_fast: findSeedanceModels(pricing.video, true),
     runway: findModels(pricing.video, 'runway')
   };
 
@@ -105,6 +108,32 @@ function findModels(records, keyword) {
   return records.filter(r =>
     r.modelDescription.toLowerCase().includes(keyword.toLowerCase())
   );
+}
+
+/**
+ * Seedream 5.0 Lite може приходити як text-to-image або image-to-image.
+ * Беремо перший збіг для визначення ціни за генерацію.
+ */
+function findSeedream5LiteModel(records = []) {
+  return records.find(r => {
+    const desc = (r.modelDescription || '').toLowerCase();
+    const isSeedreamLite = desc.includes('seedream') && (desc.includes('5 lite') || desc.includes('5-lite'));
+    const isSupportedMode = desc.includes('text-to-image') || desc.includes('image-to-image');
+    return isSeedreamLite && isSupportedMode;
+  }) || null;
+}
+
+/**
+ * Seedance 2 / Seedance 2 Fast.
+ * Розділяємо стандартну та fast версії, бо обидві містять "seedance-2".
+ */
+function findSeedanceModels(records = [], isFast = false) {
+  return records.filter(r => {
+    const desc = (r.modelDescription || '').toLowerCase();
+    const isSeedance = desc.includes('bytedance/seedance-2');
+    const hasFast = desc.includes('fast');
+    return isSeedance && (isFast ? hasFast : !hasFast);
+  });
 }
 
 /**
@@ -151,7 +180,15 @@ async function loadPricingCache() {
 function ensureParsedComplete(cache) {
   if (!cache || !cache.pricing) return cache;
   const parsed = cache.parsed || {};
-  const requiredKeys = ['nano_banana', 'ideogram', 'recraft_upscale', 'z_image'];
+  const requiredKeys = [
+    'nano_banana',
+    'ideogram',
+    'recraft_upscale',
+    'z_image',
+    'seedream_5_lite',
+    'seedance_2',
+    'seedance_2_fast'
+  ];
   const missing = requiredKeys.filter(k => parsed[k] === undefined);
   if (missing.length === 0) return cache;
 
@@ -246,6 +283,9 @@ function getModelPrice(cache, modelKey, options = {}) {
       case 'seedream_4k':
         return parsed.seedream_4k?.usdPrice || null;
 
+      case 'seedream_5_lite':
+        return parsed.seedream_5_lite?.usdPrice || null;
+
       case 'stable_diffusion':
         return parsed.stable_diffusion?.usdPrice || null;
 
@@ -299,6 +339,20 @@ function getModelPrice(cache, modelKey, options = {}) {
           return d.includes('runway') && (d.includes(`${dur}.0s`) || d.includes(`${dur}s`)) && d.includes(qual);
         });
         return rw?.usdPrice || null;
+      }
+
+      case 'seedance_2':
+      case 'seedance_2_fast': {
+        const res = (resolution || '480p').toLowerCase();
+        const inputType = options.inputType || 'no_video_input';
+        const list = parsed[modelKey];
+        const seedance = list?.find(m => {
+          const desc = (m.modelDescription || '').toLowerCase();
+          const hasRes = desc.includes(res);
+          const needsVideoInput = inputType === 'with_video_input';
+          return hasRes && (needsVideoInput ? desc.includes('with video input') : desc.includes('no video input'));
+        });
+        return seedance ? parseFloat(seedance.usdPrice) : null;
       }
 
       case 'kling_motion':
@@ -364,7 +418,7 @@ function getKling3TokenCostPerSecondSync(options = {}) {
 }
 
 /** Моделі зображень, для яких є KIE-ціна в кеші */
-const KIE_IMAGE_MODELS = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'ideogram', 'recraft_upscale', 'z_image'];
+const KIE_IMAGE_MODELS = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'seedream_5_lite', 'ideogram', 'recraft_upscale', 'z_image'];
 
 /** Опорна тривалість для переведення Veo "per video" → "per second" (мін. тривалість у боті). */
 const VEO_REF_DURATION_SEC = 4;
@@ -422,9 +476,10 @@ function getKieTokenCostSync(modelKey, options = {}) {
 
       // Fallback для Seedream: KIE support підтвердив що немає API (19.02.2026)
       // Використовуємо hardcoded ціну з kie-ai-models.js
-      if (usd == null && (modelKey === 'seedream_2k' || modelKey === 'seedream_4k')) {
+      if (usd == null && (modelKey === 'seedream_2k' || modelKey === 'seedream_4k' || modelKey === 'seedream_5_lite')) {
         usd = kieAiModels.getReplicatePrice(modelKey);
-        console.log(`💡 Using hardcoded Seedream price: $${usd} (6.5 credits)`);
+        const creditLabel = modelKey === 'seedream_5_lite' ? '5.5 credits' : '6.5 credits';
+        console.log(`💡 Using hardcoded ${modelKey} price: $${usd} (${creditLabel})`);
       }
 
       // Fallback для Nano Banana base: $0.02 (4 credits)
@@ -521,6 +576,35 @@ function getKieTokenCostSync(modelKey, options = {}) {
       return { cost: kieAiModels.usdToTokens(usd), apiCost: usd, soraType: type };
     }
 
+    if (modelKey === 'seedance_2' || modelKey === 'seedance_2_fast') {
+      const d = options.duration || 4;
+      const res = options.resolution || '480p';
+      const inputType = options.inputType || 'no_video_input';
+
+      let usdPerSec = getModelPriceSync(modelKey, { resolution: res, inputType });
+
+      if (usdPerSec == null) {
+        usdPerSec = kieAiModels.getKieAIPrice.call(kieAiModels, modelKey, {
+          duration: 1,
+          resolution: res,
+          inputType
+        });
+        console.log(`💡 Using hardcoded ${modelKey} ${res} fallback price: $${usdPerSec}/sec (${inputType})`);
+      }
+
+      if (usdPerSec == null || usdPerSec === 0) return null;
+
+      const apiCostPerSecond = typeof usdPerSec === 'string' ? parseFloat(usdPerSec) : usdPerSec;
+      if (Number.isNaN(apiCostPerSecond)) return null;
+
+      return {
+        cost: kieAiModels.usdToTokens(apiCostPerSecond * d),
+        costPerSecond: kieAiModels.usdToTokens(apiCostPerSecond),
+        apiCost: +(apiCostPerSecond * d).toFixed(4),
+        apiCostPerSecond: apiCostPerSecond
+      };
+    }
+
     return null;
   } catch (e) {
     return null;
@@ -565,6 +649,9 @@ async function showPricingReport() {
   }
   if (parsed.nano_banana_4k) {
     console.log(`  Nano Banana 4K: ${parsed.nano_banana_4k.creditPrice} credits = $${parsed.nano_banana_4k.usdPrice}`);
+  }
+  if (parsed.seedream_5_lite) {
+    console.log(`  Seedream 5.0 Lite: ${parsed.seedream_5_lite.creditPrice} credits = $${parsed.seedream_5_lite.usdPrice}`);
   }
   console.log('');
 

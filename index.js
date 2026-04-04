@@ -13,6 +13,7 @@ const midjourney = require('./services/midjourney');
 const replicate = require('./services/replicate');
 const kieAI = require('./services/kie-ai');
 const geminiImage = require('./services/gemini-image');
+const geminiVeo = require('./services/gemini-veo');
 const kiePricingSync = require('./services/kie-pricing-sync');
 const payment = require('./services/payment');
 const exchangeRate = require('./services/exchangeRate');
@@ -41,6 +42,9 @@ const models = require('./config/models');
 const { TRIAL_TOKENS, WORST_CASE_TOKEN_USD } = require('./config/constants');
 const accessControl = require('./config/access');
 
+const TOKEN_USD = models?._pricingAssumptions?.tokenUSD || 0.01;
+const PRICING_MULTIPLIER = models?._pricingAssumptions?.pricingMultiplier || 1.65;
+
 /**
  * Список моделей дизайну з ефективною ціною для кнопок меню (KIE/Replicate за вибором юзера).
  * Фільтрує Midjourney якщо KIE.AI не налаштований (Midjourney доступний тільки через KIE.AI).
@@ -57,9 +61,9 @@ function getDesignModelsWithEffectiveCost(userId) {
       if (m.available === false) return false;
       // Пропускаємо приховані в меню моделі (використовуються внутрішньо)
       if (m.menuHidden) return false;
-      // Midjourney та Z-Image доступні тільки якщо KIE.AI налаштований
-      if (m.key === 'midjourney' || m.key === 'z_image') {
-        return kieAI.isKieAIEnabled;
+      // KIE-only моделі показуємо тільки коли KIE.AI увімкнена і в користувача є доступ
+      if (m.kieAIOnly) {
+        return kieAI.isKieAIEnabled && accessControl.canUseKieAI(userId);
       }
       // Google direct моделі (Nano Banana FREE / Nano Banana 2) доступні тільки якщо Gemini API налаштований
       if (m.googleDirect) {
@@ -107,12 +111,12 @@ function getDesignModelsWithEffectiveCost(userId) {
     });
 }
 
-/** Моделі відео, що доступні тільки через KIE (зараз тільки Kling 3.0). */
-const KIE_ONLY_VIDEO_MODELS = ['kling_3'];
+/** Моделі відео, що доступні тільки через KIE. */
+const KIE_ONLY_VIDEO_MODELS = ['kling_3', 'seedance_2', 'seedance_2_fast'];
 
 
 /**
- * Чи може користувач бачити моделі "тільки KIE" (Kling 3.0).
+ * Чи може користувач бачити моделі "тільки KIE" (Kling 3.0, Seedance 2 тощо).
  */
 function canSeeKieOnlyVideoModels(userId) {
   if (!accessControl.canUseKieAI(userId) || !kieAI.isKieAIEnabled) return false;
@@ -173,6 +177,15 @@ function getVideoModelsForUser(userId) {
   }
   return list.map(m => {
     if (m.key === 'veo') {
+      if (canUseGeminiVeoDirect(userId)) {
+        return {
+          ...m,
+          costFast: getEffectiveVeoGenerationCost(userId, 'veo3_fast', 4),
+          costQuality: getEffectiveVeoGenerationCost(userId, 'veo3', 4),
+          costPerSecondNoAudio: m.geminiCostPerSecondFast ?? 25,
+          costPerSecondAudio: m.geminiCostPerSecondQuality ?? 66
+        };
+      }
       return {
         ...m,
         costFast: getEffectiveVeoFlatCost(userId, 'veo3_fast'),
@@ -228,6 +241,14 @@ function getVideoModelsForUser(userId) {
         )
       );
       return { ...m, cost: minCost };
+    }
+    if (m.key === 'seedance_2' || m.key === 'seedance_2_fast') {
+      const { minCost, maxCost } = getSeedanceCostRange(userId, m.key);
+      return {
+        ...m,
+        cost: minCost,
+        maxCost
+      };
     }
     if (m.key === 'kling_o1_edit') {
       // Для редагування відео: ціна залежить від mode та наявності відео-input
@@ -299,6 +320,9 @@ function getEffectiveKlingV2_6CostPerSecond(userId, model, withAudio) {
 function getEffectiveVeoFlatCost(userId, veoModel = 'veo3_fast') {
   const model = models.video.models.find(m => m.key === 'veo');
   const isQuality = veoModel === 'veo3';
+  if (canUseGeminiVeoDirect(userId)) {
+    return getEffectiveVeoGenerationCost(userId, veoModel, 4);
+  }
   const fallback = isQuality ? (model?.costQuality ?? 208) : (model?.costFast ?? 50);
   if (!useKiePriceForDisplay(userId)) return fallback;
   if (!kieAI.isKieAIImplemented('veo')) return fallback;
@@ -310,8 +334,14 @@ function getEffectiveVeoFlatCost(userId, veoModel = 'veo3_fast') {
 /**
  * API cost Veo (USD) — flat per-video.
  */
-function getVeoApiCostUSD(veoModel = 'veo3_fast') {
+function getVeoApiCostUSD(userId, veoModel = 'veo3_fast', duration = 8) {
   const model = models.video.models.find(m => m.key === 'veo');
+  if (canUseGeminiVeoDirect(userId)) {
+    const rate = veoModel === 'veo3'
+      ? (model?.geminiApiCostPerSecondQuality ?? 0.40)
+      : (model?.geminiApiCostPerSecondFast ?? 0.15);
+    return +(rate * duration).toFixed(3);
+  }
   return veoModel === 'veo3' ? (model?.apiCostQuality ?? 1.25) : (model?.apiCostFast ?? 0.30);
 }
 
@@ -320,6 +350,11 @@ function getVeoApiCostUSD(veoModel = 'veo3_fast') {
  */
 function getEffectiveVeoCostPerSecond(userId, withAudio) {
   const model = models.video.models.find(m => m.key === 'veo');
+  if (canUseGeminiVeoDirect(userId)) {
+    return withAudio
+      ? (model?.geminiCostPerSecondQuality ?? 66)
+      : (model?.geminiCostPerSecondFast ?? 25);
+  }
   const fallbackNo = model?.costPerSecondNoAudio ?? 33;
   const fallbackAud = model?.costPerSecondAudio ?? 66;
   if (!useKiePriceForDisplay(userId)) return withAudio ? fallbackAud : fallbackNo;
@@ -327,6 +362,33 @@ function getEffectiveVeoCostPerSecond(userId, withAudio) {
   const k = kiePricingSync.getKieTokenCostSync('veo');
   if (!k || typeof k !== 'object') return withAudio ? fallbackAud : fallbackNo;
   return withAudio ? (k.costPerSecondAudio ?? fallbackAud) : (k.costPerSecondNoAudio ?? fallbackNo);
+}
+
+function usdToTokens(usd) {
+  if (usd == null || Number.isNaN(usd)) return 0;
+  const value = typeof usd === 'string' ? parseFloat(usd) : usd;
+  return Math.ceil(value * PRICING_MULTIPLIER / TOKEN_USD);
+}
+
+function canUseGeminiVeoDirect(userId) {
+  return accessControl.isAdmin(userId) && geminiVeo.isConfigured;
+}
+
+function shouldUseGeminiVeoDirect(userId, generationData = null) {
+  if (!canUseGeminiVeoDirect(userId)) return false;
+  if (generationData && !geminiVeo.canGenerateDirect(generationData)) return false;
+  return true;
+}
+
+function getEffectiveVeoGenerationCost(userId, veoModel = 'veo3_fast', duration = 8) {
+  const model = models.video.models.find(m => m.key === 'veo');
+  if (canUseGeminiVeoDirect(userId)) {
+    const rate = veoModel === 'veo3'
+      ? (model?.geminiApiCostPerSecondQuality ?? 0.40)
+      : (model?.geminiApiCostPerSecondFast ?? 0.15);
+    return usdToTokens(rate * duration);
+  }
+  return getEffectiveVeoFlatCost(userId, veoModel);
 }
 
 /**
@@ -393,6 +455,50 @@ function getEffectiveSora2Cost(userId, model, duration = 15, options = {}) {
   const k = kiePricingSync.getKieTokenCostSync('sora_2', { soraType });
   if (k && typeof k === 'object' && typeof k.cost === 'number') return k.cost;
   return Math.ceil(duration * (model?.costPerSecond || 0));
+}
+
+function getEffectiveSeedanceCostPerSecond(userId, modelKey, resolution = '480p') {
+  const model = models.video.models.find(m => m.key === modelKey);
+  const fallback = model?.costPerSecondByResolution?.[resolution] ?? model?.costPerSecond ?? 0;
+  if (!shouldUseKieProvider(userId, modelKey)) return fallback;
+  const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration: 4, resolution });
+  if (!k || typeof k !== 'object' || typeof k.costPerSecond !== 'number') return fallback;
+  return k.costPerSecond;
+}
+
+function getSeedanceApiCostUSD(userId, modelKey, duration = 4, resolution = '480p') {
+  const model = models.video.models.find(m => m.key === modelKey);
+  const fallbackRate = model?.apiCostPerSecondByResolution?.[resolution] ?? model?.apiCostPerSecond ?? 0;
+  if (!shouldUseKieProvider(userId, modelKey)) return +(fallbackRate * duration).toFixed(4);
+  const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration, resolution });
+  if (!k || typeof k !== 'object' || typeof k.apiCost !== 'number') return +(fallbackRate * duration).toFixed(4);
+  return k.apiCost;
+}
+
+function getEffectiveSeedanceCost(userId, modelKey, duration = 4, resolution = '480p') {
+  const fallback = duration * getEffectiveSeedanceCostPerSecond(userId, modelKey, resolution);
+  if (!shouldUseKieProvider(userId, modelKey)) return fallback;
+  const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration, resolution });
+  if (!k || typeof k !== 'object' || typeof k.cost !== 'number') return fallback;
+  return k.cost;
+}
+
+function getSeedanceCostRange(userId, modelKey) {
+  const model = models.video.models.find(m => m.key === modelKey);
+  const durations = model?.durations?.length ? model.durations : [4];
+  const resolutions = model?.resolutions?.length ? model.resolutions : ['480p'];
+  const values = [];
+
+  for (const resolution of resolutions) {
+    for (const duration of durations) {
+      values.push(getEffectiveSeedanceCost(userId, modelKey, duration, resolution));
+    }
+  }
+
+  return {
+    minCost: values.length ? Math.min(...values) : 0,
+    maxCost: values.length ? Math.max(...values) : 0
+  };
 }
 
 // Ініціалізація бота
@@ -704,6 +810,7 @@ const IMAGE_MODELS = [
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_4k',
+  'seedream_5_lite',
   'ideogram',
   'z_image',
   'a2e_image',
@@ -720,6 +827,7 @@ const MODELS_WITH_ASPECT_RATIO = [
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_4k',
+  'seedream_5_lite',
   'stable_diffusion',
   'ideogram',
   'z_image'
@@ -732,12 +840,15 @@ const MODELS_WITH_STATE = [
   'kling_motion',           // mode + orientation + sound + фото + відео
   'veo',                    // aspect ratio + prompt + last_frame + start_image
   'sora_2',                 // duration + aspect ratio + optional reference + prompt
+  'seedance_2',             // resolution + duration + aspect ratio + audio + prompt
+  'seedance_2_fast',        // resolution + duration + aspect ratio + audio + prompt
   'nano_banana_pro',        // вибір розміру (2K/4K)
   ...MODELS_WITH_ASPECT_RATIO // добавляємо моделі з вибором aspect ratio
 ];
 
 const ASPECT_RATIO_OPTIONS = {
   seedream_4k: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', 'match_input_image'],
+  seedream_5_lite: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
   nano_banana: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   nano_banana_free: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   nano_banana_2: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9', '1:4', '4:1', '1:8', '8:1'],
@@ -788,6 +899,7 @@ const TEXT_ASPECT_RATIO_MODELS = new Set([
   'nano_banana_2k',
   'nano_banana_4k',
   'seedream_4k',
+  'seedream_5_lite',
   'ideogram',
   'stable_diffusion',
   'z_image'
@@ -796,6 +908,24 @@ const TEXT_ASPECT_RATIO_MODELS = new Set([
 const IMAGE_SIZE_OPTIONS = {
   nano_banana_2: ['0.5K', '1K', '2K', '4K'],
   nano_banana_pro: ['2K', '4K']
+};
+
+const FREE_NANO_BANANA_MODELS = {
+  nano_banana: {
+    label: 'Nano Banana',
+    googleModel: geminiImage.GEMINI_NANO_BANANA_MODEL,
+    imageSize: '1K'
+  },
+  nano_banana_2: {
+    label: 'Nano Banana 2',
+    googleModel: geminiImage.GEMINI_FLASH_IMAGE_MODEL,
+    imageSize: '1K'
+  },
+  nano_banana_pro: {
+    label: 'Nano Banana PRO',
+    googleModel: geminiImage.GEMINI_MODEL,
+    imageSize: '1K'
+  }
 };
 
 function resolveModelKeyBySize(modelKey, imageSize) {
@@ -820,6 +950,30 @@ function getImageGenerationCostBySize(userId, modelKey, imageSize) {
   }
 
   return getEffectiveImageCost(userId, model, modelKey);
+}
+
+function getImageGenerationOptionsFromState(state = {}) {
+  const options = {};
+
+  if (state.imageSize) options.imageSize = state.imageSize;
+  if (state.geminiModelCode) options.geminiModelCode = state.geminiModelCode;
+  if (state.freeModelLabel) options.freeModelLabel = state.freeModelLabel;
+  if (state.freeBaseModelKey) options.freeBaseModelKey = state.freeBaseModelKey;
+  if (state.selectedMaxImages) options.maxImages = state.selectedMaxImages;
+
+  return Object.keys(options).length > 0 ? options : undefined;
+}
+
+function buildNanoBananaFreeLimitMessage(freeLimit) {
+  return (
+    `🎁 <b>Nano Banana FREE</b>\n\n` +
+    `❌ Ви вже використали всі ${freeLimit} безкоштовних генерацій!\n\n` +
+    `💡 У free-режимі доступні моделі:\n` +
+    `• 🍌 Nano Banana\n` +
+    `• 🍌 Nano Banana 2\n` +
+    `• 🍌 Nano Banana PRO\n\n` +
+    `Для продовження використовуйте платні моделі або поповніть баланс.`
+  );
 }
 
 function getAspectRatiosForModel(modelKey, hasImageInput = true) {
@@ -884,6 +1038,11 @@ bot.on('callback_query', async (ctx, next) => {
     return next();
   }
 
+  // ✅ ДОЗВОЛЯЄМО FREE MODEL CALLBACKS
+  if (callbackData.startsWith('img_free_')) {
+    return next();
+  }
+
   // ✅ ДОЗВОЛЯЄМО VEO CALLBACKS
   if (callbackData.startsWith('veo_')) {
     return next();
@@ -906,6 +1065,10 @@ bot.on('callback_query', async (ctx, next) => {
 
   // ✅ ДОЗВОЛЯЄМО RUNWAY TURBO CALLBACKS
   if (callbackData.startsWith('runway_turbo_')) {
+    return next();
+  }
+
+  if (callbackData.startsWith('seedance_')) {
     return next();
   }
 
@@ -947,6 +1110,11 @@ bot.on('callback_query', async (ctx, next) => {
 
   // ✅ Дозволяємо kling_3 state
   if (state?.action === 'kling_3_generation') {
+    return next();
+  }
+
+  // ✅ Дозволяємо seedance state
+  if (state?.action === 'seedance_generation') {
     return next();
   }
 
@@ -3364,7 +3532,7 @@ bot.action(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|1:4|4:1|1:8|8:1|4:5|5:4|9:1
   // Генеруємо з вибраним aspect ratio (у фоні, щоб не блокувати інші апдейти)
   const imageInput = state.imageUrl || null;
   const targetModelKey = state.targetModelKey || modelKey;
-  const generationOptions = state.imageSize ? { imageSize: state.imageSize } : undefined;
+  const generationOptions = getImageGenerationOptionsFromState(state);
   runBackgroundTask(
     () => handleImageGeneration(ctx, state.prompt, targetModelKey, imageInput, aspectRatio, generationOptions),
     'image_generation_aspect_ratio'
@@ -3957,7 +4125,7 @@ bot.action(/^mj_vary_(.+)_(\d+)$/, async (ctx) => {
 });
 
 // Design Models
-bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|clarity|recraft_upscale|ideogram|z_image|a2e_image)$/, async (ctx) => {
+bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|seedream_5_lite|clarity|recraft_upscale|ideogram|z_image|a2e_image)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
 
@@ -3993,24 +4161,45 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
     return;
   }
 
-  // 🎁 FREE MODEL CHECK: Nano Banana PRO FREE — перевірка ліміту безкоштовних генерацій
+  // 🎁 FREE MODEL CHECK: Nano Banana FREE — перевірка ліміту безкоштовних генерацій
   if (modelKey === 'nano_banana_free') {
     const user = await User.findById(ctx.from.id);
     const freeUsed = user?.freeUsage?.nano_banana_free || 0;
     const freeLimit = geminiImage.FREE_GENERATIONS_LIMIT;
     if (freeUsed >= freeLimit) {
       await ctx.reply(
-        `🎁 <b>Nano Banana PRO FREE</b>\n\n` +
-        `❌ Ви вже використали всі ${freeLimit} безкоштовних генерацій!\n\n` +
-        `💡 Спробуйте платні моделі з більшими можливостями:\n` +
-        `• 🍌 Nano Banana — 4⚡ за генерацію\n` +
-        `• 🍌 Nano Banana PRO — 2K/4K (від 25⚡)\n` +
-        `• 🍌 Nano Banana 2 — 0.5K/1K/2K/4K (від 8⚡)\n\n` +
-        `Або поповніть баланс для доступу до всіх моделей! 🚀`,
+        buildNanoBananaFreeLimitMessage(freeLimit),
         { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
       );
       return;
     }
+
+    imageGenState.set(ctx.from.id, {
+      model: 'nano_banana_free',
+      step: 'select_free_model',
+      photos: []
+    });
+    userCurrentModel.set(ctx.from.id, 'nano_banana_free');
+
+    await ctx.reply(
+      `🍌🎁 <b>Nano Banana FREE</b>\n\n` +
+      `🆓 У вас є ${freeLimit - freeUsed} з ${freeLimit} безкоштовних генерацій.\n\n` +
+      `🎯 <b>Крок 1: Оберіть модель</b>\n\n` +
+      `• <b>Nano Banana</b> — швидка базова модель\n` +
+      `• <b>Nano Banana 2</b> — нові пропорції та 1K за замовчуванням\n` +
+      `• <b>Nano Banana PRO</b> — найякісніша Gemini image модель\n\n` +
+      `Після вибору моделі можна додати референси та ввести промпт.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🍌 Nano Banana', 'img_free_model_nano_banana')],
+          [Markup.button.callback('🍌 Nano Banana 2', 'img_free_model_nano_banana_2')],
+          [Markup.button.callback('🍌 Nano Banana PRO', 'img_free_model_nano_banana_pro')],
+          [Markup.button.callback('← Назад', 'design_menu')]
+        ])
+      }
+    );
+    return;
   }
 
   // 🍌 Вибір якості для Nano Banana 2 / Nano Banana PRO
@@ -4182,10 +4371,10 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
       `💰 Вартість: ${effectiveCost}⚡\n` +
       `⏱️ Час: ~10-25 секунд`,
 
-    nano_banana_free: `🍌🎁 <b>Nano Banana PRO FREE</b>\n\n` +
+    nano_banana_free: `🍌🎁 <b>Nano Banana FREE</b>\n\n` +
       `🆓 Безкоштовна генерація зображень!\n` +
       `📊 Ліміт: ${geminiImage.FREE_GENERATIONS_LIMIT} генерацій на користувача\n` +
-      `🤖 Модель: Gemini 3 Pro Image (Nano Banana Pro)\n\n` +
+      `🤖 Доступні моделі: Nano Banana / Nano Banana 2 / Nano Banana PRO\n\n` +
       refsStep +
       `Опишіть детально що хочете згенерувати.\n` +
       `💡 До ${geminiImage.MAX_REFERENCE_IMAGES} референс-зображень!\n\n` +
@@ -4223,6 +4412,78 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
         [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${modelKey}`)],
+        [Markup.button.callback('← Назад', 'design_menu')]
+      ])
+    }
+  );
+});
+
+bot.action(/^img_free_model_(nano_banana|nano_banana_2|nano_banana_pro)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+
+  const userId = ctx.from.id;
+  const selectedKey = ctx.match[1];
+  const selectedConfig = FREE_NANO_BANANA_MODELS[selectedKey];
+  const selectedModel = models.design.models.find(m => m.key === selectedKey);
+  const imgState = imageGenState.get(userId);
+  const user = await User.findById(userId);
+  const freeUsed = user?.freeUsage?.nano_banana_free || 0;
+  const freeLimit = geminiImage.FREE_GENERATIONS_LIMIT;
+
+  if (freeUsed >= freeLimit) {
+    await ctx.reply(buildNanoBananaFreeLimitMessage(freeLimit), {
+      parse_mode: 'HTML',
+      ...keyboard.createBackButton('design_menu')
+    });
+    imageGenState.delete(userId);
+    return;
+  }
+
+  if (!selectedConfig || !selectedModel) {
+    await ctx.reply('❌ Помилка. Модель не знайдена.', keyboard.createBackButton('design_menu'));
+    return;
+  }
+
+  if (!imgState || imgState.step !== 'select_free_model') {
+    imageGenState.set(userId, {
+      model: 'nano_banana_free',
+      step: 'select_free_model',
+      photos: []
+    });
+  }
+
+  const maxPhotos = selectedModel.maxImages || 1;
+
+  imageGenState.set(userId, {
+    model: selectedKey,
+    rootModel: 'nano_banana_free',
+    selectedModelKey: 'nano_banana_free',
+    freeBaseModelKey: selectedKey,
+    freeModelLabel: selectedConfig.label,
+    geminiModelCode: selectedConfig.googleModel,
+    imageSize: selectedConfig.imageSize,
+    selectedMaxImages: maxPhotos,
+    step: 'waiting_photos',
+    photos: []
+  });
+
+  userCurrentModel.set(userId, selectedKey);
+
+  const refsStep = `📝 <b>Крок 2:</b> Надішліть референс-зображення (опціонально)\n` +
+    `💡 Можна до ${maxPhotos} фото\n\n` +
+    `✍️ <b>Крок 3:</b> Введіть промпт\n\n` +
+    `Натисніть <b>"Далі до промпту"</b> якщо без референсів.\n\n`;
+
+  await ctx.reply(
+    `✅ <b>${selectedConfig.label}</b>\n\n` +
+    `🆓 Безкоштовна генерація ${freeUsed + 1} з ${freeLimit}\n` +
+    `🤖 Gemini model: <code>${selectedConfig.googleModel}</code>\n` +
+    `🖼️ Стандартна якість: <b>${selectedConfig.imageSize}</b>\n\n` +
+    refsStep,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('⏭️ Далі до промпту', `img_gen_start_${selectedKey}`)],
         [Markup.button.callback('← Назад', 'design_menu')]
       ])
     }
@@ -4313,6 +4574,14 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
     return;
   }
 
+  if (imgState.step === 'select_free_model') {
+    await ctx.reply(
+      '🎯 Спочатку оберіть безкоштовну модель Nano Banana.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
+
   if (imgState.step === 'select_quality') {
     await ctx.reply(
       '🎯 Спочатку оберіть якість зображення.',
@@ -4335,7 +4604,7 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
     const prompt = imgState.prompt || 'upscale image';
     const references = normalizeReferenceOrder(imgState.photos || []);
     const targetModelKey = imgState.selectedModelKey || modelKey;
-    const generationOptions = imgState.imageSize ? { imageSize: imgState.imageSize } : undefined;
+    const generationOptions = getImageGenerationOptionsFromState(imgState);
     imageGenState.delete(userId);
     await ctx.reply('🚀 Починаємо upscale...', { parse_mode: 'HTML' });
     runBackgroundTask(
@@ -4361,7 +4630,7 @@ bot.action(/^img_gen_start_(.+)$/, async (ctx) => {
   const prompt = imgState.prompt;
   const references = normalizeReferenceOrder(imgState.photos || []);
   const targetModelKey = imgState.selectedModelKey || modelKey;
-  const generationOptions = imgState.imageSize ? { imageSize: imgState.imageSize } : undefined;
+  const generationOptions = getImageGenerationOptionsFromState(imgState);
   imageGenState.delete(userId);
 
   await ctx.reply('🚀 Починаємо генерацію...', { parse_mode: 'HTML' });
@@ -4409,7 +4678,7 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
 
 
 // Video Models
-bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|runway_turbo|veo|sora_2|luma|a2e_motion)$/, async (ctx) => {
+bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|runway_turbo|veo|sora_2|seedance_2|seedance_2_fast|luma|a2e_motion)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.video.models.find(m => m.key === modelKey);
 
@@ -4420,10 +4689,10 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
 
   await ctx.answerCbQuery();
 
-  // Kling 3.0 — тільки при доступі KIE (не показуємо в меню при Replicate, але перевіряємо і при прямому кліку)
+  // KIE-only відео моделі — тільки при доступі KIE
   if (KIE_ONLY_VIDEO_MODELS.includes(modelKey) && !canSeeKieOnlyVideoModels(ctx.from.id)) {
     await ctx.reply(
-      '🔒 <b>Kling 3.0</b> доступна тільки при виборі провайдера <b>KIE.AI</b>.\n\n' +
+      `🔒 <b>${model.name}</b> доступна тільки при виборі провайдера <b>KIE.AI</b>.\n\n` +
       '👤 Профіль → Вибір провайдера → 🔵 KIE.AI',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
@@ -4489,7 +4758,10 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     );
   }
   if (modelKey === 'veo') {
-    requiredCost = getEffectiveVeoFlatCost(ctx.from.id, 'veo3_fast'); // мінімальна ціна = Fast
+    requiredCost = getEffectiveVeoGenerationCost(ctx.from.id, 'veo3_fast', 4); // мінімальна ціна = Fast 4s
+  }
+  if (modelKey === 'seedance_2' || modelKey === 'seedance_2_fast') {
+    requiredCost = getSeedanceCostRange(ctx.from.id, modelKey).minCost;
   }
   if (modelKey === 'kling_o1_edit') {
     const durations = model.durations || [3, 5, 7, 10];
@@ -4671,6 +4943,58 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
+  if (modelKey === 'seedance_2' || modelKey === 'seedance_2_fast') {
+    if (!kieAI.isKieAIEnabled) {
+      await ctx.reply('❌ KIE.AI тимчасово вимкнена. Додайте KIE_AI_API_KEY в .env.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+    if (!accessControl.canUseKieAI(ctx.from.id)) {
+      await ctx.reply(
+        '🔒 Генерації через KIE.AI (Seedance 2, Kling 3.0 тощо) поки доступні тільки адміністратору.\n\n' +
+        'Доступ керується змінною KIE_AI_ACCESS у .env (admin_only / all_users).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const durations = model.durations || [4, 5, 6, 8, 10, 12, 15];
+    const range480 = {
+      min: getEffectiveSeedanceCost(ctx.from.id, modelKey, Math.min(...durations), '480p'),
+      max: getEffectiveSeedanceCost(ctx.from.id, modelKey, Math.max(...durations), '480p')
+    };
+    const range720 = {
+      min: getEffectiveSeedanceCost(ctx.from.id, modelKey, Math.min(...durations), '720p'),
+      max: getEffectiveSeedanceCost(ctx.from.id, modelKey, Math.max(...durations), '720p')
+    };
+
+    userState.set(ctx.from.id, {
+      action: 'seedance_generation',
+      step: 'select_resolution',
+      modelKey
+    });
+
+    await ctx.reply(
+      `<b>${model.name}</b>\n\n` +
+      `🎬 Генерація відео через KIE.AI\n` +
+      `⏱️ Тривалість: 4-15 секунд\n` +
+      `🔊 Аудіо: опціонально\n\n` +
+      `📐 <b>Крок 1: Оберіть роздільну здатність</b>\n\n` +
+      `480p — ${range480.min}—${range480.max}⚡\n` +
+      `720p — ${range720.min}—${range720.max}⚡`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback(`480p (${range480.min}—${range480.max}⚡)`, 'seedance_resolution_480p'),
+            Markup.button.callback(`720p (${range720.min}—${range720.max}⚡)`, 'seedance_resolution_720p')
+          ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
   // Для Kling показуємо спеціальне меню з вибором тривалості
   if (modelKey === 'kling' || modelKey === 'kling_v2_6') {
     const durations = model.durations || [5];
@@ -4750,23 +5074,31 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
 
   // Для Veo показуємо спеціальне меню з вибором якості моделі (Крок 1)
   if (modelKey === 'veo') {
-    const costFast = getEffectiveVeoFlatCost(ctx.from.id, 'veo3_fast');
-    const costQuality = getEffectiveVeoFlatCost(ctx.from.id, 'veo3');
+    const useGeminiDirectVeo = canUseGeminiVeoDirect(ctx.from.id);
+    const costFastMin = getEffectiveVeoGenerationCost(ctx.from.id, 'veo3_fast', 4);
+    const costFastMax = getEffectiveVeoGenerationCost(ctx.from.id, 'veo3_fast', 8);
+    const costQualityMin = getEffectiveVeoGenerationCost(ctx.from.id, 'veo3', 4);
+    const costQualityMax = getEffectiveVeoGenerationCost(ctx.from.id, 'veo3', 8);
+    const fastPriceText = useGeminiDirectVeo ? `${costFastMin}—${costFastMax}⚡ за 4-8 сек` : `${costFastMin}⚡ за відео`;
+    const qualityPriceText = useGeminiDirectVeo ? `${costQualityMin}—${costQualityMax}⚡ за 4-8 сек` : `${costQualityMin}⚡ за відео`;
+    const fastButtonLabel = useGeminiDirectVeo ? `⚡ Fast (від ${costFastMin}⚡)` : `⚡ Fast (${costFastMin}⚡)`;
+    const qualityButtonLabel = useGeminiDirectVeo ? `💎 Quality (від ${costQualityMin}⚡)` : `💎 Quality (${costQualityMin}⚡)`;
 
     await ctx.reply(
       `🌟 <b>Google Veo 3.1 💎</b>\n\n` +
       `🎯 <b>Крок 1: Оберіть якість моделі</b>\n\n` +
       `<b>⚡ Fast</b> — швидка генерація, хороша якість\n` +
-      `💰 ${costFast}⚡ за відео\n\n` +
+      `💰 ${fastPriceText}\n\n` +
       `<b>💎 Quality</b> — найвища якість, довше генерує\n` +
-      `💰 ${costQuality}⚡ за відео\n\n` +
+      `💰 ${qualityPriceText}\n\n` +
+      `${useGeminiDirectVeo ? `🔌 <b>Провайдер:</b> Google Gemini API (тільки для admin UID)\n` : ''}` +
       `🔊 Аудіо включено за замовчуванням\n` +
       `⏱️ Тривалість: 4, 6 або 8 секунд`,
       {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-          [Markup.button.callback(`⚡ Fast (${costFast}⚡)`, 'veo_model_fast')],
-          [Markup.button.callback(`💎 Quality (${costQuality}⚡)`, 'veo_model_quality')],
+          [Markup.button.callback(fastButtonLabel, 'veo_model_fast')],
+          [Markup.button.callback(qualityButtonLabel, 'veo_model_quality')],
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
       }
@@ -5290,20 +5622,24 @@ bot.action(/^veo_model_(fast|quality)$/, async (ctx) => {
   const userId = ctx.from.id;
   const veoModel = ctx.match[1] === 'quality' ? 'veo3' : 'veo3_fast';
   const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
-  const veoCost = getEffectiveVeoFlatCost(userId, veoModel);
+  const useGeminiDirectVeo = canUseGeminiVeoDirect(userId);
+  const veoCost = getEffectiveVeoGenerationCost(userId, veoModel, 4);
+  const maxVeoCost = getEffectiveVeoGenerationCost(userId, veoModel, 8);
 
   userState.set(userId, {
     action: 'veo_generation',
     step: 'select_aspect',
     veoModel: veoModel,
-    duration: 8,
+    duration: 4,
     generateAudio: true,
     lastFrame: null
   });
 
   await ctx.reply(
     `🌟 <b>Google Veo 3.1 💎</b>\n` +
-    `🎯 Модель: <b>${veoModelLabel}</b> | 💰 ${veoCost}⚡\n\n` +
+    `🎯 Модель: <b>${veoModelLabel}</b>\n` +
+    `💰 ${useGeminiDirectVeo ? `Вартість: <b>${veoCost}—${maxVeoCost}⚡</b> (4-8 сек)` : `Вартість: <b>${veoCost}⚡</b>`}\n` +
+    `${useGeminiDirectVeo ? `🔌 Провайдер: <b>Google Gemini API</b> (admin only)\n` : ''}\n` +
     `📐 <b>Крок 2: Оберіть пропорції відео</b>\n\n` +
     `<b>🎬 16:9</b> — YouTube, кіно, горизонтальне\n` +
     `<b>📱 9:16</b> — TikTok, Reels, Stories`,
@@ -5328,7 +5664,9 @@ bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
   // Якщо немає стейту від Крок 1 — створюємо з default (fast)
   const veoModel = state?.veoModel || 'veo3_fast';
   const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
-  const veoCost = getEffectiveVeoFlatCost(userId, veoModel);
+  const useGeminiDirectVeo = canUseGeminiVeoDirect(userId);
+  const veoCostMin = getEffectiveVeoGenerationCost(userId, veoModel, 4);
+  const veoCostMax = getEffectiveVeoGenerationCost(userId, veoModel, 8);
 
   userState.set(userId, {
     ...(state || {}),
@@ -5336,7 +5674,7 @@ bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
     step: 'select_duration',
     aspectRatio: aspectRatio,
     veoModel: veoModel,
-    duration: 8,
+    duration: 4,
     generateAudio: true,
     lastFrame: null
   });
@@ -5344,9 +5682,9 @@ bot.action(/^veo_aspect_(.+)$/, async (ctx) => {
   await ctx.reply(
     `🌟 <b>Google Veo 3.1 💎</b>\n` +
     `🎯 Модель: <b>${veoModelLabel}</b> | 📐 ${aspectRatio === '16:9' ? '🎬 Горизонтальне' : '📱 Вертикальне'}\n` +
-    `💰 Вартість: <b>${veoCost}⚡</b>\n\n` +
+    `💰 Вартість: <b>${useGeminiDirectVeo ? `${veoCostMin}—${veoCostMax}` : veoCostMin}⚡</b>\n\n` +
     `⏱️ <b>Крок 3: Оберіть тривалість відео</b>\n\n` +
-    `💡 Ціна однакова незалежно від тривалості`,
+    `${useGeminiDirectVeo ? '💡 У Gemini-провайдера ціна залежить від тривалості.' : '💡 Ціна однакова незалежно від тривалості.'}`,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
@@ -5375,7 +5713,36 @@ bot.action(/^veo_duration_(\d+)$/, async (ctx) => {
 
   const veoModel = state.veoModel || 'veo3_fast';
   const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
-  const veoCost = getEffectiveVeoFlatCost(userId, veoModel);
+  const useGeminiDirectVeo = canUseGeminiVeoDirect(userId);
+  const veoCost = getEffectiveVeoGenerationCost(userId, veoModel, duration);
+
+  if (useGeminiDirectVeo) {
+    userState.set(userId, {
+      ...state,
+      duration: duration,
+      generateAudio: true,
+      veoCost: veoCost,
+      step: 'ask_start_image'
+    });
+
+    await ctx.reply(
+      `🌟 <b>Google Veo 3.1 💎</b>\n` +
+      `🎯 ${veoModelLabel} | ${state.aspectRatio === '16:9' ? '🎬' : '📱'} ${state.aspectRatio} | ⏱️ ${duration}сек\n` +
+      `💰 Вартість: <b>${veoCost}⚡</b>\n\n` +
+      `🔊 <b>Gemini audio:</b> native audio завжди увімкнено в цьому режимі.\n\n` +
+      `🖼️ <b>Крок 4: Стартове зображення (опціонально)</b>\n\n` +
+      `Це перший кадр відео. AI анімує його. Якщо не маєте — пропустіть.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🖼️ Завантажу зображення', 'veo_add_start_image')],
+          [Markup.button.callback('⏭️ Без зображення', 'veo_skip_start_image')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
 
   userState.set(userId, {
     ...state,
@@ -5415,7 +5782,7 @@ bot.action(/^veo_audio_(on|off)$/, async (ctx) => {
 
   const veoModel = state.veoModel || 'veo3_fast';
   const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
-  const veoCost = getEffectiveVeoFlatCost(userId, veoModel);
+  const veoCost = getEffectiveVeoGenerationCost(userId, veoModel, state.duration || 8);
 
   userState.set(userId, {
     ...state,
@@ -5565,10 +5932,15 @@ bot.action('veo_skip_start_image', async (ctx) => {
     startImage: null
   });
 
+  const directFallbackNote = canUseGeminiVeoDirect(userId)
+    ? `\n⚠️ <b>Увага:</b> якщо додати лише останній кадр без стартового, генерація перейде на fallback-провайдер.\n`
+    : '';
+
   await ctx.reply(
     `🎬 <b>Останній кадр (опціонально)</b>\n\n` +
     `<b>Що це:</b> Зображення для кінця відео.\n` +
     `AI створить плавний перехід від початку до цього кадру.\n\n` +
+    directFallbackNote +
     `<b>🎯 Приклад:</b>\n` +
     `• Початок: людина стоїть\n` +
     `• Кінець: людина сидить\n` +
@@ -5790,6 +6162,155 @@ bot.action('sora_skip_reference', async (ctx) => {
   await ctx.reply(
     `✍️ <b>Крок 4: Введіть промпт</b>\n\n` +
     `Опишіть детально що хочете бачити у відео.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// ==================== SEEDANCE 2 CALLBACKS ====================
+
+bot.action(/^seedance_resolution_(480p|720p)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const resolution = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const model = models.video.models.find(m => m.key === state.modelKey);
+  const durations = model?.durations || [4, 5, 6, 8, 10, 12, 15];
+  const durationButtons = durations.map(d =>
+    Markup.button.callback(
+      `${d} сек (${getEffectiveSeedanceCost(userId, state.modelKey, d, resolution)}⚡)`,
+      `seedance_duration_${d}`
+    )
+  );
+
+  userState.set(userId, {
+    ...state,
+    resolution,
+    step: 'select_duration'
+  });
+
+  await ctx.reply(
+    `<b>${model?.name || 'Seedance'}</b>\n\n` +
+    `🖥️ Роздільна здатність: <b>${resolution}</b>\n\n` +
+    `📐 <b>Крок 2: Оберіть тривалість відео</b>`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        durationButtons,
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+bot.action(/^seedance_duration_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const duration = parseInt(ctx.match[1], 10);
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const model = models.video.models.find(m => m.key === state.modelKey);
+  const aspectRatios = model?.aspectRatios || ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'];
+  const aspectButtons = aspectRatios.map(r =>
+    Markup.button.callback(ASPECT_RATIO_LABELS[r] || r, `seedance_aspect_${r}`)
+  );
+
+  userState.set(userId, {
+    ...state,
+    duration,
+    step: 'select_aspect'
+  });
+
+  await ctx.reply(
+    `<b>${model?.name || 'Seedance'}</b>\n\n` +
+    `🖥️ ${state.resolution} | ⏱️ <b>${duration} сек</b>\n\n` +
+    `📐 <b>Крок 3: Оберіть пропорції відео</b>`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        ...aspectButtons.map(btn => [btn]),
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+bot.action(/^seedance_aspect_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const aspectRatio = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const cost = getEffectiveSeedanceCost(userId, state.modelKey, state.duration || 4, state.resolution || '480p');
+
+  userState.set(userId, {
+    ...state,
+    aspectRatio,
+    step: 'select_audio'
+  });
+
+  await ctx.reply(
+    `<b>ByteDance Seedance</b>\n\n` +
+    `🖥️ ${state.resolution} | ⏱️ ${state.duration} сек | 📐 ${aspectRatio}\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `🔊 <b>Крок 4: Оберіть режим аудіо</b>\n\n` +
+    `Аудіо генерується моделлю та не змінює ціну в поточному флоу.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`🔊 З аудіо (${cost}⚡)`, 'seedance_audio_on'),
+          Markup.button.callback(`🔇 Без аудіо (${cost}⚡)`, 'seedance_audio_off')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+bot.action(/^seedance_audio_(on|off)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const generateAudio = ctx.match[1] === 'on';
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const model = models.video.models.find(m => m.key === state.modelKey);
+  const cost = getEffectiveSeedanceCost(userId, state.modelKey, state.duration || 4, state.resolution || '480p');
+
+  userState.set(userId, {
+    ...state,
+    generateAudio,
+    seedanceCost: cost,
+    step: 'waiting_prompt'
+  });
+
+  await ctx.reply(
+    `<b>${model?.name || 'Seedance'}</b>\n\n` +
+    `🖥️ ${state.resolution} | ⏱️ ${state.duration} сек | 📐 ${state.aspectRatio}\n` +
+    `🔊 Аудіо: <b>${generateAudio ? 'Так' : 'Ні'}</b>\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `✍️ <b>Крок 5: Введіть промпт</b>\n\n` +
+    `Опишіть детально, що має відбуватися у відео.`,
     { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
   );
 });
@@ -8687,11 +9208,17 @@ async function generateVeoVideo(ctx, state) {
   }
 
   const duration = state.duration || 8;
-  const generateAudio = state.generateAudio !== false;
+  const useGeminiDirectVeo = shouldUseGeminiVeoDirect(userId, state);
+  const generateAudio = useGeminiDirectVeo ? true : state.generateAudio !== false;
   const veoModel = state.veoModel || 'veo3_fast';
   const veoModelLabel = veoModel === 'veo3' ? '💎 Quality' : '⚡ Fast';
-  const veoCost = state.veoCost || getEffectiveVeoFlatCost(userId, veoModel);
-  const apiCost = getVeoApiCostUSD(veoModel);
+  const veoCost = useGeminiDirectVeo
+    ? (state.veoCost || getEffectiveVeoGenerationCost(userId, veoModel, duration))
+    : getEffectiveVeoFlatCost(userId, veoModel);
+  const apiCost = useGeminiDirectVeo
+    ? getVeoApiCostUSD(userId, veoModel, duration)
+    : (veoModel === 'veo3' ? (model?.apiCostQuality ?? 1.25) : (model?.apiCostFast ?? 0.30));
+  const initialProviderName = useGeminiDirectVeo ? 'Google Gemini API' : 'автовибір провайдера';
 
   if (!(await userBalance.hasTokens(userId, veoCost))) {
     await showInsufficientTokens(ctx, veoCost);
@@ -8705,6 +9232,7 @@ async function generateVeoVideo(ctx, state) {
   const statusMsg = await ctx.reply(
     `🌟 <b>Google Veo 3.1 ${veoModelLabel} - Генерація</b>\n\n` +
     `🎯 Модель: ${veoModelLabel}\n` +
+    `🔌 Провайдер: ${initialProviderName}\n` +
     `📐 Пропорції: ${state.aspectRatio}\n` +
     `⏱️ Тривалість: ${duration} сек\n` +
     `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
@@ -8727,20 +9255,26 @@ async function generateVeoVideo(ctx, state) {
   // Асинхронна функція що виконується у фоні
   (async () => {
     try {
-      // Перевіряємо чи можемо використовувати KIE.AI
-      const userChosenProvider = userProviderChoice.get(userId);
-      const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
-
+      let providerName = 'Google Gemini API';
+      let providerKey = 'google-gemini';
       let useKieAI = false;
-      if (userChosenProvider === 'kie-ai') {
-        useKieAI = kieAI.isKieAIImplemented('veo');
-      } else if (userChosenProvider === 'replicate') {
-        useKieAI = false;
-      } else {
-        useKieAI = canUseKieAI && kieAI.isKieAIImplemented('veo');
+
+      if (!useGeminiDirectVeo) {
+        const userChosenProvider = userProviderChoice.get(userId);
+        const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
+
+        if (userChosenProvider === 'kie-ai') {
+          useKieAI = kieAI.isKieAIImplemented('veo');
+        } else if (userChosenProvider === 'replicate') {
+          useKieAI = false;
+        } else {
+          useKieAI = canUseKieAI && kieAI.isKieAIImplemented('veo');
+        }
+
+        providerName = useKieAI ? 'KIE.AI' : 'Replicate';
+        providerKey = useKieAI ? 'kie' : 'replicate';
       }
 
-      const providerName = useKieAI ? 'KIE.AI' : 'Replicate';
       console.log(`🎯 Veo using provider: ${providerName}`);
 
       // Будуємо масив imageUrls та generationType для KIE.AI Veo
@@ -8766,43 +9300,53 @@ async function generateVeoVideo(ctx, state) {
         veoGenerationType = 'TEXT_2_VIDEO';
       }
 
-      console.log(`🎥 Veo KIE.AI payload: generationType=${veoGenerationType}, imageUrls=${veoImageUrls.length}, model=${generationData.veoModel || 'veo3_fast'}`);
+      console.log(`🎥 Veo payload: generationType=${veoGenerationType}, imageUrls=${veoImageUrls.length}, model=${generationData.veoModel || 'veo3_fast'}`);
 
-      const result = useKieAI
-        ? await kieAI.generateVeoKieAI(generationData.prompt, {
-            imageUrls: veoImageUrls,
-            generationType: veoGenerationType,
-            aspectRatio: generationData.aspectRatio,
+      const result = useGeminiDirectVeo
+        ? await geminiVeo.generateVideo(generationData.prompt, {
             model: generationData.veoModel || 'veo3_fast',
-            generateAudio: generateAudio,
-            // 🔔 Реєструємо taskId в kieCallbackMap ОДРАЗУ після створення задачі,
-            // ДО початку polling — щоб webhook від KIE.AI не був пропущений
-            onTaskCreated: (taskId) => {
-              console.log(`📋 Veo: registering taskId=${taskId} in kieCallbackMap BEFORE polling`);
-              kieCallbackMap.set(taskId, {
-                chatId, userId, username,
-                model: 'veo', modelName: model.name,
-                prompt: generationData.prompt,
-                aspectRatio: generationData.aspectRatio,
-                duration, generateAudio,
-                veoCost, apiCost,
-                hasStartImage, hasLastFrame,
-                references: generationData.references?.length || 0,
-                statusMsgId: statusMsg.message_id,
-                createdAt: Date.now()
-              });
-            }
-          })
-        : await replicate.generateVideoWithVeo(
-            generationData.prompt,
-            generationData.references || [],
-            generationData.lastFrame || null,
-            generationData.aspectRatio,
+            aspectRatio: generationData.aspectRatio,
             duration,
-            '', // negative prompt
-            generationData.startImage || null,
-            generateAudio
-          );
+            generateAudio,
+            startImage: generationData.startImage || null,
+            lastFrame: generationData.lastFrame || null,
+            references: generationData.references || []
+          })
+        : useKieAI
+          ? await kieAI.generateVeoKieAI(generationData.prompt, {
+              imageUrls: veoImageUrls,
+              generationType: veoGenerationType,
+              aspectRatio: generationData.aspectRatio,
+              model: generationData.veoModel || 'veo3_fast',
+              generateAudio: generateAudio,
+              // 🔔 Реєструємо taskId в kieCallbackMap ОДРАЗУ після створення задачі,
+              // ДО початку polling — щоб webhook від KIE.AI не був пропущений
+              onTaskCreated: (taskId) => {
+                console.log(`📋 Veo: registering taskId=${taskId} in kieCallbackMap BEFORE polling`);
+                kieCallbackMap.set(taskId, {
+                  chatId, userId, username,
+                  model: 'veo', modelName: model.name,
+                  prompt: generationData.prompt,
+                  aspectRatio: generationData.aspectRatio,
+                  duration, generateAudio,
+                  veoCost, apiCost,
+                  hasStartImage, hasLastFrame,
+                  references: generationData.references?.length || 0,
+                  statusMsgId: statusMsg.message_id,
+                  createdAt: Date.now()
+                });
+              }
+            })
+          : await replicate.generateVideoWithVeo(
+              generationData.prompt,
+              generationData.references || [],
+              generationData.lastFrame || null,
+              generationData.aspectRatio,
+              duration,
+              '', // negative prompt
+              generationData.startImage || null,
+              generateAudio
+            );
 
       console.log(`🎯 Veo result: success=${result.success}, pending=${!!result.pending}, taskId=${result.taskId}, videoUrl=${result.videoUrl ? result.videoUrl.substring(0, 100) : 'NULL'}, error=${result.error || 'none'}, provider=${result.provider}`);
 
@@ -8875,16 +9419,18 @@ async function generateVeoVideo(ctx, state) {
                   duration: duration, generateAudio: generateAudio,
                   hasStartImage: hasStartImage,
                   references: generationData.references?.length || 0,
-                  hasLastFrame: hasLastFrame
+                  hasLastFrame: hasLastFrame,
+                  provider: providerKey
                 });
                 const isTrialVeo = await isTrialUser(userId);
                 await monitoringLoggers.logUsageEvent({
                   userId, modelKey: 'veo', success: true,
-                  options: { duration, generateAudio }, isTrial: isTrialVeo, isFree: isTrialVeo
+                  options: { duration, generateAudio }, isTrial: isTrialVeo, isFree: isTrialVeo, provider: providerKey
                 });
                 await bot.telegram.sendMessage(
                   chatId,
                   `✅ <b>Google Veo 3.1 готово!</b>\n\n` +
+                  `🔌 Провайдер: ${providerName}\n` +
                   `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
                   `📐 Пропорції: ${generationData.aspectRatio}\n` +
                   `⏱️ Тривалість: ${duration} сек\n` +
@@ -8935,7 +9481,7 @@ async function generateVeoVideo(ctx, state) {
         if (result.taskId) kieCallbackMap.delete(result.taskId);
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
           userId, username, action: 'veo_generation', model: model.name,
-          prompt: generationData.prompt, aspectRatio: generationData.aspectRatio
+          prompt: generationData.prompt, aspectRatio: generationData.aspectRatio, provider: providerName
         });
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
@@ -8951,7 +9497,8 @@ async function generateVeoVideo(ctx, state) {
           options: { duration, generateAudio },
           isTrial,
           isFree: isTrial,
-          errorCode: result.error?.substring(0, 100)
+          errorCode: result.error?.substring(0, 100),
+          provider: providerKey
         });
 
         return;
@@ -8972,7 +9519,8 @@ async function generateVeoVideo(ctx, state) {
         duration: duration, generateAudio: generateAudio,
         hasStartImage: hasStartImage,
         references: generationData.references?.length || 0,
-        hasLastFrame: hasLastFrame
+        hasLastFrame: hasLastFrame,
+        provider: providerKey
       });
 
       // 📊 Логуємо успішну генерацію
@@ -8983,7 +9531,8 @@ async function generateVeoVideo(ctx, state) {
         success: true,
         options: { duration, generateAudio },
         isTrial: isTrialVeo,
-        isFree: isTrialVeo
+        isFree: isTrialVeo,
+        provider: providerKey
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -8992,6 +9541,7 @@ async function generateVeoVideo(ctx, state) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>Google Veo 3.1 готово!</b>\n\n` +
+        `🔌 Провайдер: ${providerName}\n` +
         `❗️<b>ЗБЕРЕЖІТЬ ВІДЕО В ГАЛЕРЕЮ ЩОБ ОТРИМАТИ ПРАВИЛЬНИЙ РОЗМІР</b>\n\n` +
         `📐 Пропорції: ${generationData.aspectRatio}\n` +
         `⏱️ Тривалість: ${duration} сек\n` +
@@ -9004,14 +9554,25 @@ async function generateVeoVideo(ctx, state) {
         { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
       );
 
-      await safeSendVideo(chatId, result.videoUrl, {
-        caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${veoCost}⚡`,
-        ...keyboard.createBackButton('video_menu')
-      });
+      if (useGeminiDirectVeo) {
+        await bot.telegram.sendVideo(
+          chatId,
+          { source: result.videoBuffer, filename: `veo-${veoModel}.mp4` },
+          {
+            caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | 🔊\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${veoCost}⚡`,
+            ...keyboard.createBackButton('video_menu')
+          }
+        );
+      } else {
+        await safeSendVideo(chatId, result.videoUrl, {
+          caption: `🌟 Google Veo 3.1\n\n📐 ${generationData.aspectRatio} | ⏱️ ${duration}сек | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${veoCost}⚡`,
+          ...keyboard.createBackButton('video_menu')
+        });
+      }
 
     } catch (error) {
       console.error('Veo 3.1 generation failed:', error);
-      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'veo_generation', model: model.name });
+      await adminNotifier.notifyAdmin(bot, error, { userId, username, action: 'veo_generation', model: model.name, provider: useGeminiDirectVeo ? 'Google Gemini API' : 'fallback-provider' });
       try {
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
@@ -9602,6 +10163,28 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  // ✅ SEEDANCE 2: Обробка промпту (останній крок)
+  if (state?.action === 'seedance_generation' && state?.step === 'waiting_prompt') {
+    if (!text || text.length < 5) {
+      await ctx.reply(
+        '⚠️ Промпт занадто короткий!\n\n' +
+        'Напишіть детальніше що хочете бачити у відео (мінімум 5 символів).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      prompt: text,
+      step: 'ready_to_generate'
+    });
+
+    await ctx.reply('🚀 Промпт збережено! Починаємо генерацію Seedance...');
+    runBackgroundTask(() => generateSeedanceVideo(ctx, { ...state, prompt: text }), 'seedance_generate_text');
+    return;
+  }
+
   // ✅ KLING: Обробка промпту
   if (state?.action === 'kling_generation' && state?.step === 'waiting_prompt') {
     if (!text || text.length < 5) {
@@ -9996,10 +10579,28 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  if ((currentModel === 'seedance_2' || currentModel === 'seedance_2_fast') && !state?.action) {
+    await ctx.reply(
+      '🎞️ <b>ByteDance Seedance</b>\n\n' +
+      '⚠️ Спочатку оберіть resolution, тривалість, пропорції та аудіо.\n\n' +
+      'Натисніть на кнопку Seedance у меню відео.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
   // ✅ НОВИЙ ФЛОУ ДЛЯ ГРАФІЧНИХ МОДЕЛЕЙ
   const imgState = imageGenState.get(userId);
   const activeImageModel = currentModel || imgState?.model;
   if (imgState && IMAGE_MODELS.includes(activeImageModel)) {
+    if (imgState.step === 'select_free_model') {
+      await ctx.reply(
+        '🎯 Спочатку оберіть безкоштовну модель Nano Banana кнопками нижче.',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+      );
+      return;
+    }
+
     if (imgState.step === 'select_quality') {
       await ctx.reply(
         '🎯 Спочатку оберіть якість зображення кнопками нижче.',
@@ -10009,7 +10610,7 @@ bot.on('text', async (ctx) => {
     }
 
     const targetModelKey = imgState.selectedModelKey || activeImageModel;
-    const generationOptions = imgState.imageSize ? { imageSize: imgState.imageSize } : undefined;
+    const generationOptions = getImageGenerationOptionsFromState(imgState);
 
     if ((activeImageModel === 'clarity' || activeImageModel === 'recraft_upscale') && (!imgState.photos || imgState.photos.length === 0)) {
       imageGenState.set(userId, { ...imgState, step: 'waiting_photos' });
@@ -10047,6 +10648,10 @@ bot.on('text', async (ctx) => {
           model: activeImageModel,
           targetModelKey,
           imageSize: imgState.imageSize || null,
+          geminiModelCode: imgState.geminiModelCode || null,
+          freeModelLabel: imgState.freeModelLabel || null,
+          freeBaseModelKey: imgState.freeBaseModelKey || null,
+          selectedMaxImages: imgState.selectedMaxImages || null,
           step: 'waiting_aspect_ratio',
           imageUrl: hasReferences ? references : null,
           prompt: text
@@ -10103,6 +10708,10 @@ bot.on('text', async (ctx) => {
           model: activeImageModel,
           targetModelKey,
           imageSize: imgState.imageSize || null,
+          geminiModelCode: imgState.geminiModelCode || null,
+          freeModelLabel: imgState.freeModelLabel || null,
+          freeBaseModelKey: imgState.freeBaseModelKey || null,
+          selectedMaxImages: imgState.selectedMaxImages || null,
           step: 'waiting_aspect_ratio',
           imageUrl: hasReferences ? references : null,
           prompt: text
@@ -10331,6 +10940,7 @@ bot.on('text', async (ctx) => {
     nano_banana_2k: () => handleImageGeneration(ctx, text, 'nano_banana_2k'),
     nano_banana_4k: () => handleImageGeneration(ctx, text, 'nano_banana_4k'),
     seedream_4k: () => handleImageGeneration(ctx, text, 'seedream_4k'),
+    seedream_5_lite: () => handleImageGeneration(ctx, text, 'seedream_5_lite'),
     ideogram: () => handleImageGeneration(ctx, text, 'ideogram'),
     kling: () => handleVideoGeneration(ctx, text, 'kling'),
     kling_v2_6: () => handleVideoGeneration(ctx, text, 'kling_v2_6'),
@@ -10389,6 +10999,15 @@ bot.on('photo', async (ctx) => {
     stateStep: state?.step,
     hasState: !!state
   });
+
+  if (state?.action === 'seedance_generation' && state?.step === 'waiting_prompt') {
+    await ctx.reply(
+      '✍️ Для Seedance зараз потрібен текстовий промпт.\n\n' +
+      'Надішліть опис сцени текстом.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
 
   // ✅ A2E Motion: Обробка фото для анімації (перевіряємо першим)
   if (state?.action === 'a2e_motion_generation' && state?.step === 'waiting_image') {
@@ -10796,10 +11415,18 @@ bot.on('photo', async (ctx) => {
     return;
   }
 
+  if (imgState && imgState.step === 'select_free_model') {
+    await ctx.reply(
+      '🎯 Спочатку оберіть безкоштовну модель Nano Banana.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
+
   if (imgState && imgState.step === 'waiting_photos') {
     const modelKey = imgState.model;
     const model = models.design.models.find(m => m.key === modelKey);
-    const maxPhotos = model?.maxImages || 1;
+    const maxPhotos = imgState.selectedMaxImages || model?.maxImages || 1;
     const mediaGroupId = ctx.message.media_group_id;
 
     // Якщо це альбом - збираємо всі фото через mediaGroups Map
@@ -10849,7 +11476,7 @@ bot.on('photo', async (ctx) => {
           imageGenState.delete(userId);
           await ctx.reply('🚀 Починаємо upscale...', { parse_mode: 'HTML' });
           runBackgroundTask(
-            () => handleImageGeneration(ctx, 'upscale image', finalGroup.model, limited),
+            () => handleImageGeneration(ctx, 'upscale image', finalGroup.model, limited, '1:1', getImageGenerationOptionsFromState(current)),
             'image_generation_upscale_album'
           );
           return;
@@ -10895,7 +11522,7 @@ bot.on('photo', async (ctx) => {
       imageGenState.delete(userId);
       await ctx.reply('🚀 Починаємо upscale...', { parse_mode: 'HTML' });
       runBackgroundTask(
-        () => handleImageGeneration(ctx, 'upscale image', modelKey, references.length ? references : null),
+        () => handleImageGeneration(ctx, 'upscale image', modelKey, references.length ? references : null, '1:1', getImageGenerationOptionsFromState(imgState)),
         'image_generation_upscale_photo'
       );
       return;
@@ -10947,6 +11574,16 @@ bot.on('photo', async (ctx) => {
       '🌌 <b>OpenAI Sora 2</b>\n\n' +
       '⚠️ Спочатку оберіть тривалість та пропорції відео.\n\n' +
       'Натисніть на кнопку Sora 2 в меню відео.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if ((currentModel === 'seedance_2' || currentModel === 'seedance_2_fast') && !state?.action) {
+    await ctx.reply(
+      '🎞️ <b>ByteDance Seedance</b>\n\n' +
+      '⚠️ Спочатку оберіть resolution, тривалість, пропорції та аудіо в меню відео.\n\n' +
+      'Після цього бот попросить текстовий промпт.',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
     return;
@@ -11028,7 +11665,7 @@ bot.on('photo', async (ctx) => {
 
   // Обробка одного фото
   const videoModels = ['kling', 'kling_v2_6', 'runway_gen4'];
-  const imageModels = ['nano_banana', 'nano_banana_2', 'nano_banana_pro', 'nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_4k', 'ideogram', 'recraft_upscale'];
+  const imageModels = ['nano_banana', 'nano_banana_2', 'nano_banana_pro', 'nano_banana_2k', 'nano_banana_4k', 'stable_diffusion', 'seedream_4k', 'seedream_5_lite', 'ideogram', 'recraft_upscale'];
 
   // Отримуємо caption як промпт
   let prompt = ctx.message.caption || '';
@@ -11446,13 +12083,20 @@ async function safeSendVideo(chatId, url, options) {
 }
 
 /**
- * 🎁 Nano Banana PRO FREE — генерація через Google Gemini API (безкоштовно)
+ * 🎁 Nano Banana FREE — генерація через Google Gemini API (безкоштовно)
  * Окремий хендлер, бо не використовує провайдер-фолбек систему
  */
-async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio) {
+async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio, generationOptions = {}) {
   const userId = ctx.from.id;
   const username = ctx.from.username || 'unknown';
   const chatId = ctx.chat.id;
+  const freeBaseModelKey = generationOptions.freeBaseModelKey || 'nano_banana_pro';
+  const freeModelConfig = FREE_NANO_BANANA_MODELS[freeBaseModelKey] || FREE_NANO_BANANA_MODELS.nano_banana_pro;
+  const freeModelLabel = generationOptions.freeModelLabel || freeModelConfig.label;
+  const geminiModelCode = generationOptions.geminiModelCode || freeModelConfig.googleModel || geminiImage.GEMINI_MODEL;
+  const imageSize = generationOptions.imageSize || freeModelConfig.imageSize || '1K';
+  const selectedModel = models.design.models.find((m) => m.key === freeBaseModelKey);
+  const maxImages = generationOptions.maxImages || selectedModel?.maxImages || model.maxImages || geminiImage.MAX_REFERENCE_IMAGES;
 
   // Перевірка ліміту
   const user = await User.findById(userId);
@@ -11461,45 +12105,49 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
 
   if (freeUsed >= freeLimit) {
     await ctx.reply(
-      `🎁 <b>Nano Banana PRO FREE</b>\n\n` +
-      `❌ Ви вже використали всі ${freeLimit} безкоштовних генерацій!\n\n` +
-      `💡 Спробуйте платні моделі для більших можливостей:\n` +
-      `• 🍌 Nano Banana — 4⚡ за генерацію\n` +
-      `• 🍌 Nano Banana PRO — 2K/4K (від 25⚡)\n` +
-      `• 🍌 Nano Banana 2 — 0.5K/1K/2K/4K (від 8⚡)`,
+      buildNanoBananaFreeLimitMessage(freeLimit),
       { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
     );
     return;
   }
 
-  const isAlbum = Array.isArray(imageInput) && imageInput.length > 1;
-  const refCount = Array.isArray(imageInput) ? imageInput.length : (imageInput ? 1 : 0);
-  const mode = imageInput ? (isAlbum ? `album (${refCount} refs)` : 'img2img') : 'text2img';
+  let normalizedImageInput = imageInput;
+  if (Array.isArray(normalizedImageInput) && maxImages > 0) {
+    normalizedImageInput = normalizedImageInput.slice(0, maxImages);
+  }
+
+  const isAlbum = Array.isArray(normalizedImageInput) && normalizedImageInput.length > 1;
+  const refCount = Array.isArray(normalizedImageInput) ? normalizedImageInput.length : (normalizedImageInput ? 1 : 0);
+  const mode = normalizedImageInput ? (isAlbum ? `album (${refCount} refs)` : 'img2img') : 'text2img';
   const remaining = freeLimit - freeUsed - 1;
 
   const statusMsg = await ctx.reply(
-    `🍌🎁 Nano Banana PRO FREE генерація (${mode})...\n\n` +
-    `🤖 Модель: Gemini 3 Pro Image\n` +
+    `🍌🎁 Nano Banana FREE генерація (${mode})...\n\n` +
+    `🤖 Модель: ${freeModelLabel}\n` +
+    `🧠 Gemini code: ${geminiModelCode}\n` +
     `📝 Промпт: "${prompt.substring(0, 150)}${prompt.length > 150 ? '...' : ''}"\n` +
     (refCount > 0 ? `📸 Референсів: ${refCount}\n` : '') +
-    `📐 Пропорції: ${aspectRatio}\n\n` +
+    `📐 Пропорції: ${aspectRatio}\n` +
+    `🖼️ Розмір: ${imageSize}\n\n` +
     `📊 Залишиться безкоштовних: ${remaining} з ${freeLimit}`
   );
 
   try {
-    console.log(`🍌🎁 Nano Banana PRO FREE: userId=${userId}, used=${freeUsed}/${freeLimit}, mode=${mode}, refs=${refCount}, aspect=${aspectRatio}`);
+    console.log(
+      `🍌🎁 Nano Banana FREE: userId=${userId}, used=${freeUsed}/${freeLimit}, mode=${mode}, refs=${refCount}, aspect=${aspectRatio}, freeModel=${freeBaseModelKey}, geminiModel=${geminiModelCode}, size=${imageSize}`
+    );
 
-    const result = await geminiImage.generateImage(prompt, imageInput, aspectRatio);
+    const result = await geminiImage.generateImage(prompt, normalizedImageInput, aspectRatio, imageSize, geminiModelCode);
 
     if (!result.success) {
-      console.error(`❌ Nano Banana PRO FREE error: ${result.error}`);
+      console.error(`❌ Nano Banana FREE error: ${result.error}`);
       await adminNotifier.notifyAdmin(bot, new Error(result.error), {
         userId, username, action: 'nano_banana_free_generation',
-        model: model.name, prompt, refs: refCount, aspectRatio
+        model: freeModelLabel, prompt, refs: refCount, aspectRatio, geminiModel: geminiModelCode
       });
 
       await bot.telegram.editMessageText(chatId, statusMsg.message_id, null,
-        `❌ Помилка генерації Nano Banana PRO FREE.\n\n${result.error}\n\nСпробуйте інший промпт або модель.`
+        `❌ Помилка генерації Nano Banana FREE.\n\n${result.error}\n\nСпробуйте інший промпт або модель.`
       );
       return;
     }
@@ -11517,8 +12165,11 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
     }
 
     const safePrompt = prompt.replace(/[<>&]/g, c => c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;');
-    const caption = `🍌🎁 Nano Banana PRO FREE (${mode})\n\n` +
+    const caption = `🍌🎁 Nano Banana FREE • ${freeModelLabel} (${mode})\n\n` +
       `📝 Промпт: ${safePrompt.substring(0, 800)}${safePrompt.length > 800 ? '...' : ''}\n\n` +
+      `🤖 Gemini: ${geminiModelCode}\n` +
+      `📐 Пропорції: ${aspectRatio}\n` +
+      `🖼️ Розмір: ${imageSize}\n` +
       `💰 Вартість: БЕЗКОШТОВНО 🎁\n` +
       `📊 Залишилось: ${remaining} з ${freeLimit}`;
 
@@ -11542,15 +12193,15 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
         );
       }
     } catch (sendErr) {
-      console.error('❌ Nano Banana PRO FREE: Failed to send image to Telegram:', sendErr.message);
+      console.error('❌ Nano Banana FREE: Failed to send image to Telegram:', sendErr.message);
       // Fallback: спробуємо без parse_mode
       try {
         await bot.telegram.sendPhoto(chatId,
           { source: result.imageBuffer, filename: 'nano_banana_free.png' },
-          { caption: `🍌🎁 Nano Banana PRO FREE\n\n📝 ${prompt.substring(0, 200)}\n\n💰 БЕЗКОШТОВНО 🎁` }
+          { caption: `🍌🎁 Nano Banana FREE • ${freeModelLabel}\n\n📝 ${prompt.substring(0, 200)}\n\n💰 БЕЗКОШТОВНО 🎁` }
         );
       } catch (sendErr2) {
-        console.error('❌ Nano Banana PRO FREE: Fallback send also failed:', sendErr2.message);
+        console.error('❌ Nano Banana FREE: Fallback send also failed:', sendErr2.message);
         await ctx.reply('✅ Зображення згенеровано, але не вдалось відправити. Спробуйте ще раз.');
       }
     }
@@ -11564,16 +12215,25 @@ async function handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, as
       isTrial,
       isFree: true,
       provider: 'google-gemini',
-      metadata: { freeUsed: freeUsed + 1, freeLimit, refCount, aspectRatio, model: geminiImage.GEMINI_MODEL }
+      metadata: {
+        freeUsed: freeUsed + 1,
+        freeLimit,
+        refCount,
+        aspectRatio,
+        imageSize,
+        freeBaseModelKey,
+        freeModelLabel,
+        model: geminiModelCode
+      }
     });
 
-    console.log(`✅ Nano Banana PRO FREE: userId=${userId}, used=${freeUsed + 1}/${freeLimit}, model=${geminiImage.GEMINI_MODEL}`);
+    console.log(`✅ Nano Banana FREE: userId=${userId}, used=${freeUsed + 1}/${freeLimit}, model=${geminiModelCode}`);
 
   } catch (error) {
-    console.error('❌ Nano Banana PRO FREE generation failed:', error);
+    console.error('❌ Nano Banana FREE generation failed:', error);
     await adminNotifier.notifyAdmin(bot, error, {
       userId, username, action: 'nano_banana_free_generation',
-      model: model.name, prompt
+      model: freeModelLabel, prompt, geminiModel: geminiModelCode
     });
 
     try {
@@ -11600,7 +12260,7 @@ async function handleGeminiDirectGeneration(ctx, prompt, model, imageInput, aspe
   const modelKey = model.key;
   const modelName = model.name;
   const imageSize = generationOptions.imageSize || model.imageSize || '1K';
-  const geminiModelCode = model.googleModel || geminiImage.GEMINI_MODEL;
+  const geminiModelCode = generationOptions.geminiModelCode || model.googleModel || geminiImage.GEMINI_MODEL;
   const effectiveImageCost = (model.costsBySize && Object.prototype.hasOwnProperty.call(model.costsBySize, imageSize))
     ? model.costsBySize[imageSize]
     : getEffectiveImageCost(userId, model, modelKey);
@@ -11778,9 +12438,9 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
 
   imageInput = normalizeReferenceOrder(imageInput);
 
-  // 🎁 Nano Banana PRO FREE — окремий шлях генерації через Google Gemini API
+  // 🎁 Nano Banana FREE — окремий шлях генерації через Google Gemini API
   if (resolvedModelKey === 'nano_banana_free') {
-    return handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio);
+    return handleNanoBananaFreeGeneration(ctx, prompt, model, imageInput, aspectRatio, generationOptions);
   }
 
   if (!imageInput && ctx.message?.photo) {
@@ -11917,6 +12577,14 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
 
             case 'seedream_4k':
               return await kieAI.generateWithSeedreamKieAI(
+                generationData.prompt,
+                generationData.imageInput,
+                generationData.aspectRatio || '1:1',
+                'high'
+              );
+
+            case 'seedream_5_lite':
+              return await kieAI.generateWithSeedream5LiteKieAI(
                 generationData.prompt,
                 generationData.imageInput,
                 generationData.aspectRatio || '1:1',
@@ -12280,6 +12948,210 @@ async function handleVideoGeneration(ctx, prompt, modelKey) {
 
       if (!finished) {
         gracefulShutdown.completeGeneration(requestId, false);
+      }
+    }
+  })();
+}
+
+// ==================== SEEDANCE GENERATION FUNCTION ====================
+
+async function generateSeedanceVideo(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
+  const modelKey = state?.modelKey || userCurrentModel.get(userId) || 'seedance_2';
+  const model = models.video.models.find(m => m.key === modelKey);
+
+  if (!model) {
+    await ctx.reply('❌ Модель Seedance не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  if (!kieAI.isKieAIEnabled) {
+    await ctx.reply('❌ KIE.AI тимчасово вимкнена. Додайте KIE_AI_API_KEY в .env.', keyboard.createBackButton('video_menu'));
+    userState.delete(userId);
+    return;
+  }
+
+  if (!accessControl.canUseKieAI(userId)) {
+    await ctx.reply(
+      '🔒 Seedance 2 доступна тільки через KIE.AI для користувачів з доступом до KIE.',
+      keyboard.createBackButton('video_menu')
+    );
+    userState.delete(userId);
+    return;
+  }
+
+  const duration = state.duration || 4;
+  const resolution = state.resolution || '480p';
+  const aspectRatio = state.aspectRatio || '16:9';
+  const generateAudio = state.generateAudio === true;
+  const seedanceCost = state.seedanceCost || getEffectiveSeedanceCost(userId, modelKey, duration, resolution);
+  const apiCost = getSeedanceApiCostUSD(userId, modelKey, duration, resolution);
+
+  if (!(await userBalance.hasTokens(userId, seedanceCost))) {
+    await showInsufficientTokens(ctx, seedanceCost);
+    userState.delete(userId);
+    return;
+  }
+
+  const statusMsg = await ctx.reply(
+    `<b>${model.name} - Генерація</b>\n\n` +
+    `🖥️ Роздільна здатність: ${resolution}\n` +
+    `⏱️ Тривалість: ${duration} сек\n` +
+    `📐 Пропорції: ${aspectRatio}\n` +
+    `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n\n` +
+    `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
+    `⏱️ Це може зайняти 5-10 хвилин...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  const generationData = { ...state };
+
+  (async () => {
+    try {
+      const result = await kieAI.generateSeedanceVideoKieAI(generationData.prompt, {
+        modelKey,
+        resolution,
+        aspectRatio,
+        duration,
+        generateAudio
+      });
+
+      if (!result.success && result.pending && result.taskId) {
+        console.log(`⏱️ Seedance task ${result.taskId} pending — recovery for user ${userId}`);
+        await bot.telegram.editMessageText(
+          chatId,
+          statusMsg.message_id,
+          null,
+          `⏳ <b>${model.name} ще генерується...</b>\n\nВідео буде надіслано автоматично.\n🔄 Перевіряємо у фоні...`,
+          { parse_mode: 'HTML' }
+        );
+        startVideoRecoveryPolling({
+          chatId,
+          userId,
+          username,
+          modelKey,
+          modelLabel: model.name,
+          taskId: result.taskId,
+          cost: seedanceCost,
+          deductDescription: `${model.name} generation`,
+          deductMeta: {
+            modelKey,
+            modelName: model.name,
+            apiCost,
+            prompt: generationData.prompt,
+            duration,
+            resolution,
+            aspectRatio,
+            generateAudio,
+            provider: 'kie'
+          },
+          promptSnippet: `🖥️ ${resolution} | ⏱️ ${duration} сек | 📐 ${aspectRatio}`,
+          captionLine: `${model.name}\n🖥️ ${resolution} | ⏱️ ${duration}сек | 📐 ${aspectRatio}`,
+          monitorOptions: { options: { duration, resolution, aspectRatio, generateAudio }, provider: 'kie' }
+        });
+        return;
+      }
+
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId,
+          username,
+          action: `${modelKey}_generation`,
+          model: model.name,
+          prompt: generationData.prompt,
+          duration,
+          resolution
+        });
+        await bot.telegram.editMessageText(
+          chatId,
+          statusMsg.message_id,
+          null,
+          `❌ Помилка генерації ${model.name}.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+        );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey,
+          success: false,
+          options: { duration, resolution, aspectRatio, generateAudio },
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100),
+          provider: 'kie'
+        });
+        return;
+      }
+
+      await userBalance.deductTokens(userId, seedanceCost, `${model.name} generation`, {
+        modelKey,
+        modelName: model.name,
+        apiCost,
+        prompt: generationData.prompt,
+        duration,
+        resolution,
+        aspectRatio,
+        generateAudio,
+        provider: 'kie'
+      });
+
+      const isTrial = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey,
+        success: true,
+        options: { duration, resolution, aspectRatio, generateAudio },
+        isTrial,
+        isFree: isTrial,
+        provider: 'kie'
+      });
+
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>${model.name} готово!</b>\n\n` +
+        `🖥️ Роздільна здатність: ${resolution}\n` +
+        `⏱️ Тривалість: ${duration} сек\n` +
+        `📐 Пропорції: ${aspectRatio}\n` +
+        `🔊 Аудіо: ${generateAudio ? 'Так' : 'Ні'}\n` +
+        `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
+        `💾 <b>Як зберегти:</b>\n` +
+        `1️⃣ Натисніть на відео нижче\n` +
+        `2️⃣ Натисніть ⋮ → "Зберегти"\n\n` +
+        `💰 Витрачено: ${seedanceCost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `${model.name}\n\n🖥️ ${resolution} | ⏱️ ${duration}сек | 📐 ${aspectRatio} | ${generateAudio ? '🔊' : '🔇'}\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${seedanceCost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
+    } catch (error) {
+      console.error(`${modelKey} generation failed:`, error);
+      await adminNotifier.notifyAdmin(bot, error, {
+        userId,
+        username,
+        action: `${modelKey}_generation`,
+        model: model.name,
+        provider: 'kie'
+      });
+      try {
+        await bot.telegram.editMessageText(
+          chatId,
+          statusMsg.message_id,
+          null,
+          `❌ Помилка генерації ${model.name}. Спробуйте ще раз.`
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, `❌ Помилка генерації ${model.name}. Спробуйте ще раз.`);
       }
     }
   })();
@@ -14450,7 +15322,7 @@ async function startBot() {
         models.design.models
           .filter(m => m.available && !m.menuHidden)
           .forEach((m) => {
-            // Nano Banana PRO FREE — показуємо окремо з freeLimit
+            // Nano Banana FREE — показуємо окремо з freeLimit
             if (m.key === 'nano_banana_free') {
               trialUsage[m.key] = {
                 count: m.freeLimit || geminiImage.FREE_GENERATIONS_LIMIT,

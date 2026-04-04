@@ -28,6 +28,7 @@ function isAvailableOnReplicate(modelKey) {
   const kieOnlyModels = [
     'kling_3',           // Kling 3.0 Pro
     'midjourney',        // Midjourney
+    'seedream_5_lite',   // Seedream 5.0 Lite
     'z_image'            // Z-Image (Qwen)
   ];
 
@@ -260,4 +261,3 @@ module.exports = {
   selectProviders,
   generateWithFallback
 };
-

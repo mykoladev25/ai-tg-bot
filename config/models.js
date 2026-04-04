@@ -74,6 +74,7 @@ module.exports = {
    * - kling_3 (Kling 3.0 Pro)
    * - veo (Google Veo 3.1)
    * - sora_2 (OpenAI Sora 2)
+   * - seedance_2 / seedance_2_fast (ByteDance Seedance 2)
    */
   video: {
     models: [
@@ -203,8 +204,13 @@ module.exports = {
         costPerSecondNoAudio: 33,
         apiCostPerSecondAudio: 0.40,
         apiCostPerSecondNoAudio: 0.20,
+        // Google Gemini direct pricing (audio included by default, billed per second)
+        geminiCostPerSecondFast: 25,      // ceil(0.15 * 1.65 / 0.01)
+        geminiCostPerSecondQuality: 66,   // ceil(0.40 * 1.65 / 0.01)
+        geminiApiCostPerSecondFast: 0.15,
+        geminiApiCostPerSecondQuality: 0.40,
         minSeconds: 4,
-        durations: [4, 8],
+        durations: [4, 6, 8],
         cost: 208, // default Quality
         available: true,
         requiresImage: false,
@@ -226,6 +232,76 @@ module.exports = {
         available: true,
         requiresImage: false,
         supportsReferences: true
+      },
+
+      /**
+       * ByteDance Seedance 2 — KIE.AI ONLY
+       * Pricing API (checked 2026-04-04), text-to-video / no-video-input:
+       * - 480p: $0.095/sec -> 16 tokens/sec
+       * - 720p: $0.205/sec -> 34 tokens/sec
+       * Range in bot:
+       * - 4s 480p = 63 tokens
+       * - 15s 720p = 508 tokens
+       */
+      {
+        name: '🎞️ ByteDance Seedance 2 💎',
+        key: 'seedance_2',
+        costPerSecond: 16,  // fallback/min = 480p
+        apiCostPerSecond: 0.095,
+        costPerSecondByResolution: {
+          '480p': 16,
+          '720p': 34
+        },
+        apiCostPerSecondByResolution: {
+          '480p': 0.095,
+          '720p': 0.205
+        },
+        cost: 63,
+        maxCost: 508,
+        minSeconds: 4,
+        durations: [4, 5, 6, 8, 10, 12, 15],
+        resolutions: ['480p', '720p'],
+        aspectRatios: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+        available: true,
+        requiresImage: false,
+        supportsReferences: true,
+        supportsAudio: true,
+        kieAIOnly: true
+      },
+
+      /**
+       * ByteDance Seedance 2 Fast — KIE.AI ONLY
+       * Pricing API (checked 2026-04-04), text-to-video / no-video-input:
+       * - 480p: $0.0775/sec -> 13 tokens/sec
+       * - 720p: $0.165/sec -> 28 tokens/sec
+       * Range in bot:
+       * - 4s 480p = 52 tokens
+       * - 15s 720p = 409 tokens
+       */
+      {
+        name: '⚡ ByteDance Seedance 2 Fast',
+        key: 'seedance_2_fast',
+        costPerSecond: 13,  // fallback/min = 480p
+        apiCostPerSecond: 0.0775,
+        costPerSecondByResolution: {
+          '480p': 13,
+          '720p': 28
+        },
+        apiCostPerSecondByResolution: {
+          '480p': 0.0775,
+          '720p': 0.165
+        },
+        cost: 52,
+        maxCost: 409,
+        minSeconds: 4,
+        durations: [4, 5, 6, 8, 10, 12, 15],
+        resolutions: ['480p', '720p'],
+        aspectRatios: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+        available: true,
+        requiresImage: false,
+        supportsReferences: true,
+        supportsAudio: true,
+        kieAIOnly: true
       },
 
       /**
@@ -297,19 +373,20 @@ module.exports = {
       { name: '🌀 Stable Diffusion', key: 'stable_diffusion', cost: 12, apiCost: 0.07, available: true },
 
       /**
-       * Nano Banana PRO FREE — безкоштовна модель через Google Gemini API
-       * gemini-3-pro-image-preview — 3 безкоштовних генерацій для кожного юзера
-       * Не використовує Replicate/KIE.AI — напряму Google API
-       * Той самий функціонал що і Nano Banana PRO (до 14 референсів, aspect ratio)
+       * Nano Banana FREE — безкоштовний вхід у Gemini image generation.
+       * Кнопка відкриває вибір моделі:
+       * - Nano Banana
+       * - Nano Banana 2
+       * - Nano Banana PRO
        */
       {
-        name: '🍌 Nano Banana PRO FREE 🎁',
+        name: '🍌 Nano Banana FREE 🎁',
         key: 'nano_banana_free',
         cost: 0,
         apiCost: 0,
         maxImages: 14,
         available: true,
-        freeLimit: 5,
+        freeLimit: 3,
         googleDirect: true  // маркер: через Google Gemini API напряму
       },
 
@@ -406,6 +483,23 @@ module.exports = {
 
       // seedream $0.04 -> 7
       { name: '🌊 Seedream 4K', key: 'seedream_4k', cost: 7, apiCost: 0.04, size: '4K', maxImages: 14, available: true },
+
+      /**
+       * Seedream 5.0 Lite — KIE.AI ONLY
+       * 5.5 credits/image = $0.0275
+       * basic = 2K, high = 3K
+       * tokens = ceil(0.0275 * 1.65 / 0.01) = 5
+       */
+      {
+        name: '🌊 Seedream 5.0 Lite',
+        key: 'seedream_5_lite',
+        cost: 5,
+        apiCost: 0.0275,
+        size: '3K',
+        maxImages: 14,
+        available: true,
+        kieAIOnly: true
+      },
 
       // clarity $0.02 -> 4
       { name: '🔮 Clarity Upscaler', key: 'clarity', cost: 4, apiCost: 0.02, maxImages: 1, available: true },

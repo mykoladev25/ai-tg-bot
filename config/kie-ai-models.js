@@ -140,6 +140,50 @@ module.exports = {
   },
 
   /**
+   * ByteDance Seedream 5.0 Lite
+   * https://docs.kie.ai/market/bytedance/seedream-5-lite
+   *
+   * KIE.AI Pricing:
+   * - 5.5 credits per image = $0.0275
+   * - text-to-image: seedream/5-lite-text-to-image
+   * - image-to-image: seedream/5-lite-image-to-image
+   * - Basic = 2K, High = 3K
+   *
+   * З нашою націнкою 1.65x:
+   * - API cost: $0.0275
+   * - User cost: $0.0275 × 1.65 = $0.045375 → 5 tokens
+   *
+   * 💰 High-tier top-ups на KIE можуть знижувати effective cost до ≈ $0.025/image
+   */
+  seedream_5_lite: {
+    kie_model_text_to_image: 'seedream/5-lite-text-to-image',
+    kie_model_image_to_image: 'seedream/5-lite-image-to-image',
+    kie_pricing: {
+      per_image: {
+        credits: 5.5,
+        usd: 0.0275,
+        note: 'Офіційна KIE.AI ціна: 5.5 credits per image'
+      },
+      discounted_effective_usd: 0.025
+    },
+    replicate_model: null,
+    replicate_pricing: null,
+    features: {
+      supports_text_to_image: true,
+      supports_image_to_image: true,
+      max_images: 14,
+      aspect_ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '21:9'],
+      qualities: {
+        basic: '2K',
+        high: '3K'
+      },
+      max_prompt_length_text_to_image: 2995,
+      max_prompt_length_image_to_image: 2996
+    },
+    notes: 'KIE.AI only. Приблизно на 21% дешевше за official/Fal.ai rates.'
+  },
+
+  /**
    * Stability AI Stable Diffusion 3.5
    * https://docs.kie.ai/market/stability-ai/stable-diffusion-3.5
    *
@@ -421,6 +465,84 @@ module.exports = {
     notes: '🔥 ВЕЛИЧЕЗНА ЗНИЖКА! 80%+ дешевше ніж Fal.ai! Це звичайна Sora 2, не Pro версія.'
   },
 
+  /**
+   * ByteDance Seedance 2
+   * https://docs.kie.ai/market/bytedance/seedance-2
+   *
+   * KIE.AI Pricing (pricing API, checked 2026-04-04):
+   * - 480p no video input: $0.095/sec
+   * - 720p no video input: $0.205/sec
+   * - 480p with video input: $0.057/sec
+   * - 720p with video input: $0.125/sec
+   *
+   * Note:
+   * - Our current Telegram flow uses text-to-video / no-video-input pricing.
+   * - Video-input pricing is stored for future multimodal flows.
+   */
+  seedance_2: {
+    kie_model: 'bytedance/seedance-2',
+    kie_pricing: {
+      no_video_input: {
+        '480p': { usd_per_sec: 0.095, credits_per_sec: 19 },
+        '720p': { usd_per_sec: 0.205, credits_per_sec: 41 }
+      },
+      with_video_input: {
+        '480p': { usd_per_sec: 0.057, credits_per_sec: 11.5 },
+        '720p': { usd_per_sec: 0.125, credits_per_sec: 25 }
+      }
+    },
+    features: {
+      durations: [4, 5, 6, 8, 10, 12, 15],
+      resolutions: ['480p', '720p'],
+      aspect_ratios: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+      supports_audio: true,
+      supports_reference_images: true,
+      supports_reference_videos: true,
+      supports_reference_audio: true,
+      supports_last_frame: true
+    },
+    notes: 'KIE.AI only. Telegram flow currently uses text-to-video / no-video-input pricing.'
+  },
+
+  /**
+   * ByteDance Seedance 2 Fast
+   * https://docs.kie.ai/market/bytedance/seedance-2-fast
+   *
+   * KIE.AI Pricing (pricing API, checked 2026-04-04):
+   * - 480p no video input: $0.0775/sec
+   * - 720p no video input: $0.165/sec
+   * - 480p with video input: $0.045/sec
+   * - 720p with video input: $0.10/sec
+   *
+   * Note:
+   * - The pricing API omits creditUnit for "720p no video input", but USD aligns
+   *   with the rest of Seedance entries, so it is treated as per-second pricing.
+   */
+  seedance_2_fast: {
+    kie_model: 'bytedance/seedance-2-fast',
+    kie_pricing: {
+      no_video_input: {
+        '480p': { usd_per_sec: 0.0775, credits_per_sec: 15.5 },
+        '720p': { usd_per_sec: 0.165, credits_per_sec: 33 }
+      },
+      with_video_input: {
+        '480p': { usd_per_sec: 0.045, credits_per_sec: 9 },
+        '720p': { usd_per_sec: 0.10, credits_per_sec: 20 }
+      }
+    },
+    features: {
+      durations: [4, 5, 6, 8, 10, 12, 15],
+      resolutions: ['480p', '720p'],
+      aspect_ratios: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+      supports_audio: true,
+      supports_reference_images: true,
+      supports_reference_videos: true,
+      supports_reference_audio: true,
+      supports_last_frame: true
+    },
+    notes: 'KIE.AI only. Fast variant with lower per-second cost and quicker generation.'
+  },
+
   // ==================== HELPER FUNCTIONS ====================
 
   /**
@@ -432,6 +554,7 @@ module.exports = {
       'nano_banana_4k': 'nano-banana-pro',
       'seedream_2k': 'seedream-4.5',
       'seedream_4k': 'seedream-4.5',
+      'seedream_5_lite': 'seedream-5-lite',
       'stable_diffusion': 'stable-diffusion-3.5',
       'z_image': 'z-image',
       'kling': 'kling-2.5',
@@ -439,7 +562,9 @@ module.exports = {
       'kling_3_0': 'kling-3.0',
       'kling_motion': 'kling-2.6/motion-control',
       'veo': 'veo-3.1',
-      'sora_2': 'sora-2'
+      'sora_2': 'sora-2',
+      'seedance_2': 'bytedance/seedance-2',
+      'seedance_2_fast': 'bytedance/seedance-2-fast'
     };
     return mapping[modelKey] || modelKey;
   },
@@ -450,7 +575,14 @@ module.exports = {
    * Ці ціни використовуються тільки для розрахунку токенів у нашій системі
    */
   getReplicatePrice(modelKey, options = {}) {
-    const { resolution = '2K', duration = 5, audio = false, mode = 'std', orientation = 'image' } = options;
+    const {
+      resolution = '2K',
+      duration = 5,
+      audio = false,
+      mode = 'std',
+      orientation = 'image',
+      inputType = 'no_video_input'
+    } = options;
 
     switch(modelKey) {
       case 'nano_banana_2k':
@@ -460,6 +592,8 @@ module.exports = {
       case 'seedream_2k':
       case 'seedream_4k':
         return 0.0325;  // KIE.AI: 6.5 credits × $0.005 = $0.0325 (18.75% дешевше ніж Replicate $0.04)
+      case 'seedream_5_lite':
+        return 0.0275;  // KIE.AI only: 5.5 credits × $0.005 = $0.0275
       case 'ideogram':
         return 0.0175;  // KIE.AI TURBO: 3.5 credits × $0.005 = $0.0175 (42% дешевше ніж Replicate $0.03)
       case 'stable_diffusion':
@@ -474,6 +608,14 @@ module.exports = {
         return prices[modeKey] || 0.50;
       case 'veo':
         return audio ? (0.40 * duration) : (0.20 * duration);
+      case 'seedance_2': {
+        const usdPerSec = this.seedance_2.kie_pricing?.[inputType]?.[resolution]?.usd_per_sec;
+        return usdPerSec ? usdPerSec * duration : 0;
+      }
+      case 'seedance_2_fast': {
+        const usdPerSec = this.seedance_2_fast.kie_pricing?.[inputType]?.[resolution]?.usd_per_sec;
+        return usdPerSec ? usdPerSec * duration : 0;
+      }
       default:
         return 0;
     }
@@ -499,6 +641,18 @@ module.exports = {
         const p = this.sora_2.kie_pricing[type];
         return p ? p.usd : this.sora_2.kie_pricing['text_to_video_15s'].usd;
       }
+
+      case 'seedance_2':
+      case 'seedance_2_fast': {
+        const inputType = options.inputType || 'no_video_input';
+        const resolution = options.resolution || '480p';
+        const duration = options.duration || 1;
+        const pricing = this[modelKey]?.kie_pricing?.[inputType]?.[resolution];
+        return pricing?.usd_per_sec ? pricing.usd_per_sec * duration : 0;
+      }
+
+      case 'seedream_5_lite':
+        return this.seedream_5_lite.kie_pricing.per_image.usd;
 
       default:
         return 0;
@@ -542,11 +696,12 @@ module.exports = {
   isKieAISupported(modelKey) {
     const supported = [
       'nano_banana_2k', 'nano_banana_4k',
-      'seedream_2k', 'seedream_4k',
+      'seedream_2k', 'seedream_4k', 'seedream_5_lite',
       'stable_diffusion',
       'z_image',
       'kling', 'kling_v2_6', 'kling_3_0', 'kling_motion',
-      'veo', 'sora_2'
+      'veo', 'sora_2',
+      'seedance_2', 'seedance_2_fast'
     ];
     return supported.includes(modelKey);
   },
@@ -564,6 +719,8 @@ module.exports = {
         '✅ Kling 2.6: 21.43% дешевше ніж Fal.ai',
         '✅ Kling 3.0: 40.48% дешевше ніж Fal.ai',
         '✅ Sora 2: 80%+ дешевше ніж Fal.ai',
+        '✅ Seedance 2 / Fast: доступні напряму на KIE.AI',
+        '✅ Seedream 5.0 Lite: ~21% дешевше за official/Fal.ai',
         '✅ Стабільні ціни без сюрпризів'
       ]
     },
@@ -576,6 +733,4 @@ module.exports = {
     important: '⚠️ KIE.AI часто дешевше за Replicate! Рекомендуємо використовувати KIE.AI'
   }
 };
-
-
 
