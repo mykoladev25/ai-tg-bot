@@ -114,6 +114,11 @@ function buildUploadFileName(sourceUrl, headers = {}, uploadPath = 'telegram-inp
   return `${safeUploadPath}-${Date.now()}.${extension}`;
 }
 
+function extractKieUploadedFileUrl(responseData) {
+  const data = responseData?.data || {};
+  return data.fileUrl || data.downloadUrl || null;
+}
+
 async function uploadFileStreamToKie(fileUrl, uploadPath = 'telegram-inputs') {
   const normalizedUrl = normalizeProviderInputUrl(fileUrl);
   if (!normalizedUrl || isKieTempFileUrl(normalizedUrl)) {
@@ -147,9 +152,9 @@ async function uploadFileStreamToKie(fileUrl, uploadPath = 'telegram-inputs') {
     }
   );
 
-  const cachedUrl = uploadResponse?.data?.data?.downloadUrl;
+  const cachedUrl = extractKieUploadedFileUrl(uploadResponse?.data);
   if (!cachedUrl) {
-    throw new Error(uploadResponse?.data?.msg || 'KIE stream upload returned no downloadUrl');
+    throw new Error(uploadResponse?.data?.msg || 'KIE stream upload returned no file URL');
   }
 
   return cachedUrl;
@@ -183,12 +188,12 @@ async function cacheRemoteFileForKie(url, uploadPath = 'telegram-inputs') {
       }
     );
 
-    const cachedUrl = response?.data?.data?.downloadUrl;
+    const cachedUrl = extractKieUploadedFileUrl(response?.data);
     if (cachedUrl) {
       return cachedUrl;
     }
 
-    console.warn('⚠️ KIE file cache: no downloadUrl returned, using original URL');
+    console.warn('⚠️ KIE file cache: no fileUrl/downloadUrl returned, using original URL');
     return normalizedUrl;
   } catch (error) {
     console.warn(`⚠️ KIE file cache failed for ${uploadPath}: ${error.response?.data?.msg || error.message}`);
