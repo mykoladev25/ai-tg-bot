@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const axios = require('axios');
 
 const DEFAULT_PROXY_TTL_SECONDS = 10 * 60;
 const DEFAULT_PROVIDER_PROXY_TTL_SECONDS = 24 * 60 * 60;
@@ -81,6 +82,35 @@ function resolveServerSideTelegramFileUrl(fileUrl) {
   }
 
   return getTelegramFileUrl(filePath);
+}
+
+async function resolveServerSideTelegramFileUrlAsync(fileUrl) {
+  const filePath = extractTelegramFilePathFromProxyUrl(fileUrl);
+  if (filePath) {
+    return getTelegramFileUrl(filePath);
+  }
+
+  const fileId = extractTelegramFileIdFromProxyUrl(fileUrl);
+  if (!fileId) {
+    return fileUrl;
+  }
+
+  const botToken = getTelegramBotToken();
+  if (!botToken) {
+    throw new Error('BOT_TOKEN is not configured');
+  }
+
+  const response = await axios.get(`https://api.telegram.org/bot${botToken}/getFile`, {
+    params: { file_id: fileId },
+    timeout: 30000
+  });
+
+  const resolvedFilePath = response?.data?.result?.file_path;
+  if (!resolvedFilePath) {
+    throw new Error('Telegram getFile returned no file_path');
+  }
+
+  return getTelegramFileUrl(resolvedFilePath);
 }
 
 function signProxyPayload(filePath, expiresAt) {
@@ -187,6 +217,7 @@ module.exports = {
   getTelegramFileUrl,
   isExpired,
   resolveServerSideTelegramFileUrl,
+  resolveServerSideTelegramFileUrlAsync,
   verifyFileIdProxySignature,
   verifyProxySignature
 };

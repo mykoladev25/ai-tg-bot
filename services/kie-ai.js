@@ -7,7 +7,8 @@ const {
   buildTelegramFileIdProxyUrl,
   buildTelegramFileProxyUrl,
   extractTelegramFileIdFromProxyUrl,
-  extractTelegramFilePathFromProxyUrl
+  extractTelegramFilePathFromProxyUrl,
+  resolveServerSideTelegramFileUrlAsync
 } = require('../utils/telegramFiles');
 
 const KIE_API_BASE = 'https://api.kie.ai/api/v1';
@@ -125,7 +126,8 @@ async function uploadFileStreamToKie(fileUrl, uploadPath = 'telegram-inputs') {
     return normalizedUrl;
   }
 
-  const sourceResponse = await axios.get(normalizedUrl, {
+  const sourceUrl = await resolveServerSideTelegramFileUrlAsync(normalizedUrl);
+  const sourceResponse = await axios.get(sourceUrl, {
     responseType: 'stream',
     timeout: 45000,
     maxRedirects: 5
@@ -133,7 +135,7 @@ async function uploadFileStreamToKie(fileUrl, uploadPath = 'telegram-inputs') {
 
   const form = new FormData();
   form.append('file', sourceResponse.data, {
-    filename: buildUploadFileName(normalizedUrl, sourceResponse.headers || {}, uploadPath),
+    filename: buildUploadFileName(sourceUrl, sourceResponse.headers || {}, uploadPath),
     contentType: sourceResponse.headers?.['content-type'] || 'application/octet-stream'
   });
   form.append('uploadPath', uploadPath);
@@ -166,8 +168,15 @@ async function cacheRemoteFileForKie(url, uploadPath = 'telegram-inputs') {
     return normalizedUrl;
   }
 
+  let uploadSourceUrl = normalizedUrl;
   try {
-    return await uploadFileStreamToKie(normalizedUrl, uploadPath);
+    uploadSourceUrl = await resolveServerSideTelegramFileUrlAsync(normalizedUrl);
+  } catch (resolveError) {
+    console.warn(`⚠️ Telegram server-side file resolve failed for ${uploadPath}: ${resolveError.message}`);
+  }
+
+  try {
+    return await uploadFileStreamToKie(uploadSourceUrl, uploadPath);
   } catch (streamError) {
     console.warn(`⚠️ KIE file stream upload failed for ${uploadPath}: ${streamError.response?.data?.msg || streamError.message}`);
   }
@@ -176,7 +185,7 @@ async function cacheRemoteFileForKie(url, uploadPath = 'telegram-inputs') {
     const response = await axios.post(
       KIE_FILE_UPLOAD_API_URL,
       {
-        fileUrl: normalizedUrl,
+        fileUrl: uploadSourceUrl,
         uploadPath
       },
       {
