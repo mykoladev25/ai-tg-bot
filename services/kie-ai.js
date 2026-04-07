@@ -1,6 +1,7 @@
 
 
 const axios = require('axios');
+const FormData = require('form-data');
 const {
   DEFAULT_PROVIDER_PROXY_TTL_SECONDS,
   buildTelegramFileIdProxyUrl,
@@ -11,6 +12,7 @@ const {
 
 const KIE_API_BASE = 'https://api.kie.ai/api/v1';
 const KIE_FILE_UPLOAD_API_URL = 'https://kieai.redpandaai.co/api/file-url-upload';
+const KIE_FILE_STREAM_UPLOAD_API_URL = 'https://kieai.redpandaai.co/api/file-stream-upload';
 const KIE_API_KEY = process.env.KIE_AI_API_KEY;
 const accessControl = require('../config/access');
 const TELEGRAM_PROVIDER_PROXY_TTL_SECONDS = Number.parseInt(process.env.TELEGRAM_PROVIDER_PROXY_TTL_SECONDS, 10) > 0
@@ -74,10 +76,95 @@ function isKieTempFileUrl(url) {
   }
 }
 
+function inferExtensionFromMimeType(mimeType = '') {
+  const normalizedMimeType = String(mimeType).split(';')[0].trim().toLowerCase();
+  const mimeToExtension = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/webm': 'webm',
+    'video/x-matroska': 'mkv',
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/ogg': 'ogg',
+    'audio/aac': 'aac',
+    'audio/mp4': 'm4a'
+  };
+
+  return mimeToExtension[normalizedMimeType] || 'bin';
+}
+
+function buildUploadFileName(sourceUrl, headers = {}, uploadPath = 'telegram-inputs') {
+  try {
+    const parsed = new URL(sourceUrl);
+    const rawName = decodeURIComponent(parsed.pathname.split('/').pop() || '').trim();
+    if (rawName && /\.[a-z0-9]{2,5}$/i.test(rawName)) {
+      return rawName;
+    }
+  } catch (error) {
+  }
+
+  const extension = inferExtensionFromMimeType(headers['content-type']);
+  const safeUploadPath = String(uploadPath || 'telegram-inputs').replace(/[^a-z0-9_-]+/gi, '-');
+  return `${safeUploadPath}-${Date.now()}.${extension}`;
+}
+
+async function uploadFileStreamToKie(fileUrl, uploadPath = 'telegram-inputs') {
+  const normalizedUrl = normalizeProviderInputUrl(fileUrl);
+  if (!normalizedUrl || isKieTempFileUrl(normalizedUrl)) {
+    return normalizedUrl;
+  }
+
+  const sourceResponse = await axios.get(normalizedUrl, {
+    responseType: 'stream',
+    timeout: 45000,
+    maxRedirects: 5
+  });
+
+  const form = new FormData();
+  form.append('file', sourceResponse.data, {
+    filename: buildUploadFileName(normalizedUrl, sourceResponse.headers || {}, uploadPath),
+    contentType: sourceResponse.headers?.['content-type'] || 'application/octet-stream'
+  });
+  form.append('uploadPath', uploadPath);
+
+  const uploadResponse = await axios.post(
+    KIE_FILE_STREAM_UPLOAD_API_URL,
+    form,
+    {
+      headers: {
+        'Authorization': `Bearer ${KIE_API_KEY}`,
+        ...form.getHeaders()
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      timeout: 60000
+    }
+  );
+
+  const cachedUrl = uploadResponse?.data?.data?.downloadUrl;
+  if (!cachedUrl) {
+    throw new Error(uploadResponse?.data?.msg || 'KIE stream upload returned no downloadUrl');
+  }
+
+  return cachedUrl;
+}
+
 async function cacheRemoteFileForKie(url, uploadPath = 'telegram-inputs') {
   const normalizedUrl = normalizeProviderInputUrl(url);
   if (!normalizedUrl || isKieTempFileUrl(normalizedUrl)) {
     return normalizedUrl;
+  }
+
+  try {
+    return await uploadFileStreamToKie(normalizedUrl, uploadPath);
+  } catch (streamError) {
+    console.warn(`⚠️ KIE file stream upload failed for ${uploadPath}: ${streamError.response?.data?.msg || streamError.message}`);
   }
 
   try {
