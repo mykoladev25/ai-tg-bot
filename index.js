@@ -6,11 +6,19 @@ const axios = require('axios');
 const express = require('express');
 const groqWhisper = require('./services/groq-whisper');
 const adminNotifier = require('./utils/adminNotifier');
-const { resolveLocale, t } = require('./utils/i18n');
 const {
+  getDateLocale,
+  pickLocalizedText,
+  resolveLocale,
+  t
+} = require('./utils/i18n');
+const {
+  DEFAULT_PROVIDER_PROXY_TTL_SECONDS,
+  buildTelegramFileIdProxyUrl,
   buildTelegramFileProxyUrl,
   getTelegramFileUrl,
   isExpired,
+  verifyFileIdProxySignature,
   verifyProxySignature
 } = require('./utils/telegramFiles');
 
@@ -52,6 +60,9 @@ const accessControl = require('./config/access');
 
 const TOKEN_USD = models?._pricingAssumptions?.tokenUSD || 0.01;
 const PRICING_MULTIPLIER = models?._pricingAssumptions?.pricingMultiplier || 1.65;
+const TELEGRAM_PROVIDER_PROXY_TTL_SECONDS = Number.parseInt(process.env.TELEGRAM_PROVIDER_PROXY_TTL_SECONDS, 10) > 0
+  ? Number.parseInt(process.env.TELEGRAM_PROVIDER_PROXY_TTL_SECONDS, 10)
+  : DEFAULT_PROVIDER_PROXY_TTL_SECONDS;
 
 function getBotUsername() {
   return String(process.env.BOT_USERNAME || 'neuro_lab_ai_bot').replace(/^@/, '');
@@ -1048,12 +1059,6 @@ loadProviderChoice();
 const blockedUserLastNotified = new Map();
 const BLOCKED_USER_COOLDOWN = 5 * 60 * 1000;
 
-const WELCOME_MODAL_TEXT = [
-  t('en', 'welcome.text')
-].join('\n');
-
-const WELCOME_START_BUTTON_TEXT = t('en', 'welcome.start');
-
 let cachedBotAvatarFileId = null;
 let cachedBotId = null;
 
@@ -1091,15 +1096,74 @@ async function getBotAvatarFileId() {
   }
 }
 
-function buildWelcomeStartKeyboard() {
+function getProviderChoiceLabel(localeSource, choice = 'auto') {
+  const locale = resolveLocale(localeSource);
+  const emojiMap = {
+    'kie-ai': '🔵',
+    replicate: '🟣',
+    auto: '🤖'
+  };
+  const labelKeyMap = {
+    'kie-ai': 'provider.choiceKie',
+    replicate: 'provider.choiceReplicate',
+    auto: 'provider.choiceAuto'
+  };
+  const resolvedChoice = labelKeyMap[choice] ? choice : 'auto';
+  return `${emojiMap[resolvedChoice]} ${t(locale, labelKeyMap[resolvedChoice])}`;
+}
+
+function buildFeedbackMenu(localeSource) {
+  const locale = resolveLocale(localeSource);
+  return {
+    message: t(locale, 'feedback.menu'),
+    keyboard: Markup.inlineKeyboard([
+      [Markup.button.callback(t(locale, 'feedback.suggestion'), 'feedback_suggestion')],
+      [Markup.button.callback(t(locale, 'feedback.problem'), 'feedback_problem')],
+      [Markup.button.callback(t(locale, 'feedback.review'), 'feedback_review')],
+      [Markup.button.callback(`🔙 ${t(locale, 'common.back')}`, 'main_menu')]
+    ])
+  };
+}
+
+function buildSettingsMenuText(localeSource, currentChoice) {
+  const locale = resolveLocale(localeSource);
+
+  return [
+    t(locale, 'settings.title'),
+    '',
+    t(locale, 'settings.current'),
+    t(locale, 'settings.providerLine', {
+      emoji: currentChoice === 'auto' ? '🤖' : currentChoice === 'kie-ai' ? '🔵' : '🟣',
+      label: t(locale, currentChoice === 'auto' ? 'provider.choiceAuto' : currentChoice === 'kie-ai' ? 'provider.choiceKie' : 'provider.choiceReplicate')
+    }),
+    '',
+    t(locale, 'settings.whatIsProvider'),
+    t(locale, 'settings.kie'),
+    t(locale, 'settings.replicate'),
+    t(locale, 'settings.auto'),
+    '',
+    t(locale, 'settings.fallback'),
+    '',
+    t(locale, 'settings.chooseBelow')
+  ].join('\n');
+}
+
+function buildProviderMenuText(localeSource, currentChoice, variant = 'command') {
+  const locale = resolveLocale(localeSource);
+  return t(locale, variant === 'inline' ? 'provider.inlineMenu' : 'provider.commandMenu', {
+    currentChoice: getProviderChoiceLabel(locale, currentChoice)
+  });
+}
+
+function buildWelcomeStartKeyboard(localeSource) {
   return Markup.inlineKeyboard([
-    [Markup.button.callback(WELCOME_START_BUTTON_TEXT, 'welcome_start')]
+    [Markup.button.callback(t(localeSource, 'welcome.start'), 'welcome_start')]
   ]);
 }
 
 async function sendWelcomeModal(ctx) {
-  const keyboardMarkup = buildWelcomeStartKeyboard();
-  const caption = WELCOME_MODAL_TEXT;
+  const keyboardMarkup = buildWelcomeStartKeyboard(ctx);
+  const caption = t(ctx, 'welcome.text');
 
   try {
     const avatarFileId = await getBotAvatarFileId();
@@ -1122,7 +1186,7 @@ async function sendWelcomeModal(ctx) {
 
 function buildMainMenuMessage(ctx, user) {
   const locale = resolveLocale(ctx);
-  const firstName = ctx.from?.first_name || 'friend';
+  const firstName = ctx.from?.first_name || pickLocalizedText(locale, { uk: 'друже', en: 'friend' });
   const balance = Number.isFinite(user?.tokens) ? user.tokens.toFixed(2) : '0.00';
 
   return [
@@ -1188,7 +1252,8 @@ function isNavigationMenuText(ctx, text) {
     '⚙️ Налаштування',
     '❓ Допомога',
     '💰 Поповнити баланс',
-    '📝 Feedback'
+    '📝 Feedback',
+    '📝 Відгук'
   ]);
 
   return navigationTexts.has(text);
@@ -1197,36 +1262,12 @@ function isNavigationMenuText(ctx, text) {
 async function showSettingsMenu(ctx) {
   const userId = ctx.from.id;
   const currentChoice = userProviderChoice.get(userId) || 'auto';
-
-  const choiceEmoji = {
-    'kie-ai': '🔵',
-    'replicate': '🟣',
-    'auto': '🤖'
-  };
-
-  const choiceText = {
-    'kie-ai': 'KIE.AI',
-    'replicate': 'Replicate',
-    'auto': 'Автоматичний'
-  };
-
-  const settingsMenu = `⚙️ <b>Налаштування</b>
-
-<b>Поточні налаштування:</b>
-${choiceEmoji[currentChoice]} Провайдер: <b>${choiceText[currentChoice]}</b>
-
-<b>Що таке провайдер?</b>
-• 🔵 <b>KIE.AI</b> - дешевший, пріоритетний ✅
-• 🟣 <b>Replicate</b> - альтернативний (дорожчий)
-• 🤖 <b>Автоматичний</b> - спершу KIE.AI, потім Replicate
-
-✅ Якщо один провайдер не працює - автоматично перемикається на інший!
-
-Оберіть опцію нижче 👇`;
+  const locale = resolveLocale(ctx);
+  const settingsMenu = buildSettingsMenuText(locale, currentChoice);
 
   const settingsKeyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('🔧 Вибрати провайдер', 'provider_menu')],
-    [Markup.button.callback('🏠 Назад', 'main_menu')]
+    [Markup.button.callback(t(locale, 'settings.openProviderMenu'), 'provider_menu')],
+    [Markup.button.callback(t(locale, 'common.home'), 'main_menu')]
   ]);
 
   await ctx.reply(settingsMenu, {
@@ -1769,7 +1810,7 @@ bot.on('text', async (ctx, next) => {
   const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
   if (isBlocked) {
     if (canNotifyBlockedUser(userId)) {
-      await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+      await ctx.reply(t(ctx, 'commands.blocked'));
     }
     return;
   }
@@ -1873,7 +1914,7 @@ bot.on('text', async (ctx, next) => {
   const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
   if (isBlocked) {
     if (canNotifyBlockedUser(userId)) {
-      await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+      await ctx.reply(t(ctx, 'commands.blocked'));
     }
     return;
   }
@@ -1899,12 +1940,7 @@ if (isDevelopment) {
       return next();
     }
     
-    await ctx.reply(
-      '🛠️ Бот тимчасово недоступний\n\n' +
-      '⚙️ Триває технічне обслуговування\n' +
-      '⏰ Очікуваний час: ~30 хвилин\n\n' +
-      'Спробуйте пізніше! Дякуємо за розуміння 🙏'
-    );
+    await ctx.reply(t(ctx, 'maintenance.message'));
     
     console.log(`🚫 Blocked user ${ctx.from.id} (@${ctx.from.username}) during maintenance`);
   });
@@ -1916,76 +1952,13 @@ const mediaGroups = new Map();
 
 const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || '@support';
 
-const INSTRUCTION_HTML = `
-📄 <b>ІНСТРУКЦІЯ</b>
-
-📝 <b>Як користуватися ботом:</b>
-
-<b>1️⃣ Базові помічники (Gemini AI)</b>
-- <b>✍️ Текст:</b> напишіть запит → отримайте відповідь
-- <b>🎙️ Голос:</b> надішліть голосове → AI розпізнає і відповість
-- <b>🖼️ Аналіз фото:</b> надішліть зображення → AI опише/проаналізує
-
-<b>2️⃣ Генерація зображень</b>
-- Оберіть модель (<i>Nano Banana, Seedream, Ideogram тощо</i>)
-- Опишіть що хочете побачити (промпт)
-- Можна додати до 14 референс-фото!
-- Очікуйте результат <i>(~20–60 сек)</i>
-
-<b>3️⃣ Генерація відео</b>
-- Оберіть модель (<i>Kling, Kling 3.0, Veo, Runway тощо</i>).
-- <b>Kling 3.0</b>: після вибору моделі з’явиться покрокова підказка — режим якості, тривалість, формат відео, звук, опційно фото як перший кадр, потім текстовий опис відео. Просто йдіть кроками і вводьте те, що просить бот.
-- Інші моделі: налаштуйте параметри та надішліть опис або фото.
-- Відео буде готове <i>за 1–5 хвилин</i>.
-
-💰 <b>Токени ⚡</b>
-- <b>Кожна генерація списує токени</b>
-- 🎁 <b>Безкоштовно:</b> 15⚡ при реєстрації
-- 💎 Далі — можна поповнити баланс
-- 📉 <b>Чим більший пакет — тим вигідніше!</b>
-
-<i>⚡ Вартість вказана біля кожної моделі</i>
-
-📜 <b>Політика білінгу</b>
-
-- Бот використовує сторонні AI-сервіси
-  <i>(Replicate, Google, Runway тощо)</i>
-
-- <b>Ви купуєте внутрішні токени ⚡</b>, а не прямий API-доступ
-
-- <b>Токени списуються за кожну AI-дію</b>
-
-⚠️ <b>Важливо:</b>
-- <b>Генерація може не відповідати очікуванням</b> — це особливість AI
-- <b>Повернення токенів за виконані дії не передбачено</b>
-
-🔥 <b>⚠️ ЗАВЖДИ ЗАВАНТАЖУЙТЕ ОДРАЗУ! ⚠️</b>
-<b>Великі файли (>10MB) активні ТІЛЬКИ 1 ГОДИНУ!</b>
-Звичайні фото/відео Telegram зберігає автоматично.
-
-📥 <b>Як зберегти результат:</b>
-1️⃣ Натисніть на згенерований файл
-2️⃣ Натисніть меню ⋮ або утримуйте палець
-3️⃣ Оберіть "Зберегти" / "Завантажити"
-
-📋 <b>Юридична інформація:</b>
-Перед оплатою ознайомтесь з нашими документами:
-- Угода користувача
-- Політика приватності
-
-Введіть команду <i>/info</i> для перегляду юридичної інформації.
-
-ℹ️ Використовуючи бота, ви погоджуєтеся з умовами обслуговування.
-`;
-
-
 bot.start(async (ctx) => {
   const userId = ctx.from.id;
 
   const isBlocked = await blockedUsersUtil.isUserBlocked(userId);
   if (isBlocked) {
     if (canNotifyBlockedUser(userId)) {
-      await ctx.reply('🚫 Ви були заблоковані та не можете користуватися цим ботом.');
+      await ctx.reply(t(ctx, 'commands.blocked'));
     }
     return;
   }
@@ -2009,38 +1982,10 @@ bot.start(async (ctx) => {
 });
 
 bot.command('help', async (ctx) => {
-  const helpText = `❓ Help
-
-🤖 Available commands:
-/start - Main menu
-/profile - Your profile
-/settings - Provider settings
-/setings - Settings alias
-/balance - Check your balance
-/history - Usage history
-/clear - Clear conversation history
-/feedback - Feedback form
-/instruction - Instructions
-/info - Legal information
-/help - This help message
-
-💡 How to use the bot:
-1. Choose a section from the main menu
-2. Select a generation model
-3. Send your prompt or media input
-4. Wait for the result
-
-💰 Tokens are charged for each generation
-📦 Buy a package to get more tokens
-
-👤 Support:
-💬 Telegram: https://t.me/${SUPPORT_USERNAME.replace('@', '')}
-
-📋 Legal information:
-🔗 Terms and privacy: /info
-🔗 Company information: /info`;
-
-  await ctx.reply(helpText, keyboard.createBackButton());
+  await ctx.reply(
+    t(ctx, 'help.full', { supportUsername: SUPPORT_USERNAME.replace('@', '') }),
+    keyboard.createBackButton('main_menu', ctx)
+  );
 });
 
 bot.command('settings', async (ctx) => {
@@ -2058,13 +2003,16 @@ bot.command('profile', async (ctx) => {
 bot.command('balance', async (ctx) => {
   const user = await userBalance.getUser(ctx.from.id, ctx.from);
   await ctx.reply(
-    `💰 Ваш баланс: ${user.tokens.toFixed(2)}⚡`,
-    keyboard.createBackButton()
+    t(ctx, 'commands.balance', { balance: user.tokens.toFixed(2) }),
+    keyboard.createBackButton('main_menu', ctx)
   );
 });
 
 bot.command('clear', async (ctx) => {
   const userId = ctx.from.id;
+  const imageStateBeforeClear = imageGenState.get(userId);
+  const stateBeforeClear = userState.get(userId);
+  const hadPrompt = Boolean(imageStateBeforeClear?.prompt || stateBeforeClear?.prompt);
 
   const hadImageState = imageGenState.has(userId);
   imageGenState.delete(userId);
@@ -2075,84 +2023,68 @@ bot.command('clear', async (ctx) => {
   if (hadImageState || hadState) {
     const currentModel = userCurrentModel.get(userId);
     await ctx.reply(
-      '🧹 <b>Очищено!</b>\n\n' +
-      (hadPrompt ? '✅ Накопичений промпт видалено\n' : '') +
-      (hadState ? '✅ Стан генерації скинуто\n' : '') +
-      (currentModel ? `\n📌 Обрана модель: <b>${currentModel}</b>\nМожете продовжити генерацію.` : '\nМожете почати заново.'),
+      `${t(ctx, 'commands.clearTitle')}\n\n` +
+      (hadPrompt ? `${t(ctx, 'commands.clearPromptRemoved')}\n` : '') +
+      (hadState ? `${t(ctx, 'commands.clearStateReset')}\n` : '') +
+      (currentModel
+        ? `\n${t(ctx, 'commands.clearSelectedModel', { model: currentModel })}`
+        : `\n${t(ctx, 'commands.clearStartAgain')}`),
       { parse_mode: 'HTML' }
     );
   } else {
     await ctx.reply(
-      '✅ Нічого очищати - все чисто!',
-      keyboard.createMainMenu()
+      t(ctx, 'commands.clearNothing'),
+      keyboard.createMainMenu(ctx)
     );
   }
 });
 
 bot.command('history', async (ctx) => {
   const history = await userBalance.getTransactionHistory(ctx.from.id, 10);
+  const locale = resolveLocale(ctx);
   
   if (history.length === 0) {
-    await ctx.reply('📊 Історія порожня', keyboard.createBackButton());
+    await ctx.reply(t(locale, 'commands.historyEmpty'), keyboard.createBackButton('main_menu', ctx));
     return;
   }
   
-  let text = '📊 Історія останніх операцій:\n\n';
+  let text = t(locale, 'commands.historyTitle');
   
   history.forEach((item, index) => {
-    const date = new Date(item.createdAt).toLocaleString('uk-UA');
+    const date = new Date(item.createdAt).toLocaleString(getDateLocale(locale));
     const sign = item.type === 'deduction' ? '-' : '+';
-    text += `${index + 1}. ${date}\n`;
-    text += `   ${item.description || 'Транзакція'}\n`;
-    text += `   ${sign}${item.amount.toFixed(2)}⚡ (баланс: ${item.balanceAfter.toFixed(2)}⚡)\n\n`;
+    text += t(locale, 'commands.historyLine', {
+      index: index + 1,
+      date,
+      description: item.description || t(locale, 'commands.historyFallbackDescription'),
+      sign,
+      amount: item.amount.toFixed(2),
+      balance: item.balanceAfter.toFixed(2)
+    });
   });
   
-  await ctx.reply(text, keyboard.createBackButton());
+  await ctx.reply(text, keyboard.createBackButton('main_menu', ctx));
 });
 
 bot.command('clear', async (ctx) => {
   await userBalance.clearConversationHistory(ctx.from.id);
-  await ctx.reply('✅ Історію розмови очищено!', keyboard.createMainMenu());
+  await ctx.reply(t(ctx, 'commands.conversationCleared'), keyboard.createMainMenu(ctx));
 });
 
 bot.command('info', async (ctx) => {
-  const message = `📋 <b>Юридична інформація та Угода користувача</b>
-
-Перед використанням сервісу ознайомтесь з нашими юридичними документами:
-
-<b>📋 Угода користувача</b>
-Регулює умови надання послуг та взаємовідносини між користувачем та компанією. Включає описання всіх товарів/послуг та їхні вартості.
-
-<b>🔒 Політика приватності</b>
-Описує як ми збираємо, обробляємо та захищаємо вашу персональну інформацію.
-
-Натисніть на кнопку нижче щоб ознайомитися з повним текстом документів:`;
-
-  await ctx.reply(message, { parse_mode: 'HTML', ...keyboard.createLegalMenu(ctx) });
+  await ctx.reply(t(ctx, 'info.full'), { parse_mode: 'HTML', ...keyboard.createLegalMenu(ctx) });
 });
 
 bot.command('feedback', async (ctx) => {
-  const feedbackMenu = `📝 <b>Форма зворотнього зв'язку</b>
-
-Яка причина вашого звернення?
-
-Оберіть категорію 👇`;
-
-  const feedbackKeyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('💡 Побажання', 'feedback_suggestion')],
-    [Markup.button.callback('🐛 Проблема', 'feedback_problem')],
-    [Markup.button.callback('⭐ Відгук', 'feedback_review')],
-    [Markup.button.callback('🔙 Назад', 'main_menu')]
-  ]);
-
-  await ctx.reply(feedbackMenu, { parse_mode: 'HTML', ...feedbackKeyboard });
+  const feedbackMenu = buildFeedbackMenu(ctx);
+  await ctx.reply(feedbackMenu.message, { parse_mode: 'HTML', ...feedbackMenu.keyboard });
 });
 
 // ==================== ADMIN COMMANDS ====================
 
 bot.command('blocklist', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
 
@@ -2179,7 +2111,7 @@ bot.command('blocklist', async (ctx) => {
 
 bot.command('kiepricing', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
 
@@ -2250,7 +2182,7 @@ bot.command('kiepricing', async (ctx) => {
 
 bot.command('kiepricingupdate', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
 
@@ -2274,7 +2206,7 @@ bot.command('kiepricingupdate', async (ctx) => {
 
 bot.command('kiepricingreport', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
 
@@ -2349,7 +2281,7 @@ bot.command('kiepricingreport', async (ctx) => {
 
 bot.command('kiecompare', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
 
@@ -2439,7 +2371,7 @@ bot.command(/^unblock_(\d+)$/, async (ctx) => {
   const userId = parseInt(ctx.match[1]);
 
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
 
@@ -2478,7 +2410,7 @@ bot.command(/^unblock_(\d+)$/, async (ctx) => {
 
 bot.command('broadcast', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
   const currentAdminId = ctx.from.id;
@@ -2529,7 +2461,7 @@ bot.command('broadcast', async (ctx) => {
 
 bot.command('broadcast_cancel', async (ctx) => {
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
   const currentAdminId = ctx.from.id;
@@ -2542,7 +2474,7 @@ bot.action('broadcast_send', async (ctx) => {
   await ctx.answerCbQuery();
 
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
   const currentAdminId = ctx.from.id;
@@ -2578,7 +2510,7 @@ bot.action('broadcast_cancel', async (ctx) => {
   await ctx.answerCbQuery();
 
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
   const currentAdminId = ctx.from.id;
@@ -2665,7 +2597,7 @@ bot.action(/^feedback_confirm_(\d+)$/, async (ctx) => {
 
   const userId = parseInt(ctx.match[1]);
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.answerCbQuery('❌ Доступ заборонений', true);
+    await ctx.answerCbQuery(t(ctx, 'errors.accessDenied'), true);
     return;
   }
 
@@ -2701,7 +2633,7 @@ bot.action(/^feedback_decline_(\d+)$/, async (ctx) => {
 
   const userId = parseInt(ctx.match[1]);
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.answerCbQuery('❌ Доступ заборонений', true);
+    await ctx.answerCbQuery(t(ctx, 'errors.accessDenied'), true);
     return;
   }
 
@@ -2737,7 +2669,7 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
 
   const userId = parseInt(ctx.match[1]);
   if (!accessControl.isAdmin(ctx.from.id)) {
-    await ctx.answerCbQuery('❌ Доступ заборонений', true);
+    await ctx.answerCbQuery(t(ctx, 'errors.accessDenied'), true);
     return;
   }
 
@@ -2879,33 +2811,18 @@ bot.command('provider', async (ctx) => {
 
 
   if (!kieAI.isKieAIEnabled) {
-    return ctx.reply('❌ KIE.AI не увімкнена. Додайте KIE_AI_API_KEY в .env файл.');
+    return ctx.reply(t(ctx, 'provider.disabled'));
   }
 
   const currentChoice = userProviderChoice.get(userId) || 'auto';
-
-  const providerMenu = `⚙️ <b>Вибір провайдера для генерацій</b>
-
-Який провайдер використовувати для генерацій?
-
-<b>Поточний вибір:</b> ${currentChoice === 'auto' ? '🤖 Автоматичний' : currentChoice === 'kie-ai' ? '🔵 KIE.AI' : '🟣 Replicate'}
-
-<b>Описання:</b>
-🔵 <b>KIE.AI</b> - дешевший, швидший (пріоритетний) ✅
-🟣 <b>Replicate</b> - альтернативний провайдер
-🤖 <b>Автоматичний</b> - розумний вибір з fallback
-
-<b>🆕 Нова система fallback:</b>
-✅ Якщо KIE.AI не працює - автоматично перемикається на Replicate
-✅ Якщо обрали конкретний провайдер - використовується тільки він
-
-💡 Рекомендуємо: <b>Автоматичний</b> (найкраща надійність)`;
+  const locale = resolveLocale(ctx);
+  const providerMenu = buildProviderMenuText(locale, currentChoice, 'command');
 
   const providerKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('🔵 KIE.AI', 'provider_kie-ai')],
     [Markup.button.callback('🟣 Replicate', 'provider_replicate')],
-    [Markup.button.callback('🤖 Автоматичний', 'provider_auto')],
-    [Markup.button.callback('🏠 Назад', 'main_menu')]
+    [Markup.button.callback(t(locale, 'provider.buttonAuto'), 'provider_auto')],
+    [Markup.button.callback(t(locale, 'common.home'), 'main_menu')]
   ]);
 
   await ctx.reply(providerMenu, {
@@ -2917,68 +2834,59 @@ bot.command('provider', async (ctx) => {
 
 bot.action('provider_kie-ai', async (ctx) => {
   const userId = ctx.from.id;
+  const locale = resolveLocale(ctx);
 
   userProviderChoice.set(userId, 'kie-ai');
   saveProviderChoice();
 
   await ctx.editMessageText(
-    '✅ <b>KIE.AI вибрана</b>\n\n' +
-    '🔵 Тепер все генерації будуть використовувати KIE.AI\n\n' +
-    '💡 Командa: /provider для зміни вибору',
+    t(locale, 'provider.selectedKie'),
     {
       parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([[Markup.button.callback('🏠 Назад', 'main_menu')]])
+      ...Markup.inlineKeyboard([[Markup.button.callback(t(locale, 'common.home'), 'main_menu')]])
     }
   );
 
-  await ctx.answerCbQuery('✅ KIE.AI обрана!');
+  await ctx.answerCbQuery(t(locale, 'provider.answerSelectedKie'));
 });
 
 bot.action('provider_replicate', async (ctx) => {
   const userId = ctx.from.id;
+  const locale = resolveLocale(ctx);
 
   userProviderChoice.set(userId, 'replicate');
   saveProviderChoice();
 
   await ctx.editMessageText(
-    '✅ <b>Replicate вибрана</b>\n\n' +
-    '🟣 Тепер всі генерації будуть використовувати Replicate\n\n' +
-    '⚠️ <b>Увага:</b> Вартість генерацій на Replicate зазвичай <b>дорожча</b> ніж на KIE.AI!\n' +
-    'Наприклад: Nano Banana — 7⚡ (Replicate) vs 4⚡ (KIE.AI)\n\n' +
-    '💡 Рекомендуємо <b>KIE.AI</b> або <b>Автоматичний</b> режим для економії\n\n' +
-    '💡 Командa: /provider для зміни вибору',
+    t(locale, 'provider.selectedReplicate'),
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('🔵 Повернути KIE.AI', 'provider_kie-ai')],
-        [Markup.button.callback('🏠 Назад', 'main_menu')]
+        [Markup.button.callback(t(locale, 'provider.buttonKieRecommended'), 'provider_kie-ai')],
+        [Markup.button.callback(t(locale, 'common.home'), 'main_menu')]
       ])
     }
   );
 
-  await ctx.answerCbQuery('⚠️ Replicate обрана (дорожчі ціни)');
+  await ctx.answerCbQuery(t(locale, 'provider.answerSelectedReplicate'));
 });
 
 bot.action('provider_auto', async (ctx) => {
   const userId = ctx.from.id;
+  const locale = resolveLocale(ctx);
 
   userProviderChoice.delete(userId);  
   saveProviderChoice();
 
   await ctx.editMessageText(
-    '✅ <b>Автоматичний режим увімкнено</b>\n\n' +
-    '🤖 Розумний вибір провайдера:\n' +
-    '1️⃣ Спочатку пробує <b>KIE.AI</b> (дешевше)\n' +
-    '2️⃣ Якщо не працює → автоматично <b>Replicate</b>\n\n' +
-    '✅ Fallback УВІМКНЕНИЙ - максимальна надійність!\n\n' +
-    '💡 Команда: /provider для зміни вибору',
+    t(locale, 'provider.selectedAuto'),
     {
       parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([[Markup.button.callback('🏠 Назад', 'main_menu')]])
+      ...Markup.inlineKeyboard([[Markup.button.callback(t(locale, 'common.home'), 'main_menu')]])
     }
   );
 
-  await ctx.answerCbQuery('✅ Автоматичний режим включений!');
+  await ctx.answerCbQuery(t(locale, 'provider.answerSelectedAuto'));
 });
 
 
@@ -2987,28 +2895,18 @@ bot.action('provider_menu', async (ctx) => {
 
 
   if (!kieAI.isKieAIEnabled) {
-    return ctx.answerCbQuery('❌ KIE.AI не увімкнена', 1);
+    return ctx.answerCbQuery(t(ctx, 'provider.disabled'), true);
   }
 
   const currentChoice = userProviderChoice.get(userId) || 'auto';
-
-  const providerMenu = `⚙️ <b>Вибір провайдера для генерацій</b>
-
-Який провайдер використовувати для генерацій?
-
-<b>Поточний:</b> ${currentChoice === 'auto' ? '🤖 Автоматичний (KIE.AI)' : currentChoice === 'kie-ai' ? '🔵 KIE.AI' : '🟣 Replicate'}
-
-🔵 <b>KIE.AI</b> — дешевший, рекомендований ✅
-🟣 <b>Replicate</b> — дорожчий, альтернативний
-🤖 <b>Автоматичний</b> — спершу KIE.AI, якщо недоступна → Replicate
-
-⚠️ При виборі Replicate ціни генерацій будуть вищими!`;
+  const locale = resolveLocale(ctx);
+  const providerMenu = buildProviderMenuText(locale, currentChoice, 'inline');
 
   const providerKeyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('🔵 KIE.AI (рекомендовано)', 'provider_kie-ai')],
-    [Markup.button.callback('🟣 Replicate (дорожчий)', 'provider_replicate')],
-    [Markup.button.callback('🤖 Автоматичний', 'provider_auto')],
-    [Markup.button.callback('🏠 Профіль', 'profile_menu')]
+    [Markup.button.callback(t(locale, 'provider.buttonKieRecommended'), 'provider_kie-ai')],
+    [Markup.button.callback(t(locale, 'provider.buttonReplicateExpensive'), 'provider_replicate')],
+    [Markup.button.callback(t(locale, 'provider.buttonAuto'), 'provider_auto')],
+    [Markup.button.callback(t(locale, 'provider.buttonBackProfile'), 'profile_menu')]
   ]);
 
   await ctx.editMessageText(providerMenu, {
@@ -3016,7 +2914,7 @@ bot.action('provider_menu', async (ctx) => {
     ...providerKeyboard
   });
 
-  await ctx.answerCbQuery('⚙️ Меню провайдера');
+  await ctx.answerCbQuery(t(locale, 'provider.answerMenu'));
 });
 
 
@@ -3028,14 +2926,14 @@ bot.hears(/^(❓ (Допомога|Help))$/, async (ctx) => {
   const locale = resolveLocale(ctx);
   await ctx.reply(
     t(locale, 'help.quick'),
-    keyboard.createBackButton()
+    keyboard.createBackButton('main_menu', ctx)
   );
 });
 
 bot.command('instruction', async (ctx) => {
-  await ctx.reply(INSTRUCTION_HTML, {
+  await ctx.reply(t(ctx, 'instruction.html'), {
     parse_mode: 'HTML',
-    ...keyboard.createBackButton()
+    ...keyboard.createBackButton('main_menu', ctx)
   });
 });
 
@@ -3056,25 +2954,13 @@ bot.hears(/^(🎨 (Креативи|Creatives))$/, async (ctx) => {
   await ctx.reply(creativesMenu, { parse_mode: 'HTML', ...creativesKeyboard });
 });
 
-bot.hears('📝 Feedback', async (ctx) => {
-  const feedbackMenu = `📝 <b>Форма зворотнього зв'язку</b>
-
-Яка причина вашого звернення?
-
-Оберіть категорію 👇`;
-
-  const feedbackKeyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('💡 Побажання', 'feedback_suggestion')],
-    [Markup.button.callback('🐛 Проблема', 'feedback_problem')],
-    [Markup.button.callback('⭐ Відгук', 'feedback_review')],
-    [Markup.button.callback('🔙 Назад', 'main_menu')]
-  ]);
-
-  await ctx.reply(feedbackMenu, { parse_mode: 'HTML', ...feedbackKeyboard });
+bot.hears(/^(📝 (Відгук|Feedback))$/, async (ctx) => {
+  const feedbackMenu = buildFeedbackMenu(ctx);
+  await ctx.reply(feedbackMenu.message, { parse_mode: 'HTML', ...feedbackMenu.keyboard });
 });
 
 bot.hears(/^(💰 (Поповнити баланс|Top up balance))$/, async (ctx) => {
-  await ctx.reply(`⚡ Buy tokens\n\nChoose a package below.`, keyboard.createSubscriptionsMenu(ctx.from.id, ctx));
+  await ctx.reply(t(ctx, 'subscription.title'), keyboard.createSubscriptionsMenu(ctx.from.id, ctx));
 });
 
 const nanoBanana2kModel = models.design.models.find(m => m.key === 'nano_banana_2k');
@@ -10519,12 +10405,12 @@ bot.action(/^pay_stars_(starter|basic|pro|premium|starter_test)$/, async (ctx) =
   const sub = models.subscriptions[planKey];
 
   if (!sub) {
-    await ctx.reply('❌ План не знайдено');
+    await ctx.reply(t(ctx, 'errors.planNotFound'));
     return;
   }
 
   if (sub.adminOnly && ctx.from.id !== getAdminTelegramId()) {
-    await ctx.reply('❌ Доступ заборонений');
+    await ctx.reply(t(ctx, 'errors.accessDenied'));
     return;
   }
 
@@ -10574,7 +10460,7 @@ bot.on('successful_payment', async (ctx) => {
   const planKey = payload.plan;
   const sub = models.subscriptions[planKey];
   if (!sub) {
-    await ctx.reply('❌ План не знайдено. Зверніться до підтримки.');
+    await ctx.reply(t(ctx, 'errors.planNotFoundSupport'));
     return;
   }
 
@@ -11570,14 +11456,19 @@ bot.on('voice', async (ctx) => {
     return;
   }
 
-  const statusMsg = await ctx.reply('🎙️ Transcribing voice...');
+  const statusMsg = await ctx.reply(t(ctx, 'assistants.transcribingVoice'));
 
   try {
     const fileLink = await ctx.telegram.getFileLink(ctx.message.voice.file_id);
     const transcription = await groqWhisper.transcribeVoice(fileLink.href);
 
     if (!transcription.success) {
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Transcription failed: ${transcription.error}`);
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        t(ctx, 'assistants.transcriptionFailed', { error: transcription.error })
+      );
       return;
     }
 
@@ -11585,7 +11476,10 @@ bot.on('voice', async (ctx) => {
       ctx.chat.id,
       statusMsg.message_id,
       null,
-      `📝 Recognized: "${transcription.text}"\n\n${t(ctx, 'assistants.thinking')}`
+      t(ctx, 'assistants.recognizedVoice', {
+        text: transcription.text,
+        thinking: t(ctx, 'assistants.thinking')
+      })
     );
     runBackgroundTask(
       () => handleClaudeText(ctx, transcription.text, { statusMessageId: statusMsg.message_id }),
@@ -11594,7 +11488,7 @@ bot.on('voice', async (ctx) => {
 
   } catch (error) {
     console.error('Voice processing error:', error);
-    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Voice processing failed. Please try again.');
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, t(ctx, 'assistants.voiceProcessingFailed'));
   }
 });
 
@@ -12052,7 +11946,7 @@ bot.on('photo', async (ctx) => {
       const group = mediaGroups.get(albumKey);
       const photo = ctx.message.photo[ctx.message.photo.length - 1];
       const file = await ctx.telegram.getFile(photo.file_id);
-      const photoUrl = buildTelegramFileProxyUrl(file.file_path);
+      const photoUrl = buildTelegramFileAccessUrl({ file_id: photo.file_id, file_path: file.file_path });
       group.photos.push({ id: ctx.message.message_id, url: photoUrl });
 
       if (group.timeout) clearTimeout(group.timeout);
@@ -12242,7 +12136,7 @@ bot.on('photo', async (ctx) => {
     const group = mediaGroups.get(mediaGroupId);
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
     const file = await ctx.telegram.getFile(photo.file_id);
-    const photoUrl = buildTelegramFileProxyUrl(file.file_path);
+    const photoUrl = buildTelegramFileAccessUrl({ file_id: photo.file_id, file_path: file.file_path });
     group.photos.push(photoUrl);
 
     if (ctx.message.caption) group.caption = ctx.message.caption;
@@ -12485,7 +12379,7 @@ bot.on('video', async (ctx) => {
     let videoUrl;
     try {
       const fileInfo = await ctx.telegram.getFile(videoFile.file_id);
-      videoUrl = buildTelegramFileProxyUrl(fileInfo.file_path);
+      videoUrl = buildTelegramFileAccessUrl({ file_id: videoFile.file_id, file_path: fileInfo.file_path });
     } catch (error) {
       console.error('❌ Kling Motion: Failed to get video file:', error);
       await ctx.reply(
@@ -12591,16 +12485,35 @@ async function handleMediaGroup(ctx, group) {
 }
 
 function buildTelegramFileAccessUrl(filePath, access = 'proxy') {
-  return access === 'direct'
-    ? getTelegramFileUrl(filePath)
-    : buildTelegramFileProxyUrl(filePath);
+  const fileRef = typeof filePath === 'object' && filePath !== null
+    ? filePath
+    : { file_path: filePath };
+  const { file_id: fileId, file_path: resolvedFilePath } = fileRef;
+
+  if (!resolvedFilePath) {
+    return null;
+  }
+
+  if (access === 'direct') {
+    return getTelegramFileUrl(resolvedFilePath);
+  }
+
+  if (fileId && process.env.APP_URL) {
+    return buildTelegramFileIdProxyUrl(fileId, {
+      ttlSeconds: TELEGRAM_PROVIDER_PROXY_TTL_SECONDS
+    });
+  }
+
+  return buildTelegramFileProxyUrl(resolvedFilePath, {
+    ttlSeconds: TELEGRAM_PROVIDER_PROXY_TTL_SECONDS
+  });
 }
 
 async function getImageUrl(ctx, access = 'proxy') {
   if (!ctx.message?.photo) return null;
   const photo = ctx.message.photo[ctx.message.photo.length - 1];
   const file = await ctx.telegram.getFile(photo.file_id);
-  return buildTelegramFileAccessUrl(file.file_path, access);
+  return buildTelegramFileAccessUrl({ file_id: photo.file_id, file_path: file.file_path }, access);
 }
 
 function isSupportedVideoDocument(document) {
@@ -12617,7 +12530,7 @@ async function getVideoUrl(ctx, access = 'proxy') {
   if (!fileId) return null;
 
   const file = await ctx.telegram.getFile(fileId);
-  return buildTelegramFileAccessUrl(file.file_path, access);
+  return buildTelegramFileAccessUrl({ file_id: fileId, file_path: file.file_path }, access);
 }
 
 function isSupportedAudioDocument(document) {
@@ -12636,7 +12549,7 @@ async function getAudioUrl(ctx, access = 'proxy') {
   if (!fileId) return null;
 
   const file = await ctx.telegram.getFile(fileId);
-  return buildTelegramFileAccessUrl(file.file_path, access);
+  return buildTelegramFileAccessUrl({ file_id: fileId, file_path: file.file_path }, access);
 }
 
 
@@ -12644,7 +12557,7 @@ async function getImageUrlsFromContext(ctx) {
   if (!ctx.message?.photo) return [];
   const photo = ctx.message.photo[ctx.message.photo.length - 1];
   const file = await ctx.telegram.getFile(photo.file_id);
-  const url = buildTelegramFileProxyUrl(file.file_path);
+  const url = buildTelegramFileAccessUrl({ file_id: photo.file_id, file_path: file.file_path });
   return [url];
 }
 
@@ -13811,7 +13724,7 @@ async function handleClaudeText(ctx, text, options = {}) {
       statusMsg = await ctx.reply(t(ctx, 'assistants.thinking'));
     }
     const history = await userBalance.getConversationHistory(userId);
-    const response = await claude.continueConversation(text, history);
+    const response = await claude.continueConversation(text, history, ctx);
     
     if (response.success) {
       await userBalance.saveConversationMessage(userId, 'user', text);
@@ -13824,7 +13737,7 @@ async function handleClaudeText(ctx, text, options = {}) {
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       await ctx.reply(response.text);
     } else {
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Error: ${response.error}`);
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ ${response.error}`);
     }
   } catch (error) {
     console.error('Gemini assistant text error:', error);
@@ -13854,8 +13767,8 @@ async function handleClaudeVision(ctx) {
     const imageUrl = await getImageUrl(ctx, 'direct');
     const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBase64 = Buffer.from(imageResponse.data).toString('base64');
-    const prompt = ctx.message.caption || 'Describe this image in detail.';
-    const response = await claude.analyzeImageWithClaude(imageBase64, prompt, 'image/jpeg');
+    const prompt = ctx.message.caption || '';
+    const response = await claude.analyzeImageWithClaude(imageBase64, prompt, 'image/jpeg', ctx);
 
     if (response.success) {
       await userBalance.saveConversationMessage(userId, 'user', `[Image] ${prompt}`);
@@ -13868,11 +13781,11 @@ async function handleClaudeVision(ctx) {
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
       await ctx.reply(response.text);
     } else {
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Error: ${response.error}`);
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ ${response.error}`);
     }
   } catch (error) {
     console.error('Gemini vision error:', error);
-    await ctx.reply('❌ Image analysis failed. Please try again.');
+    await ctx.reply(t(ctx, 'assistants.imageAnalysisFailed'));
   }
 }
 
@@ -14353,7 +14266,11 @@ async function handleClarityUpscaler(ctx) {
     return;
   }
 
-  const statusMsg = await ctx.reply(`🔮 Покращую якість зображення через Clarity Upscaler...\n\n⏱️ Це може зайняти 30-60 секунд`);
+  const locale = resolveLocale(ctx);
+  const statusMsg = await ctx.reply(pickLocalizedText(locale, {
+    uk: '🔮 Покращую якість зображення через Clarity Upscaler...\n\n⏱️ Це може зайняти 30-60 секунд',
+    en: '🔮 Enhancing image quality with Clarity Upscaler...\n\n⏱️ This can take 30-60 seconds'
+  }));
 
   try {
     const imageUrl = await getImageUrl(ctx);
@@ -14362,20 +14279,29 @@ async function handleClarityUpscaler(ctx) {
 
     if (!result.success) {
       await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username: ctx.from.username, action: 'clarity_upscaler', model: 'Clarity Upscaler', prompt, imageUrl });
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка покращення.\n\nСпробуйте ще раз або оберіть іншу модель.`);
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, pickLocalizedText(locale, {
+        uk: '❌ Помилка покращення.\n\nСпробуйте ще раз або оберіть іншу модель.',
+        en: '❌ Upscaling failed.\n\nPlease try again or choose another model.'
+      }));
       return;
     }
 
     await userBalance.deductTokens(userId, model.cost, 'Clarity Upscaler', { modelKey: 'clarity', modelName: model.name, apiCost: model.apiCost, prompt });
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
     await safeSendPhoto(ctx.chat.id, result.imageUrl, {
-      caption: `🔮 Clarity Upscaler\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
-      ...keyboard.createBackButton('design_menu')
+      caption: pickLocalizedText(locale, {
+        uk: `🔮 Clarity Upscaler\n\n📝 Промпт: ${prompt}\n\n💰 Витрачено: ${model.cost}⚡`,
+        en: `🔮 Clarity Upscaler\n\n📝 Prompt: ${prompt}\n\n💰 Spent: ${model.cost}⚡`
+      }),
+      ...keyboard.createBackButton('design_menu', ctx)
     });
 
   } catch (error) {
     console.error('Clarity Upscaler failed:', error);
-    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Помилка покращення зображення. Спробуйте ще раз.');
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, pickLocalizedText(locale, {
+      uk: '❌ Помилка покращення зображення. Спробуйте ще раз.',
+      en: '❌ Image enhancement failed. Please try again.'
+    }));
   }
 }
 
@@ -14388,19 +14314,30 @@ async function handleSunoGeneration(ctx, text) {
     return;
   }
 
+  const locale = resolveLocale(ctx);
+
   if (text.length > 500) {
-    await ctx.reply(`❌ Текст занадто довгий!\n\nМаксимум: 500 символів\nВаш текст: ${text.length} символів\n\nСкоротіть текст і спробуйте ще раз.`);
+    await ctx.reply(pickLocalizedText(locale, {
+      uk: `❌ Текст занадто довгий!\n\nМаксимум: 500 символів\nВаш текст: ${text.length} символів\n\nСкоротіть текст і спробуйте ще раз.`,
+      en: `❌ The text is too long.\n\nMaximum: 500 characters\nYour text: ${text.length} characters\n\nShorten it and try again.`
+    }));
     return;
   }
 
-  const statusMsg = await ctx.reply(`🎵 Генерую аудіо через Suno AI Bark...\n\nТекст: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n\n⏱️ Це може зайняти 20-40 секунд`);
+  const statusMsg = await ctx.reply(pickLocalizedText(locale, {
+    uk: `🎵 Генерую аудіо через Suno AI Bark...\n\nТекст: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n\n⏱️ Це може зайняти 20-40 секунд`,
+    en: `🎵 Generating audio with Suno AI Bark...\n\nText: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"\n\n⏱️ This can take 20-40 seconds`
+  }));
 
   try {
     const result = await replicate.generateWithSuno(text);
 
     if (!result.success) {
       await adminNotifier.notifyAdmin(bot, new Error(result.error), { userId, username: ctx.from.username, action: 'suno_generation', model: 'Suno AI Bark', text });
-      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ Помилка генерації аудіо.\n\nСпробуйте ще раз або оберіть іншу модель.`);
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, pickLocalizedText(locale, {
+        uk: '❌ Помилка генерації аудіо.\n\nСпробуйте ще раз або оберіть іншу модель.',
+        en: '❌ Audio generation failed.\n\nPlease try again or choose another model.'
+      }));
       return;
     }
 
@@ -14408,24 +14345,27 @@ async function handleSunoGeneration(ctx, text) {
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
 
     await ctx.reply(
-      `✅ <b>Аудіо готово!</b>\n\n` +
-      `📝 Текст: "${text}"\n\n` +
-      `💾 <b>Як зберегти аудіо:</b>\n` +
-      `1️⃣ Натисніть на аудіо (☝️ див. нижче)\n` +
-      `2️⃣ Натисніть меню ⋮\n` +
-      `3️⃣ Оберіть "Зберегти" або "Завантажити"\n\n` +
-      `💰 Витрачено: ${model.cost}⚡`,
-      { parse_mode: 'HTML', ...keyboard.createBackButton('audio_menu') }
+      pickLocalizedText(locale, {
+        uk: `✅ <b>Аудіо готово!</b>\n\n📝 Текст: "${text}"\n\n💾 <b>Як зберегти аудіо:</b>\n1️⃣ Натисніть на аудіо (☝️ див. нижче)\n2️⃣ Натисніть меню ⋮\n3️⃣ Оберіть "Зберегти" або "Завантажити"\n\n💰 Витрачено: ${model.cost}⚡`,
+        en: `✅ <b>Audio is ready!</b>\n\n📝 Text: "${text}"\n\n💾 <b>How to save the audio:</b>\n1️⃣ Tap the audio below\n2️⃣ Open the ⋮ menu\n3️⃣ Choose "Save" or "Download"\n\n💰 Spent: ${model.cost}⚡`
+      }),
+      { parse_mode: 'HTML', ...keyboard.createBackButton('audio_menu', ctx) }
     );
 
     await ctx.replyWithAudio({ url: result.audioUrl }, {
-      caption: `🎵 Suno AI Bark\n\n📝 Текст: ${text}\n\n💰 Витрачено: ${model.cost}⚡`,
-      ...keyboard.createBackButton('audio_menu')
+      caption: pickLocalizedText(locale, {
+        uk: `🎵 Suno AI Bark\n\n📝 Текст: ${text}\n\n💰 Витрачено: ${model.cost}⚡`,
+        en: `🎵 Suno AI Bark\n\n📝 Text: ${text}\n\n💰 Spent: ${model.cost}⚡`
+      }),
+      ...keyboard.createBackButton('audio_menu', ctx)
     });
 
   } catch (error) {
     console.error('Suno generation failed:', error);
-    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, '❌ Помилка генерації аудіо. Спробуйте ще раз.');
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, pickLocalizedText(locale, {
+      uk: '❌ Помилка генерації аудіо. Спробуйте ще раз.',
+      en: '❌ Audio generation failed. Please try again.'
+    }));
   }
 }
 
@@ -14443,42 +14383,54 @@ async function getFileSize(url) {
 
 async function showProfile(ctx) {
   const user = await userBalance.getUser(ctx.from.id, ctx.from);
+  const locale = resolveLocale(ctx);
 
   if (!user) {
-    await ctx.reply('❌ Помилка. Спробуйте /start', keyboard.createBackButton());
+    await ctx.reply(t(locale, 'profileView.loadError'), keyboard.createBackButton('main_menu', ctx));
     return;
   }
 
   const stats = await userBalance.getUserStats(ctx.from.id);
   
   if (!stats) {
-    await ctx.reply('❌ Помилка отримання статистики', keyboard.createBackButton());
+    await ctx.reply(t(locale, 'profileView.statsError'), keyboard.createBackButton('main_menu', ctx));
     return;
   }
   
-  let message = `👤 Ваш профіль\n\n`;
-  message += `🆔 ID: ${ctx.from.id}\n`;
-  message += `👤 Ім'я: ${ctx.from.first_name}\n`;
-  message += `💰 Баланс: ${stats.currentBalance.toFixed(2)}⚡\n`;
-  message += `\n📊 Статистика:\n`;
-  message += `🎨 Генерацій: ${stats.generationCount}\n`;
-  message += `💸 Витрачено: ${stats.totalSpent.toFixed(2)}⚡\n`;
-  message += `📅 З нами: ${stats.memberSince.toLocaleDateString('uk-UA')}`;
+  let message = `${t(locale, 'profileView.title')}\n\n`;
+  message += `${t(locale, 'profileView.id', { id: ctx.from.id })}\n`;
+  message += `${t(locale, 'profileView.name', { name: ctx.from.first_name })}\n`;
+  message += `${t(locale, 'profileView.balance', { balance: stats.currentBalance.toFixed(2) })}\n`;
+  message += `\n${t(locale, 'profileView.statsTitle')}\n`;
+  message += `${t(locale, 'profileView.generations', { count: stats.generationCount })}\n`;
+  message += `${t(locale, 'profileView.spent', { spent: stats.totalSpent.toFixed(2) })}\n`;
+  message += t(locale, 'profileView.memberSince', {
+    date: stats.memberSince.toLocaleDateString(getDateLocale(locale))
+  });
   
   await ctx.reply(message, keyboard.createProfileMenu(ctx));
 }
 
 async function showInsufficientTokens(ctx, required) {
   const user = await userBalance.getUser(ctx.from.id, ctx.from);
+  const locale = resolveLocale(ctx);
   const starterPlan = models.subscriptions?.starter;
   const starterTokens = starterPlan?.tokensWayForPay ?? starterPlan?.tokens;
   const starterPrice = starterPlan?.priceUSD;
   const starterName = starterPlan?.name || 'STARTER';
   const starterLine = (starterTokens && starterPrice)
-    ? `Рекомендуємо тариф ${starterName} — всього ${starterPrice}$ — ${starterTokens} токенів😍\n\n`
+    ? t(locale, 'billing.recommendedStarter', {
+      planName: starterName,
+      priceUSD: starterPrice,
+      tokens: starterTokens
+    })
     : '';
   await ctx.reply(
-    `Ви використали токени.🙌🏻\n\nНеобхідно: ${required}⚡\nВаш баланс: ${user.tokens.toFixed(2)}⚡\n\nВсі генерації в таких нейромережах коштують нам реальних грошей. Але ми зробили зручний бот, де ви можете користуватись ними прямо в Телеграм 😍\n\n${starterLine}Щоб продовжити, придбайте підписку та отримайте більше токенів👇🏻\n\n`,
+    t(locale, 'billing.insufficientTokens', {
+      required,
+      balance: user.tokens.toFixed(2),
+      starterLine
+    }),
     keyboard.createSubscriptionMenu(ctx)
   );
 }
@@ -14831,6 +14783,27 @@ async function startBot() {
       next();
     });
 
+    const streamTelegramFileToResponse = async (filePath, res) => {
+      const telegramFileResponse = await axios.get(getTelegramFileUrl(filePath), {
+        responseType: 'stream',
+        timeout: 30000
+      });
+
+      const contentType = telegramFileResponse.headers['content-type'];
+      const contentLength = telegramFileResponse.headers['content-length'];
+
+      if (contentType) {
+        res.setHeader('Content-Type', contentType);
+      }
+
+      if (contentLength) {
+        res.setHeader('Content-Length', contentLength);
+      }
+
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      telegramFileResponse.data.pipe(res);
+    };
+
     app.get('/telegram/file/*filePath', async (req, res) => {
       const rawFilePath = req.params.filePath;
       const joinedPath = Array.isArray(rawFilePath) ? rawFilePath.join('/') : rawFilePath;
@@ -14842,26 +14815,31 @@ async function startBot() {
       }
 
       try {
-        const telegramFileResponse = await axios.get(getTelegramFileUrl(filePath), {
-          responseType: 'stream',
-          timeout: 30000
-        });
-
-        const contentType = telegramFileResponse.headers['content-type'];
-        const contentLength = telegramFileResponse.headers['content-length'];
-
-        if (contentType) {
-          res.setHeader('Content-Type', contentType);
-        }
-
-        if (contentLength) {
-          res.setHeader('Content-Length', contentLength);
-        }
-
-        res.setHeader('Cache-Control', 'private, max-age=300');
-        telegramFileResponse.data.pipe(res);
+        await streamTelegramFileToResponse(filePath, res);
       } catch (error) {
         console.error('Telegram file proxy error:', error.message);
+        res.status(502).json({ error: 'Failed to load Telegram file' });
+      }
+    });
+
+    app.get('/telegram/file-id/:fileId', async (req, res) => {
+      const rawFileId = req.params.fileId;
+      const fileId = typeof rawFileId === 'string' ? decodeURIComponent(rawFileId) : '';
+      const { expires, signature } = req.query;
+
+      if (!fileId || isExpired(expires) || !verifyFileIdProxySignature(fileId, expires, signature)) {
+        return res.status(403).json({ error: 'Invalid or expired file link' });
+      }
+
+      try {
+        const file = await bot.telegram.getFile(fileId);
+        if (!file?.file_path) {
+          return res.status(404).json({ error: 'Telegram file not found' });
+        }
+
+        await streamTelegramFileToResponse(file.file_path, res);
+      } catch (error) {
+        console.error('Telegram file-id proxy error:', error.message);
         res.status(502).json({ error: 'Failed to load Telegram file' });
       }
     });

@@ -1,4 +1,8 @@
 const { GoogleGenAI, createPartFromBase64, createPartFromText } = require('@google/genai');
+const {
+  getAssistantLanguageInstruction,
+  pickLocalizedText
+} = require('../utils/i18n');
 
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
 const DEFAULT_GEMINI_ASSISTANT_MODELS = [
@@ -43,22 +47,22 @@ function formatModelLabel(modelCode) {
   return label;
 }
 
-function buildTextSystemPrompt(modelCode) {
+function buildTextSystemPrompt(modelCode, localeSource = 'en') {
   const modelLabel = formatModelLabel(modelCode);
   return [
     `You are ${modelLabel} via the Google Gemini API.`,
     `If the user asks which version you are, answer: "I am ${modelLabel} via Google Gemini."`,
-    'Respond in English by default unless the user explicitly asks for another language.',
+    getAssistantLanguageInstruction(localeSource),
     'Be helpful and concise.'
   ].join(' ');
 }
 
-function buildVisionSystemPrompt(modelCode) {
+function buildVisionSystemPrompt(modelCode, localeSource = 'en') {
   const modelLabel = formatModelLabel(modelCode);
   return [
     `You are ${modelLabel} via the Google Gemini API.`,
     'Analyze images carefully and answer clearly.',
-    'Respond in English by default unless the user explicitly asks for another language.'
+    getAssistantLanguageInstruction(localeSource)
   ].join(' ');
 }
 
@@ -143,7 +147,7 @@ function shouldTryNextGeminiModel(error) {
   );
 }
 
-function getSafeGeminiErrorMessage(error) {
+function getSafeGeminiErrorMessage(error, localeSource = 'en') {
   const { payload, status, providerMessage } = getGeminiErrorContext(error);
   const retryDelayRaw = payload?.error?.details
     ?.find((detail) => detail?.['@type'] === 'type.googleapis.com/google.rpc.RetryInfo')
@@ -157,28 +161,52 @@ function getSafeGeminiErrorMessage(error) {
     || /rate limit/i.test(providerMessage)
   ) {
     return retryDelay
-      ? `Gemini is temporarily unavailable due to provider quota limits. Please try again in about ${retryDelay}.`
-      : 'Gemini is temporarily unavailable due to provider quota limits. Please try again later.';
+      ? pickLocalizedText(localeSource, {
+        uk: `Gemini тимчасово недоступний через ліміти провайдера. Спробуйте приблизно через ${retryDelay}.`,
+        en: `Gemini is temporarily unavailable due to provider quota limits. Please try again in about ${retryDelay}.`
+      })
+      : pickLocalizedText(localeSource, {
+        uk: 'Gemini тимчасово недоступний через ліміти провайдера. Спробуйте пізніше.',
+        en: 'Gemini is temporarily unavailable due to provider quota limits. Please try again later.'
+      });
   }
 
   if (status === 401 || status === 403) {
-    return 'Gemini API access is not available right now. Please contact support.';
+    return pickLocalizedText(localeSource, {
+      uk: 'Доступ до Gemini API зараз недоступний. Зверніться до підтримки.',
+      en: 'Gemini API access is not available right now. Please contact support.'
+    });
   }
 
   if (status >= 500) {
-    return 'Gemini is temporarily unavailable. Please try again later.';
+    return pickLocalizedText(localeSource, {
+      uk: 'Gemini тимчасово недоступний. Спробуйте пізніше.',
+      en: 'Gemini is temporarily unavailable. Please try again later.'
+    });
   }
 
   if (/deadline|timed out|timeout/i.test(providerMessage)) {
-    return 'Gemini did not respond in time. Please try again.';
+    return pickLocalizedText(localeSource, {
+      uk: 'Gemini не встиг відповісти. Спробуйте ще раз.',
+      en: 'Gemini did not respond in time. Please try again.'
+    });
   }
 
-  return 'Gemini request failed. Please try again later.';
+  return pickLocalizedText(localeSource, {
+    uk: 'Запит до Gemini не вдався. Спробуйте пізніше.',
+    en: 'Gemini request failed. Please try again later.'
+  });
 }
 
 async function generateWithFallback(buildRequest, options = {}) {
   if (!GEMINI_API_KEY) {
-    return { success: false, error: 'Google Gemini API key not configured' };
+    return {
+      success: false,
+      error: pickLocalizedText(options.localeSource, {
+        uk: 'Google Gemini API key не налаштовано',
+        en: 'Google Gemini API key not configured'
+      })
+    };
   }
 
   const ai = getClient();
@@ -193,7 +221,10 @@ async function generateWithFallback(buildRequest, options = {}) {
       if (!response?.text) {
         return {
           success: false,
-          error: `${formatModelLabel(model)} did not return a text response.`,
+          error: pickLocalizedText(options.localeSource, {
+            uk: `${formatModelLabel(model)} не повернув текстову відповідь.`,
+            en: `${formatModelLabel(model)} did not return a text response.`
+          }),
           model,
           modelLabel: formatModelLabel(model)
         };
@@ -232,13 +263,13 @@ async function generateWithFallback(buildRequest, options = {}) {
 
   return {
     success: false,
-    error: getSafeGeminiErrorMessage(lastError),
+    error: getSafeGeminiErrorMessage(lastError, options.localeSource),
     model: null,
     modelLabel: null
   };
 }
 
-async function chatWithClaude(message, conversationHistory = []) {
+async function chatWithClaude(message, conversationHistory = [], localeSource = 'en') {
   return generateWithFallback((model) => ({
     model,
     contents: [
@@ -249,14 +280,14 @@ async function chatWithClaude(message, conversationHistory = []) {
       }
     ],
     config: {
-      systemInstruction: buildTextSystemPrompt(model),
+      systemInstruction: buildTextSystemPrompt(model, localeSource),
       temperature: 0.7,
       maxOutputTokens: 4096
     }
-  }));
+  }), { localeSource });
 }
 
-async function analyzeImageWithClaude(imageBase64, prompt, mimeType = 'image/jpeg') {
+async function analyzeImageWithClaude(imageBase64, prompt, mimeType = 'image/jpeg', localeSource = 'en') {
   return generateWithFallback((model) => ({
     model,
     contents: [
@@ -264,20 +295,26 @@ async function analyzeImageWithClaude(imageBase64, prompt, mimeType = 'image/jpe
         role: 'user',
         parts: [
           createPartFromBase64(imageBase64, mimeType),
-          createPartFromText(prompt || 'Describe this image in detail.')
+          createPartFromText(
+            prompt
+            || pickLocalizedText(localeSource, {
+              uk: 'Опиши це зображення детально.',
+              en: 'Describe this image in detail.'
+            })
+          )
         ]
       }
     ],
     config: {
-      systemInstruction: buildVisionSystemPrompt(model),
+      systemInstruction: buildVisionSystemPrompt(model, localeSource),
       temperature: 0.4,
       maxOutputTokens: 4096
     }
-  }));
+  }), { localeSource });
 }
 
-async function continueConversation(userMessage, conversationHistory) {
-  return chatWithClaude(userMessage, conversationHistory);
+async function continueConversation(userMessage, conversationHistory, localeSource = 'en') {
+  return chatWithClaude(userMessage, conversationHistory, localeSource);
 }
 
 module.exports = {

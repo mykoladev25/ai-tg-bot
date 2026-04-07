@@ -10,7 +10,7 @@ Open-source Telegram bot for AI text, image, video, and payment workflows. The p
 - Stripe, LiqPay, WayForPay, and Telegram Stars payment support
 - Admin dashboard for revenue, COGS, pricing checks, and active generation visibility
 - Signed Telegram file proxy to avoid exposing the bot token to third-party providers
-- Centralized English locale structure with Telegram `language_code` fallback to English
+- Centralized locale structure with Telegram `language_code` support for English and Ukrainian
 
 ## Screenshots
 
@@ -63,13 +63,12 @@ If a provider key is missing, related features should be considered disabled.
 
 ## Localization
 
-The public repository is English-only by design.
-
-Locale resolution is centralized in [utils/i18n.js](utils/i18n.js) and currently uses Telegram `language_code` as the best available device/system locale proxy. Unsupported or missing locales fall back to English.
+Locale resolution is centralized in [utils/i18n.js](utils/i18n.js) and currently uses Telegram `language_code` as the best available device/system locale proxy. The bot ships with English and Ukrainian locales. Unsupported or missing locales fall back to English.
 
 The translation structure is intentionally simple and extensible:
 
 - [locales/en.js](locales/en.js)
+- [locales/uk.js](locales/uk.js)
 - [utils/i18n.js](utils/i18n.js)
 - [utils/keyboard.js](utils/keyboard.js)
 

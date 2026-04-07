@@ -71,9 +71,14 @@ function createInlineMenu(buttons, columns = 1) {
   return Markup.inlineKeyboard(keyboardRows);
 }
 
-function createBackButton(callback = 'main_menu', text = '🏠 Main menu') {
+function createBackButton(callback = 'main_menu', text = null, localeSource = 'en') {
+  if (text && typeof text === 'object') {
+    localeSource = text;
+    text = null;
+  }
+
   return Markup.inlineKeyboard([
-    [Markup.button.callback(text, callback)]
+    [Markup.button.callback(text || t(localeSource, 'common.home'), callback)]
   ]);
 }
 

@@ -5,6 +5,7 @@ const User = require('../database/models/User');
 async function getUser(userId, userInfo = {}) {
   try {
     let user = await User.findById(userId);
+    const nextLanguageCode = userInfo.language_code || userInfo.languageCode || 'en';
 
     if (!user) {
       user = new User({
@@ -12,7 +13,7 @@ async function getUser(userId, userInfo = {}) {
         username: userInfo.username,
         firstName: userInfo.first_name,
         lastName: userInfo.last_name,
-        languageCode: userInfo.language_code || 'en',
+        languageCode: nextLanguageCode,
         tokens: TRIAL_TOKENS,
         totalTokensEarned: TRIAL_TOKENS
       });
@@ -29,6 +30,18 @@ async function getUser(userId, userInfo = {}) {
         description: 'Initial signup bonus'
       });
     } else {
+      if (userInfo.username && user.username !== userInfo.username) {
+        user.username = userInfo.username;
+      }
+      if (userInfo.first_name && user.firstName !== userInfo.first_name) {
+        user.firstName = userInfo.first_name;
+      }
+      if (userInfo.last_name && user.lastName !== userInfo.last_name) {
+        user.lastName = userInfo.last_name;
+      }
+      if (nextLanguageCode && user.languageCode !== nextLanguageCode) {
+        user.languageCode = nextLanguageCode;
+      }
       user.lastActivityAt = new Date();
       await user.save();
     }

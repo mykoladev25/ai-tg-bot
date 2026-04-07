@@ -1,16 +1,63 @@
 
 
 const axios = require('axios');
+const {
+  DEFAULT_PROVIDER_PROXY_TTL_SECONDS,
+  buildTelegramFileIdProxyUrl,
+  buildTelegramFileProxyUrl,
+  extractTelegramFileIdFromProxyUrl,
+  extractTelegramFilePathFromProxyUrl
+} = require('../utils/telegramFiles');
 
 const KIE_API_BASE = 'https://api.kie.ai/api/v1';
 const KIE_API_KEY = process.env.KIE_AI_API_KEY;
 const accessControl = require('../config/access');
+const TELEGRAM_PROVIDER_PROXY_TTL_SECONDS = Number.parseInt(process.env.TELEGRAM_PROVIDER_PROXY_TTL_SECONDS, 10) > 0
+  ? Number.parseInt(process.env.TELEGRAM_PROVIDER_PROXY_TTL_SECONDS, 10)
+  : DEFAULT_PROVIDER_PROXY_TTL_SECONDS;
 
 // ==================== HELPER FUNCTIONS ====================
 
 
 function isAdminUser(userId) {
   return accessControl.isAdmin(userId);
+}
+
+function normalizeProviderInputUrl(url) {
+  if (typeof url !== 'string' || !url) {
+    return url;
+  }
+
+  const fileId = extractTelegramFileIdFromProxyUrl(url);
+  if (fileId) {
+    try {
+      return buildTelegramFileIdProxyUrl(fileId, {
+        ttlSeconds: TELEGRAM_PROVIDER_PROXY_TTL_SECONDS
+      });
+    } catch (error) {
+      console.warn(`⚠️ Failed to rebuild Telegram file-id proxy URL: ${error.message}`);
+      return url;
+    }
+  }
+
+  const filePath = extractTelegramFilePathFromProxyUrl(url);
+  if (filePath) {
+    return buildTelegramFileProxyUrl(filePath, {
+      ttlSeconds: TELEGRAM_PROVIDER_PROXY_TTL_SECONDS
+    });
+  }
+
+  return url;
+}
+
+function normalizeProviderInputUrls(input, maxItems = null) {
+  if (!input) return [];
+  const list = Array.isArray(input) ? input : [input];
+  const normalized = list
+    .map(normalizeProviderInputUrl)
+    .filter(Boolean);
+
+  return Number.isFinite(maxItems) ? normalized.slice(0, maxItems) : normalized;
 }
 
 
@@ -1177,6 +1224,9 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
       throw new Error('KIE.AI Kling Motion requires both an image and a video');
     }
 
+    const normalizedImageUrl = normalizeProviderInputUrl(imageUrl);
+    const normalizedVideoUrl = normalizeProviderInputUrl(videoUrl);
+
     console.log(`🎥 KIE.AI Kling Motion Control:`, {
       prompt: prompt?.substring(0, 100) || 'no prompt',
       mode,
@@ -1189,8 +1239,8 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
       callBackUrl: `${process.env.APP_URL || 'http://localhost:5500'}/webhook/kie-ai`,
       input: {
         prompt: prompt || '',
-        input_urls: [imageUrl],  
-        video_urls: [videoUrl],  
+        input_urls: [normalizedImageUrl],
+        video_urls: [normalizedVideoUrl],
         mode: mode,  
         character_orientation: characterOrientation  
       }
@@ -1288,6 +1338,15 @@ async function generateKling3VideoKieAI(options = {}) {
       throw new Error('multiPrompt is required for multi-shot mode');
     }
 
+    const normalizedImageUrls = normalizeProviderInputUrls(imageUrls, 2);
+    const normalizedKlingElements = Array.isArray(klingElements)
+      ? klingElements.map((element) => ({
+          ...element,
+          imageUrls: normalizeProviderInputUrls(element?.imageUrls, 4),
+          videoUrl: normalizeProviderInputUrl(element?.videoUrl)
+        }))
+      : [];
+
     console.log(`🎥 KIE.AI Kling 3.0 (${multiShots ? 'multi-shot' : 'single-shot'}):`, {
       prompt: prompt?.substring(0, 100) || 'multi-shot mode',
       duration,
@@ -1296,8 +1355,8 @@ async function generateKling3VideoKieAI(options = {}) {
       sound,
       multiShots,
       shots: multiPrompt?.length || 0,
-      elements: klingElements?.length || 0,
-      hasImages: imageUrls?.length || 0
+      elements: normalizedKlingElements.length,
+      hasImages: normalizedImageUrls.length
     });
 
     const input = {
@@ -1307,13 +1366,13 @@ async function generateKling3VideoKieAI(options = {}) {
       multi_shots: multiShots
     };
 
-    if (!imageUrls || imageUrls.length === 0) {
+    if (normalizedImageUrls.length === 0) {
       input.aspect_ratio = aspectRatio || '1:1';
     }
 
     // First/last frame images
-    if (imageUrls && imageUrls.length > 0) {
-      input.image_urls = imageUrls.slice(0, 2); // max 2 (first + last frame)
+    if (normalizedImageUrls.length > 0) {
+      input.image_urls = normalizedImageUrls;
     }
 
     if (multiShots) {
@@ -1330,19 +1389,19 @@ async function generateKling3VideoKieAI(options = {}) {
     }
 
     // Element references
-    if (klingElements && klingElements.length > 0) {
-      input.kling_elements = klingElements.map(el => {
+    if (normalizedKlingElements.length > 0) {
+      input.kling_elements = normalizedKlingElements.map(el => {
         const element = {
           name: el.name,
           description: el.description || el.name
         };
 
         if (el.imageUrls && el.imageUrls.length > 0) {
-          element.element_input_urls = el.imageUrls.slice(0, 4); // 2-4 images
+          element.element_input_urls = el.imageUrls;
         }
 
         if (el.videoUrl) {
-          element.element_input_video_urls = [el.videoUrl]; // 1 video
+          element.element_input_video_urls = [el.videoUrl];
         }
 
         return element;
@@ -1483,8 +1542,10 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
       throw new Error('Prompt is required for Kling');
     }
 
-    const isImage2Video = !!imageUrl;
+    const normalizedImageUrl = normalizeProviderInputUrl(imageUrl);
     const { tailImageUrl = '', negativePrompt = '', cfgScale = 0.5, onTaskCreated = null } = options;
+    const normalizedTailImageUrl = normalizeProviderInputUrl(tailImageUrl);
+    const isImage2Video = !!normalizedImageUrl;
 
     let modelName;
     if (version === 'v2.5') {
@@ -1503,7 +1564,7 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
       aspectRatio,
       sound,
       hasImage: isImage2Video,
-      hasTailImage: !!tailImageUrl
+      hasTailImage: !!normalizedTailImageUrl
     });
 
     let input;
@@ -1511,8 +1572,8 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
     if (version === 'v2.5') {
       input = {
         prompt: prompt,
-        image_url: imageUrl || '',
-        tail_image_url: tailImageUrl,
+        image_url: normalizedImageUrl || '',
+        tail_image_url: normalizedTailImageUrl,
         duration: String(duration),
         negative_prompt: negativePrompt,
         cfg_scale: cfgScale
@@ -1529,7 +1590,7 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
       }
 
       if (isImage2Video) {
-        input.image_urls = [imageUrl];
+        input.image_urls = [normalizedImageUrl];
       }
     }
 
@@ -1655,6 +1716,7 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
       callBackUrl = null,      // callback URL
       onTaskCreated = null
     } = options;
+    const normalizedImageUrl = normalizeProviderInputUrl(imageUrl);
 
     if (quality === '1080p' && duration !== 5) {
       console.warn('⚠️ 1080p is available only for 5-second videos. Falling back to 720p.');
@@ -1662,12 +1724,12 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
 
     const actualQuality = (quality === '1080p' && duration !== 5) ? '720p' : quality;
 
-    console.log(`🎬 KIE.AI Runway (${imageUrl ? 'image2video' : 'text2video'}):`, {
+    console.log(`🎬 KIE.AI Runway (${normalizedImageUrl ? 'image2video' : 'text2video'}):`, {
       prompt: prompt.substring(0, 100),
       duration,
       quality: actualQuality,
       aspectRatio,
-      hasImage: !!imageUrl
+      hasImage: !!normalizedImageUrl
     });
 
     // https://docs.kie.ai/runway-api/generate-ai-video
@@ -1679,8 +1741,8 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
       waterMark: waterMark
     };
 
-    if (imageUrl) {
-      payload.imageUrl = imageUrl;
+    if (normalizedImageUrl) {
+      payload.imageUrl = normalizedImageUrl;
     }
 
     // Callback URL
@@ -1691,7 +1753,7 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
     }
 
     console.log(`📤 KIE.AI Runway request:`, {
-      mode: imageUrl ? 'image2video' : 'text2video',
+      mode: normalizedImageUrl ? 'image2video' : 'text2video',
       duration,
       quality: actualQuality,
       aspectRatio
@@ -1839,8 +1901,8 @@ async function generateSora2KieAI(prompt, options = {}) {
       aspectRatio = 'landscape',
       onTaskCreated = null
     } = options;
-
-    const isImageToVideo = !!imageUrl;
+    const normalizedImageUrl = normalizeProviderInputUrl(imageUrl);
+    const isImageToVideo = !!normalizedImageUrl;
 
     let modelName, actualDuration;
     if (isImageToVideo) {
@@ -1864,7 +1926,7 @@ async function generateSora2KieAI(prompt, options = {}) {
     };
 
     if (isImageToVideo) {
-      input.image_urls = [imageUrl];
+      input.image_urls = [normalizedImageUrl];
     }
 
     const payload = {
@@ -1978,12 +2040,6 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
       ? 'bytedance/seedance-2-fast'
       : 'bytedance/seedance-2';
 
-    const normalizeUrlList = (input, maxItems = 5) => {
-      if (!input) return [];
-      const list = Array.isArray(input) ? input : [input];
-      return list.filter(Boolean).slice(0, maxItems);
-    };
-
     const safeDuration = Math.max(4, Math.min(15, Number(duration) || 4));
     const safeResolution = ['480p', '720p'].includes(resolution) ? resolution : '480p';
     const safeAspectRatio = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'].includes(aspectRatio)
@@ -2000,9 +2056,9 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
       web_search: !!webSearch
     };
 
-    const imageRefs = normalizeUrlList(referenceImageUrls, 5);
-    const videoRefs = normalizeUrlList(referenceVideoUrls, 3);
-    const audioRefs = normalizeUrlList(referenceAudioUrls, 3);
+    const imageRefs = normalizeProviderInputUrls(referenceImageUrls, 5);
+    const videoRefs = normalizeProviderInputUrls(referenceVideoUrls, 3);
+    const audioRefs = normalizeProviderInputUrls(referenceAudioUrls, 3);
 
     if (imageRefs.length > 0) input.reference_image_urls = imageRefs;
     if (videoRefs.length > 0) input.reference_video_urls = videoRefs;
@@ -2136,12 +2192,13 @@ async function generateVeoKieAI(prompt, options = {}) {
       watermark = null,         
       seeds = null              // random seed 10000-99999
     } = options;
+    const normalizedImageUrls = normalizeProviderInputUrls(imageUrls, 3);
 
     let actualGenerationType = generationType;
     if (!actualGenerationType) {
-      if (imageUrls.length === 0) {
+      if (normalizedImageUrls.length === 0) {
         actualGenerationType = 'TEXT_2_VIDEO';
-      } else if (imageUrls.length <= 2) {
+      } else if (normalizedImageUrls.length <= 2) {
         actualGenerationType = 'FIRST_AND_LAST_FRAMES_2_VIDEO';
       } else {
         actualGenerationType = 'REFERENCE_2_VIDEO';
@@ -2162,7 +2219,7 @@ async function generateVeoKieAI(prompt, options = {}) {
       model,
       aspectRatio,
       generationType: actualGenerationType,
-      imageCount: imageUrls.length,
+      imageCount: normalizedImageUrls.length,
       enableTranslation
     });
 
@@ -2176,8 +2233,8 @@ async function generateVeoKieAI(prompt, options = {}) {
       callBackUrl: `${process.env.APP_URL || 'http://localhost:5500'}/webhook/kie-ai`
     };
 
-    if (imageUrls.length > 0) {
-      payload.imageUrls = imageUrls.slice(0, 3); 
+    if (normalizedImageUrls.length > 0) {
+      payload.imageUrls = normalizedImageUrls;
     }
 
     if (watermark) {
