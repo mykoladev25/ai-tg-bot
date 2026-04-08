@@ -11671,6 +11671,10 @@ bot.on('photo', async (ctx) => {
   }
 
   if (state?.action === 'kling_3_generation' && state?.step === 'waiting_start_image') {
+    if (!(await ensureMinimumPhotoDimensions(ctx, 300, 300))) {
+      return;
+    }
+
     const imageUrl = await getImageUrl(ctx);
 
     userState.set(userId, {
@@ -11720,6 +11724,11 @@ bot.on('photo', async (ctx) => {
       );
       return;
     }
+
+    if (!(await ensureMinimumPhotoDimensions(ctx, 300, 300))) {
+      return;
+    }
+
     const imageUrl = await getImageUrl(ctx);
     if (imageUrl) {
       const cur = state.currentElement;
@@ -12514,6 +12523,31 @@ async function getImageUrl(ctx, access = 'proxy') {
   const photo = ctx.message.photo[ctx.message.photo.length - 1];
   const file = await ctx.telegram.getFile(photo.file_id);
   return buildTelegramFileAccessUrl({ file_id: photo.file_id, file_path: file.file_path }, access);
+}
+
+function getIncomingPhotoDimensions(ctx) {
+  const photo = ctx.message?.photo?.[ctx.message.photo.length - 1];
+  return {
+    width: photo?.width || 0,
+    height: photo?.height || 0
+  };
+}
+
+async function ensureMinimumPhotoDimensions(ctx, minWidth, minHeight, backTarget = 'video_menu') {
+  const { width, height } = getIncomingPhotoDimensions(ctx);
+  if (width >= minWidth && height >= minHeight) {
+    return true;
+  }
+
+  await ctx.reply(
+    `❌ Зображення занадто маленьке!\n\n` +
+    `Мінімальний розмір: ${minWidth}x${minHeight}px\n` +
+    `Ваше фото: ${width}x${height}px\n\n` +
+    `Kling 3.0 потребує зображення, де і ширина, і висота не менше ${minWidth}px.`,
+    keyboard.createBackButton(backTarget)
+  );
+
+  return false;
 }
 
 function isSupportedVideoDocument(document) {
@@ -14686,21 +14720,26 @@ async function startBot() {
     app.post('/webhook/wayforpay', express.raw({ type: '*/*' }), (req, res, next) => {
         try {
             let data;
+            let rawBody = '';
 
             if (typeof req.body === 'string') {
                 console.log('📥 Parsing raw JSON from WayForPay...');
-                data = JSON.parse(req.body);
+                rawBody = req.body;
+                data = JSON.parse(rawBody);
             } else if (Buffer.isBuffer(req.body)) {
                 console.log('📥 Parsing Buffer from WayForPay...');
-                data = JSON.parse(req.body.toString('utf8'));
+                rawBody = req.body.toString('utf8');
+                data = JSON.parse(rawBody);
             } else if (typeof req.body === 'object') {
                 data = req.body;
+                rawBody = JSON.stringify(req.body);
             } else {
                 console.error('❌ Unexpected body type:', typeof req.body);
                 return res.status(400).json({ error: 'Invalid request body' });
             }
 
             console.log('✅ WayForPay webhook body parsed successfully');
+            req.rawBody = rawBody;
             req.body = data;
             next();
         } catch (error) {

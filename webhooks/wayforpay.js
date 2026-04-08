@@ -10,6 +10,13 @@ module.exports = function(bot) {
     router.post('/wayforpay', express.text({ type: '*/*' }), async (req, res) => {
         try {
             let data;
+            const rawBody = typeof req.rawBody === 'string' && req.rawBody.length > 0
+                ? req.rawBody
+                : Buffer.isBuffer(req.body)
+                    ? req.body.toString('utf8')
+                    : typeof req.body === 'string'
+                        ? req.body
+                        : null;
 
             if (typeof req.body === 'string') {
                 // Raw JSON string
@@ -47,7 +54,7 @@ module.exports = function(bot) {
                 reason: data.reason
             });
 
-            if (!wayforpay.verifySignature(data)) {
+            if (!wayforpay.verifySignature(data, rawBody)) {
                 console.error('❌ WayForPay: Invalid signature');
                 return res.status(400).json({ error: 'Invalid signature' });
             }

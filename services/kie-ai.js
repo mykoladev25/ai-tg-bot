@@ -100,6 +100,32 @@ function inferExtensionFromMimeType(mimeType = '') {
   return mimeToExtension[normalizedMimeType] || 'bin';
 }
 
+function inferMimeTypeFromFileName(fileName = '') {
+  const normalizedName = String(fileName).trim().toLowerCase();
+  const extension = normalizedName.includes('.')
+    ? normalizedName.split('.').pop()
+    : '';
+
+  const extensionToMime = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    gif: 'image/gif',
+    mp4: 'video/mp4',
+    mov: 'video/quicktime',
+    webm: 'video/webm',
+    mkv: 'video/x-matroska',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    ogg: 'audio/ogg',
+    aac: 'audio/aac',
+    m4a: 'audio/mp4'
+  };
+
+  return extensionToMime[extension] || null;
+}
+
 function buildUploadFileName(sourceUrl, headers = {}, uploadPath = 'telegram-inputs') {
   try {
     const parsed = new URL(sourceUrl);
@@ -113,6 +139,18 @@ function buildUploadFileName(sourceUrl, headers = {}, uploadPath = 'telegram-inp
   const extension = inferExtensionFromMimeType(headers['content-type']);
   const safeUploadPath = String(uploadPath || 'telegram-inputs').replace(/[^a-z0-9_-]+/gi, '-');
   return `${safeUploadPath}-${Date.now()}.${extension}`;
+}
+
+function normalizeUploadContentType(sourceUrl, headers = {}, uploadPath = 'telegram-inputs') {
+  const reportedContentType = String(headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  const fileName = buildUploadFileName(sourceUrl, headers, uploadPath);
+  const inferredContentType = inferMimeTypeFromFileName(fileName);
+
+  if (!reportedContentType || reportedContentType === 'application/octet-stream' || reportedContentType === 'binary/octet-stream') {
+    return inferredContentType || 'application/octet-stream';
+  }
+
+  return reportedContentType;
 }
 
 function extractKieUploadedFileUrl(responseData) {
@@ -133,10 +171,18 @@ async function uploadFileStreamToKie(fileUrl, uploadPath = 'telegram-inputs') {
     maxRedirects: 5
   });
 
+  const fileName = buildUploadFileName(sourceUrl, sourceResponse.headers || {}, uploadPath);
+  const uploadContentType = normalizeUploadContentType(sourceUrl, sourceResponse.headers || {}, uploadPath);
+  const sourceContentType = String(sourceResponse.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase();
+
+  if (sourceContentType && sourceContentType !== uploadContentType) {
+    console.log(`📎 KIE upload MIME override for ${uploadPath}: ${sourceContentType} -> ${uploadContentType} (${fileName})`);
+  }
+
   const form = new FormData();
   form.append('file', sourceResponse.data, {
-    filename: buildUploadFileName(sourceUrl, sourceResponse.headers || {}, uploadPath),
-    contentType: sourceResponse.headers?.['content-type'] || 'application/octet-stream'
+    filename: fileName,
+    contentType: uploadContentType
   });
   form.append('uploadPath', uploadPath);
 
@@ -162,7 +208,46 @@ async function uploadFileStreamToKie(fileUrl, uploadPath = 'telegram-inputs') {
   return cachedUrl;
 }
 
-async function cacheRemoteFileForKie(url, uploadPath = 'telegram-inputs') {
+function requiresStrictKieUpload(url) {
+  if (typeof url !== 'string' || !url) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname || '';
+    return host === 'api.telegram.org'
+      || path.includes('/telegram/file/')
+      || path.includes('/telegram/file-id/');
+  } catch (error) {
+    return false;
+  }
+}
+
+function getKieFriendlyMediaError(message) {
+  const normalized = String(message || '').toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.includes('media file is unavailable')) {
+    return 'KIE.AI could not access the uploaded media. Please re-send the image or video and try again.';
+  }
+
+  if (normalized.includes('image_input file type not supported')) {
+    return 'KIE.AI does not accept this image format. Send the image as a Telegram photo or use JPG/PNG and try again.';
+  }
+
+  if (normalized.includes('image dimensions must be at least 300 pixels')) {
+    return 'The image is too small for KIE.AI. Please use an image that is at least 300x300 px.';
+  }
+
+  return null;
+}
+
+async function cacheRemoteFileForKie(url, uploadPath = 'telegram-inputs', options = {}) {
+  const { strict = false } = options;
   const normalizedUrl = normalizeProviderInputUrl(url);
   if (!normalizedUrl || isKieTempFileUrl(normalizedUrl)) {
     return normalizedUrl;
@@ -203,9 +288,15 @@ async function cacheRemoteFileForKie(url, uploadPath = 'telegram-inputs') {
     }
 
     console.warn('⚠️ KIE file cache: no fileUrl/downloadUrl returned, using original URL');
+    if (strict && requiresStrictKieUpload(normalizedUrl)) {
+      throw new Error('Failed to upload media to KIE.AI. Please re-send the image or video and try again.');
+    }
     return normalizedUrl;
   } catch (error) {
     console.warn(`⚠️ KIE file cache failed for ${uploadPath}: ${error.response?.data?.msg || error.message}`);
+    if (strict && requiresStrictKieUpload(normalizedUrl)) {
+      throw new Error('Failed to upload media to KIE.AI. Please re-send the image or video and try again.');
+    }
     return normalizedUrl;
   }
 }
@@ -213,11 +304,31 @@ async function cacheRemoteFileForKie(url, uploadPath = 'telegram-inputs') {
 async function cacheRemoteFilesForKie(input, options = {}) {
   const {
     maxItems = null,
-    uploadPath = 'telegram-inputs'
+    uploadPath = 'telegram-inputs',
+    strict = false
   } = options;
 
   const urls = normalizeProviderInputUrls(input, maxItems);
-  return Promise.all(urls.map((url) => cacheRemoteFileForKie(url, uploadPath)));
+  return Promise.all(urls.map((url) => cacheRemoteFileForKie(url, uploadPath, { strict })));
+}
+
+async function prepareKieImageInputs(imageInput, options = {}) {
+  const {
+    maxImages = 3,
+    uploadPath = 'telegram-inputs',
+    strict = true
+  } = options;
+
+  const images = imageInput ? normalizeImageInput(imageInput, maxImages) : [];
+  if (images.length === 0) {
+    return [];
+  }
+
+  return cacheRemoteFilesForKie(images, {
+    maxItems: maxImages,
+    uploadPath,
+    strict
+  });
 }
 
 
@@ -628,7 +739,11 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
 
     const truncatedPrompt = prompt.length > 20000 ? prompt.substring(0, 20000) : prompt;
 
-    const images = imageInput ? normalizeImageInput(imageInput, 3) : [];
+    const images = await prepareKieImageInputs(imageInput, {
+      maxImages: 3,
+      uploadPath: 'telegram-nano-banana-base-images',
+      strict: true
+    });
     const isText2Img = images.length === 0;
 
     console.log(`🎨 KIE.AI Nano Banana Base (${isText2Img ? 'text2img' : 'img2img'}):`, {
@@ -647,6 +762,10 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
         output_format: outputFormat || 'png'
       }
     };
+
+    if (images.length > 0) {
+      payload.input.image_input = images;
+    }
 
     console.log(`📤 KIE.AI Nano Banana Base request:`, {
       model: payload.model,
@@ -680,6 +799,15 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+      const mediaError = getKieFriendlyMediaError(apiMsg);
+
+      if (mediaError) {
+        return {
+          success: false,
+          error: mediaError,
+          provider: 'kie-ai'
+        };
+      }
 
       if (responseCode === 500) {
         console.error('❌ KIE.AI Nano Banana Base - Server Error 500:', createResponse?.data);
@@ -714,6 +842,15 @@ async function generateWithNanoBananaBaseKieAI(prompt, imageInput = null, imageS
 
   } catch (error) {
     console.error('❌ KIE.AI Nano Banana Base Error:', error.response?.data || error.message);
+    const mediaError = getKieFriendlyMediaError(error.response?.data?.msg || error.response?.data?.message || error.message);
+
+    if (mediaError) {
+      return {
+        success: false,
+        error: mediaError,
+        provider: 'kie-ai'
+      };
+    }
 
     if (error.response?.data?.code === 500) {
       return {
@@ -851,7 +988,11 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
       throw new Error('Prompt is required for Nano Banana Pro');
     }
 
-    const images = imageInput ? normalizeImageInput(imageInput, 8) : [];
+    const images = await prepareKieImageInputs(imageInput, {
+      maxImages: 8,
+      uploadPath: 'telegram-nano-banana-pro-images',
+      strict: true
+    });
     const isText2Img = images.length === 0;
 
     console.log(`🎨 KIE.AI Nano Banana Pro (${isText2Img ? 'text2img' : 'img2img'}):`, {
@@ -915,6 +1056,15 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+      const mediaError = getKieFriendlyMediaError(apiMsg);
+
+      if (mediaError) {
+        return {
+          success: false,
+          error: mediaError,
+          provider: 'kie-ai'
+        };
+      }
 
       if (responseCode === 500) {
         console.error('❌ KIE.AI Nano Banana - Server Error 500:', createResponse?.data);
@@ -949,6 +1099,15 @@ async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution
 
   } catch (error) {
     console.error('❌ KIE.AI Nano Banana Error:', error.response?.data || error.message);
+    const mediaError = getKieFriendlyMediaError(error.response?.data?.msg || error.response?.data?.message || error.message);
+
+    if (mediaError) {
+      return {
+        success: false,
+        error: mediaError,
+        provider: 'kie-ai'
+      };
+    }
 
     if (error.response?.data?.code === 500) {
       return {
@@ -1019,7 +1178,11 @@ async function generateWithSeedreamVariantKieAI({
       quality = 'basic';
     }
 
-    const images = imageInput ? normalizeImageInput(imageInput, maxImages) : [];
+    const images = await prepareKieImageInputs(imageInput, {
+      maxImages,
+      uploadPath: 'telegram-seedream-images',
+      strict: true
+    });
     const isEdit = images.length > 0;
     const maxPromptLength = isEdit ? maxPromptLengthImage : maxPromptLengthText;
     const finalPrompt = (maxPromptLength && prompt.length > maxPromptLength)
@@ -1088,6 +1251,15 @@ async function generateWithSeedreamVariantKieAI({
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+      const mediaError = getKieFriendlyMediaError(apiMsg);
+
+      if (mediaError) {
+        return {
+          success: false,
+          error: mediaError,
+          provider: 'kie-ai'
+        };
+      }
 
       if (responseCode === 500) {
         console.error(`❌ KIE.AI ${modelLabel} - Server Error 500:`, createResponse?.data);
@@ -1122,6 +1294,15 @@ async function generateWithSeedreamVariantKieAI({
 
   } catch (error) {
     console.error(`❌ KIE.AI ${modelLabel} Error:`, error.response?.data || error.message);
+    const mediaError = getKieFriendlyMediaError(error.response?.data?.msg || error.response?.data?.message || error.message);
+
+    if (mediaError) {
+      return {
+        success: false,
+        error: mediaError,
+        provider: 'kie-ai'
+      };
+    }
 
     if (error.response?.data?.code === 500) {
       return {
@@ -1191,13 +1372,15 @@ async function generateWithRecraftUpscaleKieAI(imageUrl) {
       throw new Error('Recraft Upscale requires an image');
     }
 
+    const normalizedImageUrl = await cacheRemoteFileForKie(imageUrl, 'telegram-recraft-upscale-images', { strict: true });
+
     console.log(`✨ KIE.AI Recraft Crisp Upscale`);
 
     const payload = {
       model: 'recraft/crisp-upscale',
       callBackUrl: `${process.env.APP_URL || 'http://localhost:5500'}/webhook/kie-ai`,
       input: {
-        image: imageUrl
+        image: normalizedImageUrl
       }
     };
 
@@ -1240,6 +1423,14 @@ async function generateWithRecraftUpscaleKieAI(imageUrl) {
 
   } catch (error) {
     console.error('❌ KIE.AI Recraft Upscale Error:', error.response?.data || error.message);
+    const mediaError = getKieFriendlyMediaError(error.response?.data?.msg || error.response?.data?.message || error.message);
+    if (mediaError) {
+      return {
+        success: false,
+        error: mediaError,
+        provider: 'kie-ai'
+      };
+    }
     return {
       success: false,
       error: error.response?.data?.message || error.message,
@@ -1271,6 +1462,8 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
 
     const modelName = `ideogram/v3-${mode}`;
 
+    const normalizedImageUrl = await cacheRemoteFileForKie(imageUrl, 'telegram-ideogram-images', { strict: true });
+
     console.log(`🎨 KIE.AI Ideogram v3 (${mode}):`, {
       imageSize,
       renderingSpeed,
@@ -1279,7 +1472,7 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
     });
 
     const input = {
-      image_url: imageUrl,
+      image_url: normalizedImageUrl,
       image_size: imageSize,
       rendering_speed: renderingSpeed,
       style: style,
@@ -1319,6 +1512,15 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+      const mediaError = getKieFriendlyMediaError(apiMsg);
+
+      if (mediaError) {
+        return {
+          success: false,
+          error: mediaError,
+          provider: 'kie-ai'
+        };
+      }
 
       if (responseCode === 500) {
         console.error('❌ KIE.AI Ideogram - Server Error 500:', createResponse?.data);
@@ -1353,6 +1555,15 @@ async function generateWithIdeogramKieAI(imageUrl, options = {}) {
 
   } catch (error) {
     console.error('❌ KIE.AI Ideogram Error:', error.response?.data || error.message);
+    const mediaError = getKieFriendlyMediaError(error.response?.data?.msg || error.response?.data?.message || error.message);
+
+    if (mediaError) {
+      return {
+        success: false,
+        error: mediaError,
+        provider: 'kie-ai'
+      };
+    }
 
     if (error.response?.data?.code === 500) {
       return {
@@ -1385,8 +1596,8 @@ async function generateKlingMotionKieAI(prompt, imageUrl, videoUrl, mode = '720p
     }
 
     const [normalizedImageUrl, normalizedVideoUrl] = await Promise.all([
-      cacheRemoteFileForKie(imageUrl, 'telegram-kling-motion-images'),
-      cacheRemoteFileForKie(videoUrl, 'telegram-kling-motion-videos')
+      cacheRemoteFileForKie(imageUrl, 'telegram-kling-motion-images', { strict: true }),
+      cacheRemoteFileForKie(videoUrl, 'telegram-kling-motion-videos', { strict: true })
     ]);
 
     console.log(`🎥 KIE.AI Kling Motion Control:`, {
@@ -1502,7 +1713,8 @@ async function generateKling3VideoKieAI(options = {}) {
 
     const normalizedImageUrls = await cacheRemoteFilesForKie(imageUrls, {
       maxItems: 2,
-      uploadPath: 'telegram-kling-3-images'
+      uploadPath: 'telegram-kling-3-images',
+      strict: true
     });
     const normalizedKlingElements = Array.isArray(klingElements)
       ? await Promise.all(
@@ -1510,11 +1722,13 @@ async function generateKling3VideoKieAI(options = {}) {
             ...element,
             imageUrls: await cacheRemoteFilesForKie(element?.imageUrls, {
               maxItems: 4,
-              uploadPath: 'telegram-kling-3-elements'
+              uploadPath: 'telegram-kling-3-elements',
+              strict: true
             }),
             videoUrl: await cacheRemoteFileForKie(
               element?.videoUrl,
-              'telegram-kling-3-element-videos'
+              'telegram-kling-3-element-videos',
+              { strict: true }
             )
           }))
         )
@@ -1611,6 +1825,15 @@ async function generateKling3VideoKieAI(options = {}) {
     if (!taskId) {
       const responseCode = createResponse?.data?.code;
       const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+      const mediaError = getKieFriendlyMediaError(apiMsg);
+
+      if (mediaError) {
+        return {
+          success: false,
+          error: mediaError,
+          provider: 'kie-ai'
+        };
+      }
 
       if (responseCode === 500) {
         console.error('❌ KIE.AI Kling 3.0 - Server Error 500:', createResponse?.data);
@@ -1685,6 +1908,15 @@ async function generateKling3VideoKieAI(options = {}) {
   } catch (error) {
     const res = error.response?.data;
     console.error('❌ KIE.AI Kling 3.0 Error:', res || error.message);
+    const mediaError = getKieFriendlyMediaError((typeof res?.msg === 'string' ? res.msg : null) || res?.message || error.message);
+
+    if (mediaError) {
+      return {
+        success: false,
+        error: mediaError,
+        provider: 'kie-ai'
+      };
+    }
 
     if (res?.code === 500 || error.response?.data?.code === 500) {
       return {
@@ -1715,9 +1947,9 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
       throw new Error('Prompt is required for Kling');
     }
 
-    const normalizedImageUrl = await cacheRemoteFileForKie(imageUrl, 'telegram-kling-images');
+    const normalizedImageUrl = await cacheRemoteFileForKie(imageUrl, 'telegram-kling-images', { strict: true });
     const { tailImageUrl = '', negativePrompt = '', cfgScale = 0.5, onTaskCreated = null } = options;
-    const normalizedTailImageUrl = await cacheRemoteFileForKie(tailImageUrl, 'telegram-kling-tail-images');
+    const normalizedTailImageUrl = await cacheRemoteFileForKie(tailImageUrl, 'telegram-kling-tail-images', { strict: true });
     const isImage2Video = !!normalizedImageUrl;
 
     let modelName;
@@ -1795,6 +2027,14 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
     console.log(`📥 KIE.AI response:`, JSON.stringify(createResponse.data, null, 2));
 
     if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      const mediaError = getKieFriendlyMediaError(createResponse?.data?.msg ?? createResponse?.data?.message);
+      if (mediaError) {
+        return {
+          success: false,
+          error: mediaError,
+          provider: 'kie-ai'
+        };
+      }
       console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
       throw new Error(`Unexpected response from KIE.AI: ${JSON.stringify(createResponse.data)}`);
     }
@@ -1838,6 +2078,15 @@ async function generateKlingVideoKieAI(prompt, imageUrl = null, duration = '5', 
       data: error.response?.data,
       stack: error.stack
     });
+    const mediaError = getKieFriendlyMediaError(error.response?.data?.msg || error.response?.data?.message || error.message);
+
+    if (mediaError) {
+      return {
+        success: false,
+        error: mediaError,
+        provider: 'kie-ai'
+      };
+    }
 
     if (error.response?.data?.code === 500) {
       return {
@@ -1889,7 +2138,7 @@ async function generateRunwayVideoKieAI(prompt, options = {}) {
       callBackUrl = null,      // callback URL
       onTaskCreated = null
     } = options;
-    const normalizedImageUrl = await cacheRemoteFileForKie(imageUrl, 'telegram-runway-images');
+    const normalizedImageUrl = await cacheRemoteFileForKie(imageUrl, 'telegram-runway-images', { strict: true });
 
     if (quality === '1080p' && duration !== 5) {
       console.warn('⚠️ 1080p is available only for 5-second videos. Falling back to 720p.');
@@ -2074,7 +2323,7 @@ async function generateSora2KieAI(prompt, options = {}) {
       aspectRatio = 'landscape',
       onTaskCreated = null
     } = options;
-    const normalizedImageUrl = await cacheRemoteFileForKie(imageUrl, 'telegram-sora-images');
+    const normalizedImageUrl = await cacheRemoteFileForKie(imageUrl, 'telegram-sora-images', { strict: true });
     const isImageToVideo = !!normalizedImageUrl;
 
     let modelName, actualDuration;
@@ -2232,15 +2481,18 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
     const [imageRefs, videoRefs, audioRefs] = await Promise.all([
       cacheRemoteFilesForKie(referenceImageUrls, {
         maxItems: 5,
-        uploadPath: 'telegram-seedance-images'
+        uploadPath: 'telegram-seedance-images',
+        strict: true
       }),
       cacheRemoteFilesForKie(referenceVideoUrls, {
         maxItems: 3,
-        uploadPath: 'telegram-seedance-videos'
+        uploadPath: 'telegram-seedance-videos',
+        strict: true
       }),
       cacheRemoteFilesForKie(referenceAudioUrls, {
         maxItems: 3,
-        uploadPath: 'telegram-seedance-audio'
+        uploadPath: 'telegram-seedance-audio',
+        strict: true
       })
     ]);
 
@@ -2378,7 +2630,8 @@ async function generateVeoKieAI(prompt, options = {}) {
     } = options;
     const normalizedImageUrls = await cacheRemoteFilesForKie(imageUrls, {
       maxItems: 3,
-      uploadPath: 'telegram-veo-images'
+      uploadPath: 'telegram-veo-images',
+      strict: true
     });
 
     let actualGenerationType = generationType;

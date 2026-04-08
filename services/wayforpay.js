@@ -10,6 +10,51 @@ class WayForPayService {
         this.checkoutUrl = 'https://secure.wayforpay.com/pay';
     }
 
+    extractRawJsonField(rawBody, fieldName) {
+        if (typeof rawBody !== 'string' || !rawBody) {
+            return null;
+        }
+
+        const escapedFieldName = fieldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const match = rawBody.match(new RegExp(`"${escapedFieldName}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*"|[^,}\\r\\n]+)`));
+
+        if (!match) {
+            return null;
+        }
+
+        const token = match[1].trim();
+        if (token.startsWith('"')) {
+            try {
+                return JSON.parse(token);
+            } catch (error) {
+                return token.slice(1, -1);
+            }
+        }
+
+        return token;
+    }
+
+    getCallbackSignatureFieldValue(fieldName, data, rawBody) {
+        const rawValue = this.extractRawJsonField(rawBody, fieldName);
+        if (rawValue !== null && rawValue !== undefined) {
+            return String(rawValue);
+        }
+
+        const parsedValue = data?.[fieldName];
+        return parsedValue === undefined || parsedValue === null ? '' : String(parsedValue);
+    }
+
+    signaturesEqual(expected, actual) {
+        const left = String(expected || '');
+        const right = String(actual || '');
+
+        if (left.length !== right.length) {
+            return false;
+        }
+
+        return crypto.timingSafeEqual(Buffer.from(left), Buffer.from(right));
+    }
+
     /**
      * Generate the HMAC_MD5 signature required by WayForPay.
      */
@@ -37,30 +82,20 @@ class WayForPayService {
     /**
      * Verify a WayForPay callback signature.
      */
-    verifySignature(data) {
+    verifySignature(data, rawBody = null) {
         try {
-            const {
-                merchantAccount,
-                orderReference,
-                amount,
-                currency,
-                authCode,
-                cardPan,
-                transactionStatus,
-                reasonCode,
-                merchantSignature
-            } = data;
-
             const signatureParts = [
-                merchantAccount,
-                orderReference,
-                amount,
-                currency,
-                authCode,
-                cardPan,
-                transactionStatus,
-                reasonCode
-            ];
+                'merchantAccount',
+                'orderReference',
+                'amount',
+                'currency',
+                'authCode',
+                'cardPan',
+                'transactionStatus',
+                'reasonCode'
+            ].map((fieldName) => this.getCallbackSignatureFieldValue(fieldName, data, rawBody));
+
+            const merchantSignature = this.getCallbackSignatureFieldValue('merchantSignature', data, rawBody).trim();
 
             const signatureString = signatureParts.join(';');
             const calculatedSignature = crypto
@@ -68,12 +103,14 @@ class WayForPayService {
                 .update(signatureString, 'utf8')
                 .digest('hex');
 
-            const isValid = calculatedSignature === merchantSignature;
+            const isValid = this.signaturesEqual(calculatedSignature, merchantSignature);
 
             if (!isValid) {
                 console.warn('⚠️ WayForPay signature mismatch', {
                     expected: merchantSignature,
-                    calculated: calculatedSignature
+                    calculated: calculatedSignature,
+                    orderReference: signatureParts[1],
+                    amount: signatureParts[2]
                 });
             }
 
