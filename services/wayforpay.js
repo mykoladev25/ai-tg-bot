@@ -31,17 +31,33 @@ class WayForPayService {
             }
         }
 
-        return token;
+        try {
+            return JSON.parse(token);
+        } catch (error) {
+            return token;
+        }
+    }
+
+    normalizeCallbackFieldValue(value) {
+        if (value === undefined || value === null) {
+            return '';
+        }
+
+        const normalized = String(value).trim();
+        if (!normalized || normalized === 'null' || normalized === 'undefined') {
+            return '';
+        }
+
+        return normalized;
     }
 
     getCallbackSignatureFieldValue(fieldName, data, rawBody) {
         const rawValue = this.extractRawJsonField(rawBody, fieldName);
         if (rawValue !== null && rawValue !== undefined) {
-            return String(rawValue);
+            return this.normalizeCallbackFieldValue(rawValue);
         }
 
-        const parsedValue = data?.[fieldName];
-        return parsedValue === undefined || parsedValue === null ? '' : String(parsedValue);
+        return this.normalizeCallbackFieldValue(data?.[fieldName]);
     }
 
     signaturesEqual(expected, actual) {
@@ -109,8 +125,15 @@ class WayForPayService {
                 console.warn('⚠️ WayForPay signature mismatch', {
                     expected: merchantSignature,
                     calculated: calculatedSignature,
+                    merchantAccount: signatureParts[0],
                     orderReference: signatureParts[1],
-                    amount: signatureParts[2]
+                    amount: signatureParts[2],
+                    currency: signatureParts[3],
+                    authCode: signatureParts[4],
+                    cardPan: signatureParts[5],
+                    transactionStatus: signatureParts[6],
+                    reasonCode: signatureParts[7],
+                    signatureString
                 });
             }
 
