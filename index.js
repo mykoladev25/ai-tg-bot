@@ -1765,7 +1765,7 @@ async function sendWelcomeModal(ctx) {
 }
 
 function buildMainMenuMessage(ctx, user) {
-  const locale = resolveLocale(ctx);
+  const locale = resolveLocale(user?.languageCode || ctx);
   const firstName = ctx.from?.first_name || pickLocalizedText(locale, { uk: 'друже', en: 'friend' });
   const balance = Number.isFinite(user?.tokens) ? user.tokens.toFixed(2) : '0.00';
 
@@ -1857,7 +1857,8 @@ async function showSettingsMenu(ctx) {
 }
 
 async function sendMainMenu(ctx, user) {
-  await ctx.reply(buildMainMenuMessage(ctx, user), keyboard.createMainMenu(resolveLocale(ctx)));
+  const locale = resolveLocale(user?.languageCode || ctx);
+  await ctx.reply(buildMainMenuMessage(ctx, user), keyboard.createMainMenu(locale));
 }
 
 function isPrivateChat(ctx) {
@@ -2593,7 +2594,7 @@ ${feedback.message}`;
     `✅ <b>Дякуємо за ваш ${feedback.typeName.toLowerCase()}!</b>
 
 Ми отримали ваше звернення и розглянемо його найближчим часом.`,
-    { parse_mode: 'HTML', ...keyboard.createMainMenu() }
+    { parse_mode: 'HTML', ...keyboard.createMainMenu(ctx) }
   );
 }
 
@@ -11435,7 +11436,7 @@ bot.on('successful_payment', async (ctx) => {
     await ctx.reply(
       '⚠️ Платіж отримано, але токени не нараховані.\n' +
       'Ми вже розбираємось. Напишіть в підтримку.',
-      keyboard.createMainMenu()
+      keyboard.createMainMenu(ctx)
     );
     await adminNotifier.notifyAdmin(bot, error, { userId, action: 'stars_payment', planKey, amountStars });
   }
@@ -12371,7 +12372,7 @@ bot.on('text', async (ctx) => {
     runBackgroundTask(handlers[currentModel], `text_handler_${currentModel}`);
   } else {
     console.log(`⚠️ Text handler: no handler for model "${currentModel}" for user ${userId}`);
-    await ctx.reply(`Модель "${currentModel}" ще не підтримується.\nВиберіть іншу модель.`, keyboard.createMainMenu());
+    await ctx.reply(`Модель "${currentModel}" ще не підтримується.\nВиберіть іншу модель.`, keyboard.createMainMenu(ctx));
   }
 });
 

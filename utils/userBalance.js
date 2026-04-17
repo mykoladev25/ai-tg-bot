@@ -5,7 +5,8 @@ const User = require('../database/models/User');
 async function getUser(userId, userInfo = {}) {
   try {
     let user = await User.findById(userId);
-    const nextLanguageCode = userInfo.language_code || userInfo.languageCode || 'en';
+    const explicitLanguageCode = userInfo.language_code || userInfo.languageCode;
+    const nextLanguageCode = explicitLanguageCode || 'en';
 
     if (!user) {
       user = new User({
@@ -39,8 +40,8 @@ async function getUser(userId, userInfo = {}) {
       if (userInfo.last_name && user.lastName !== userInfo.last_name) {
         user.lastName = userInfo.last_name;
       }
-      if (nextLanguageCode && user.languageCode !== nextLanguageCode) {
-        user.languageCode = nextLanguageCode;
+      if (explicitLanguageCode && user.languageCode !== explicitLanguageCode) {
+        user.languageCode = explicitLanguageCode;
       }
       user.lastActivityAt = new Date();
       await user.save();
