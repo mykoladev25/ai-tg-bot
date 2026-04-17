@@ -50,8 +50,10 @@ const gracefulShutdown = require('./utils/gracefulShutdown');
 const providerFallback = require('./utils/providerFallback');
 const db = require('./database/connection');
 const User = require('./database/models/User');
+const Transaction = require('./database/models/Transaction');
 const GenerationResult = require('./database/models/GenerationResult');
 const PendingGenerationTask = require('./database/models/PendingGenerationTask');
+const PromoSubmission = require('./database/models/PromoSubmission');
 
 // Configuration
 const models = require('./config/models');
@@ -63,6 +65,9 @@ const PRICING_MULTIPLIER = models?._pricingAssumptions?.pricingMultiplier || 1.6
 const TELEGRAM_PROVIDER_PROXY_TTL_SECONDS = Number.parseInt(process.env.TELEGRAM_PROVIDER_PROXY_TTL_SECONDS, 10) > 0
   ? Number.parseInt(process.env.TELEGRAM_PROVIDER_PROXY_TTL_SECONDS, 10)
   : DEFAULT_PROVIDER_PROXY_TTL_SECONDS;
+const PROMO_TASK_KEY = 'instagram_promo';
+const PROMO_REWARD_AMOUNT = 30;
+const PROMO_BOT_LINK = 'neurolab.fun/bot';
 
 function getBotUsername() {
   return String(process.env.BOT_USERNAME || 'neuro_lab_ai_bot').replace(/^@/, '');
@@ -82,6 +87,500 @@ async function sendTemplatedPublicHtml(res, relativeFilePath) {
     console.error(`Failed to send public page ${relativeFilePath}:`, error);
     res.status(500).send('Failed to load page');
   }
+}
+
+function escapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function getFullName(userInfo = {}) {
+  return [userInfo.first_name || userInfo.firstName, userInfo.last_name || userInfo.lastName]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+function normalizeInstagramPromoLink(rawLink = '') {
+  const trimmed = String(rawLink || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const host = url.hostname.toLowerCase();
+    const isInstagramHost = host === 'instagram.com'
+      || host === 'www.instagram.com'
+      || host.endsWith('.instagram.com')
+      || host === 'instagr.am';
+
+    if (!isInstagramHost) {
+      return '';
+    }
+
+    const pathname = url.pathname.toLowerCase();
+    const isSupportedPath = pathname.includes('/stories/')
+      || pathname.includes('/reel/')
+      || pathname.includes('/reels/')
+      || pathname.includes('/p/');
+
+    if (!isSupportedPath) {
+      return '';
+    }
+
+    return url.toString();
+  } catch (error) {
+    return '';
+  }
+}
+
+function getPromoStatusLabel(status) {
+  if (status === 'approved') return 'promoAdmin.statusApproved';
+  if (status === 'declined') return 'promoAdmin.statusDeclined';
+  return 'promoAdmin.statusPending';
+}
+
+async function getUserLocaleById(userId, fallbackLocale = 'en') {
+  try {
+    const user = await User.findById(userId).select('languageCode').lean();
+    return resolveLocale(user?.languageCode || fallbackLocale);
+  } catch (error) {
+    return resolveLocale(fallbackLocale);
+  }
+}
+
+function buildPromoAdminCaption(localeSource, submission) {
+  const locale = resolveLocale(localeSource);
+  const usernameDisplay = submission.username
+    ? `@${escapeHtml(submission.username)}`
+    : t(locale, 'promoAdmin.noUsername');
+  const fullName = escapeHtml(submission.fullName || '—');
+  const safeLink = escapeHtml(submission.instagramLink);
+  const lines = [
+    t(locale, 'promoAdmin.title'),
+    '',
+    t(locale, 'promoAdmin.user', { username: usernameDisplay, fullName }),
+    t(locale, 'promoAdmin.userId', { userId: submission.userId }),
+    t(locale, 'promoAdmin.instagram', { link: safeLink }),
+    t(locale, 'promoAdmin.reward', { reward: submission.rewardAmount }),
+    t(locale, 'promoAdmin.status', { status: t(locale, getPromoStatusLabel(submission.status)) })
+  ];
+
+  if (submission.moderatedAt) {
+    lines.push(
+      t(locale, 'promoAdmin.moderator', { moderatedBy: submission.moderatedBy || '—' }),
+      t(locale, 'promoAdmin.moderatedAt', {
+        date: submission.moderatedAt.toLocaleString(getDateLocale(locale))
+      })
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function buildPromoAdminKeyboard(localeSource, submissionId) {
+  const locale = resolveLocale(localeSource);
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback(t(locale, 'promoAdmin.approve'), `promo_approve_${submissionId}`),
+      Markup.button.callback(t(locale, 'promoAdmin.decline'), `promo_decline_${submissionId}`)
+    ]
+  ]);
+}
+
+function isMongoTransactionUnsupported(error) {
+  const message = error?.message || '';
+  return /Transaction numbers are only allowed on a replica set member or mongos/i.test(message)
+    || /replica set/i.test(message) && /transaction/i.test(message);
+}
+
+async function getLatestPromoSubmission(userId) {
+  return PromoSubmission.findOne({
+    userId,
+    taskKey: PROMO_TASK_KEY
+  }).sort({ createdAt: -1 });
+}
+
+async function syncPromoAdminMessages(submissionInput) {
+  const submission = submissionInput?._id
+    ? submissionInput
+    : await PromoSubmission.findById(submissionInput);
+
+  if (!submission?.adminMessages?.length) {
+    return;
+  }
+
+  for (const adminMessage of submission.adminMessages) {
+    const adminLocale = await getUserLocaleById(adminMessage.chatId, 'en');
+    const replyMarkup = submission.status === 'pending'
+      ? buildPromoAdminKeyboard(adminLocale, String(submission._id)).reply_markup
+      : { inline_keyboard: [] };
+
+    try {
+      await bot.telegram.editMessageCaption(
+        adminMessage.chatId,
+        adminMessage.messageId,
+        null,
+        buildPromoAdminCaption(adminLocale, submission),
+        {
+          parse_mode: 'HTML',
+          reply_markup: replyMarkup
+        }
+      );
+    } catch (error) {
+      const errorMessage = error?.message || '';
+      if (!/message is not modified/i.test(errorMessage)) {
+        console.warn(`Promo admin message sync failed for ${adminMessage.chatId}:${adminMessage.messageId}:`, errorMessage);
+      }
+    }
+  }
+}
+
+async function sendPromoSubmissionToAdmins(submission) {
+  const adminIds = accessControl.getAdminIds();
+  if (!adminIds.length) {
+    return { deliveredCount: 0, adminMessages: [] };
+  }
+
+  const adminMessages = [];
+  for (const adminIdRaw of adminIds) {
+    const adminId = Number(adminIdRaw);
+    if (!Number.isFinite(adminId)) {
+      continue;
+    }
+
+    try {
+      const adminLocale = await getUserLocaleById(adminId, 'en');
+      const caption = buildPromoAdminCaption(adminLocale, submission);
+      const keyboardMarkup = buildPromoAdminKeyboard(adminLocale, String(submission._id)).reply_markup;
+      const sentMessage = submission.screenshotType === 'document'
+        ? await bot.telegram.sendDocument(adminId, submission.screenshotFileId, {
+            caption,
+            parse_mode: 'HTML',
+            reply_markup: keyboardMarkup
+          })
+        : await bot.telegram.sendPhoto(adminId, submission.screenshotFileId, {
+            caption,
+            parse_mode: 'HTML',
+            reply_markup: keyboardMarkup
+          });
+
+      adminMessages.push({
+        chatId: adminId,
+        messageId: sentMessage.message_id
+      });
+    } catch (error) {
+      console.error(`Failed to send promo submission ${submission._id} to admin ${adminId}:`, error.message);
+    }
+  }
+
+  if (adminMessages.length) {
+    await PromoSubmission.findByIdAndUpdate(submission._id, {
+      $set: { adminMessages }
+    });
+  }
+
+  return {
+    deliveredCount: adminMessages.length,
+    adminMessages
+  };
+}
+
+async function beginPromoTaskFlow(ctx) {
+  const latestSubmission = await getLatestPromoSubmission(ctx.from.id);
+  if (latestSubmission?.status === 'approved') {
+    await ctx.reply(
+      t(ctx, 'promoTask.alreadyApproved'),
+      { parse_mode: 'HTML', ...keyboard.createBackButton('profile_menu', ctx) }
+    );
+    return;
+  }
+
+  if (latestSubmission?.status === 'pending') {
+    await ctx.reply(
+      t(ctx, 'promoTask.alreadyPending', { reward: latestSubmission.rewardAmount || PROMO_REWARD_AMOUNT }),
+      { parse_mode: 'HTML', ...keyboard.createBackButton('profile_menu', ctx) }
+    );
+    return;
+  }
+
+  userCurrentModel.delete(ctx.from.id);
+  userState.set(ctx.from.id, {
+    action: 'promo_submission',
+    step: 'awaiting_image'
+  });
+
+  await ctx.reply(
+    t(ctx, 'promoTask.intro', {
+      reward: PROMO_REWARD_AMOUNT,
+      botLink: PROMO_BOT_LINK
+    }),
+    { parse_mode: 'HTML', ...keyboard.createBackButton('profile_menu', ctx) }
+  );
+}
+
+function extractPromoProofFromMessage(ctx) {
+  if (ctx.message.photo?.length) {
+    return {
+      fileId: ctx.message.photo[ctx.message.photo.length - 1].file_id,
+      type: 'photo'
+    };
+  }
+
+  if (ctx.message.document?.file_id && ctx.message.document.mime_type?.startsWith('image/')) {
+    return {
+      fileId: ctx.message.document.file_id,
+      type: 'document'
+    };
+  }
+
+  return null;
+}
+
+async function notifyPromoUser(submission, localeSource) {
+  const locale = resolveLocale(localeSource || submission.languageCode || 'en');
+  const key = submission.status === 'approved' ? 'promoTask.approved' : 'promoTask.declined';
+
+  try {
+    await bot.telegram.sendMessage(
+      submission.userId,
+      t(locale, key, { reward: submission.rewardAmount }),
+      { parse_mode: 'HTML', ...keyboard.createMainMenu(locale) }
+    );
+  } catch (error) {
+    console.error(`Failed to notify user ${submission.userId} about promo moderation:`, error.message);
+  }
+}
+
+async function approvePromoSubmissionFallback(submissionId, moderatorId) {
+  const current = await PromoSubmission.findById(submissionId);
+  if (!current) {
+    return { status: 'not_found' };
+  }
+
+  if (current.status === 'declined') {
+    return { status: 'already_declined', submission: current };
+  }
+
+  if (current.rewardGrantedAt) {
+    return { status: 'already_rewarded', submission: current };
+  }
+
+  const lockedSubmission = await PromoSubmission.findOneAndUpdate(
+    {
+      _id: submissionId,
+      status: { $in: ['pending', 'approved'] },
+      rewardGrantedAt: null,
+      rewardLockAt: null
+    },
+    {
+      $set: {
+        status: 'approved',
+        moderatedBy: moderatorId,
+        moderatedAt: new Date(),
+        rewardLockAt: new Date()
+      }
+    },
+    { new: true }
+  );
+
+  if (!lockedSubmission) {
+    const latest = await PromoSubmission.findById(submissionId);
+    if (!latest) {
+      return { status: 'not_found' };
+    }
+
+    if (latest.rewardGrantedAt) {
+      return { status: 'already_rewarded', submission: latest };
+    }
+
+    if (latest.status === 'declined') {
+      return { status: 'already_declined', submission: latest };
+    }
+
+    return { status: 'already_processing', submission: latest };
+  }
+
+  try {
+    const user = await User.findById(lockedSubmission.userId);
+    if (!user) {
+      throw new Error(`Promo reward user ${lockedSubmission.userId} not found`);
+    }
+
+    const balanceBefore = Number(user.tokens || 0);
+    user.tokens += lockedSubmission.rewardAmount;
+    user.totalTokensEarned += lockedSubmission.rewardAmount;
+    await user.save();
+
+    await Transaction.create({
+      userId: lockedSubmission.userId,
+      type: 'addition',
+      category: 'bonus',
+      amount: lockedSubmission.rewardAmount,
+      balanceBefore,
+      balanceAfter: balanceBefore + lockedSubmission.rewardAmount,
+      description: 'Promo task reward',
+      sessionId: `promo_submission_${lockedSubmission._id}`,
+      metadata: {
+        promoSubmissionId: String(lockedSubmission._id),
+        taskKey: lockedSubmission.taskKey,
+        moderatedBy: moderatorId
+      }
+    });
+
+    const approvedSubmission = await PromoSubmission.findByIdAndUpdate(
+      lockedSubmission._id,
+      {
+        $set: {
+          rewardGrantedAt: new Date()
+        },
+        $unset: {
+          rewardLockAt: 1
+        }
+      },
+      { new: true }
+    );
+
+    return { status: 'approved', submission: approvedSubmission };
+  } catch (error) {
+    await PromoSubmission.findByIdAndUpdate(lockedSubmission._id, {
+      $unset: { rewardLockAt: 1 }
+    });
+
+    if (error?.code === 11000) {
+      const existingApproved = await PromoSubmission.findByIdAndUpdate(
+        lockedSubmission._id,
+        {
+          $set: {
+            rewardGrantedAt: lockedSubmission.rewardGrantedAt || new Date()
+          },
+          $unset: { rewardLockAt: 1 }
+        },
+        { new: true }
+      );
+      return { status: 'already_rewarded', submission: existingApproved };
+    }
+
+    throw error;
+  }
+}
+
+async function approvePromoSubmission(submissionId, moderatorId) {
+  try {
+    const session = await db.mongoose.startSession();
+
+    try {
+      let result = { status: 'not_found' };
+
+      await session.withTransaction(async () => {
+        const submission = await PromoSubmission.findById(submissionId).session(session);
+        if (!submission) {
+          result = { status: 'not_found' };
+          return;
+        }
+
+        if (submission.status === 'declined') {
+          result = { status: 'already_declined', submission: submission.toObject() };
+          return;
+        }
+
+        if (submission.rewardGrantedAt) {
+          result = { status: 'already_rewarded', submission: submission.toObject() };
+          return;
+        }
+
+        const user = await User.findById(submission.userId).session(session);
+        if (!user) {
+          throw new Error(`Promo reward user ${submission.userId} not found`);
+        }
+
+        const balanceBefore = Number(user.tokens || 0);
+        user.tokens += submission.rewardAmount;
+        user.totalTokensEarned += submission.rewardAmount;
+        await user.save({ session });
+
+        await Transaction.create([{
+          userId: submission.userId,
+          type: 'addition',
+          category: 'bonus',
+          amount: submission.rewardAmount,
+          balanceBefore,
+          balanceAfter: balanceBefore + submission.rewardAmount,
+          description: 'Promo task reward',
+          sessionId: `promo_submission_${submission._id}`,
+          metadata: {
+            promoSubmissionId: String(submission._id),
+            taskKey: submission.taskKey,
+            moderatedBy: moderatorId
+          }
+        }], { session });
+
+        submission.status = 'approved';
+        submission.moderatedBy = moderatorId;
+        submission.moderatedAt = new Date();
+        submission.rewardGrantedAt = new Date();
+        await submission.save({ session });
+
+        result = { status: 'approved', submission: submission.toObject() };
+      });
+
+      return result;
+    } finally {
+      await session.endSession();
+    }
+  } catch (error) {
+    if (error?.code === 11000) {
+      const existingSubmission = await PromoSubmission.findById(submissionId);
+      if (existingSubmission) {
+        return { status: 'already_rewarded', submission: existingSubmission };
+      }
+    }
+    if (isMongoTransactionUnsupported(error)) {
+      return approvePromoSubmissionFallback(submissionId, moderatorId);
+    }
+    throw error;
+  }
+}
+
+async function declinePromoSubmission(submissionId, moderatorId) {
+  const declinedSubmission = await PromoSubmission.findOneAndUpdate(
+    {
+      _id: submissionId,
+      status: 'pending',
+      rewardGrantedAt: null
+    },
+    {
+      $set: {
+        status: 'declined',
+        moderatedBy: moderatorId,
+        moderatedAt: new Date()
+      }
+    },
+    { new: true }
+  );
+
+  if (declinedSubmission) {
+    return { status: 'declined', submission: declinedSubmission };
+  }
+
+  const existingSubmission = await PromoSubmission.findById(submissionId);
+  if (!existingSubmission) {
+    return { status: 'not_found' };
+  }
+
+  if (existingSubmission.status === 'approved' || existingSubmission.rewardGrantedAt) {
+    return { status: 'already_rewarded', submission: existingSubmission };
+  }
+
+  if (existingSubmission.status === 'declined') {
+    return { status: 'already_declined', submission: existingSubmission };
+  }
+
+  return { status: 'not_found' };
 }
 
 
@@ -1896,6 +2395,90 @@ bot.on('text', async (ctx, next) => {
     return;
   }
 
+  const promoState = userState.get(userId);
+  if (promoState?.action === 'promo_submission' && !text.startsWith('/')) {
+    if (promoState.step !== 'awaiting_link' || !promoState.screenshotFileId) {
+      await ctx.reply(
+        t(ctx, 'promoTask.waitingImage'),
+        { parse_mode: 'HTML', ...keyboard.createBackButton('profile_menu', ctx) }
+      );
+      return;
+    }
+
+    const instagramLink = normalizeInstagramPromoLink(text);
+    if (!instagramLink) {
+      await ctx.reply(
+        t(ctx, 'promoTask.invalidLink'),
+        { parse_mode: 'HTML', ...keyboard.createBackButton('profile_menu', ctx) }
+      );
+      return;
+    }
+
+    const latestSubmission = await getLatestPromoSubmission(userId);
+    if (latestSubmission?.status === 'approved') {
+      userState.delete(userId);
+      await ctx.reply(
+        t(ctx, 'promoTask.alreadyApproved'),
+        { parse_mode: 'HTML', ...keyboard.createBackButton('profile_menu', ctx) }
+      );
+      return;
+    }
+
+    if (latestSubmission?.status === 'pending') {
+      userState.delete(userId);
+      await ctx.reply(
+        t(ctx, 'promoTask.alreadyPending', { reward: latestSubmission.rewardAmount || PROMO_REWARD_AMOUNT }),
+        { parse_mode: 'HTML', ...keyboard.createBackButton('profile_menu', ctx) }
+      );
+      return;
+    }
+
+    try {
+      const submission = await PromoSubmission.create({
+        taskKey: PROMO_TASK_KEY,
+        userId,
+        username: ctx.from.username || '',
+        fullName: getFullName(ctx.from),
+        languageCode: resolveLocale(ctx),
+        screenshotFileId: promoState.screenshotFileId,
+        screenshotType: promoState.screenshotType || 'photo',
+        instagramLink,
+        status: 'pending',
+        rewardAmount: PROMO_REWARD_AMOUNT,
+        adminMessages: []
+      });
+
+      const adminDelivery = await sendPromoSubmissionToAdmins(submission);
+      if (adminDelivery.deliveredCount === 0) {
+        await PromoSubmission.findByIdAndDelete(submission._id);
+        throw new Error('No admin delivery targets available');
+      }
+
+      userState.delete(userId);
+
+      await ctx.reply(
+        t(ctx, 'promoTask.summary', {
+          link: escapeHtml(instagramLink),
+          reward: PROMO_REWARD_AMOUNT
+        }),
+        { parse_mode: 'HTML' }
+      );
+
+      await ctx.reply(
+        t(ctx, 'promoTask.pending', { reward: PROMO_REWARD_AMOUNT }),
+        { parse_mode: 'HTML', ...keyboard.createMainMenu(ctx) }
+      );
+      return;
+    } catch (error) {
+      console.error(`Failed to create promo submission for user ${userId}:`, error.message);
+      await ctx.reply(
+        t(ctx, 'promoTask.submitError'),
+        { parse_mode: 'HTML', ...keyboard.createBackButton('profile_menu', ctx) }
+      );
+      return;
+    }
+  }
+
   return next();
 });
 
@@ -1921,6 +2504,32 @@ bot.on(['photo', 'document'], async (ctx, next) => {
 
     await sendFeedbackToAdmin(feedback, text, ctx, fileId);
     feedbackData.delete(userId);
+    return;
+  }
+
+  const promoState = userState.get(userId);
+  if (promoState?.action === 'promo_submission') {
+    const proof = extractPromoProofFromMessage(ctx);
+    if (!proof) {
+      await ctx.reply(
+        t(ctx, 'promoTask.imageOnly'),
+        { parse_mode: 'HTML', ...keyboard.createBackButton('profile_menu', ctx) }
+      );
+      return;
+    }
+
+    const wasWaitingForLink = promoState.step === 'awaiting_link' && promoState.screenshotFileId;
+    userState.set(userId, {
+      ...promoState,
+      screenshotFileId: proof.fileId,
+      screenshotType: proof.type,
+      step: 'awaiting_link'
+    });
+
+    await ctx.reply(
+      t(ctx, wasWaitingForLink ? 'promoTask.imageUpdated' : 'promoTask.imageSaved'),
+      { parse_mode: 'HTML', ...keyboard.createBackButton('profile_menu', ctx) }
+    );
     return;
   }
 
@@ -2812,6 +3421,58 @@ bot.action(/^feedback_block_(\d+)$/, async (ctx) => {
     console.log(`🚫 User ${userId} blocked`);
   } else {
     await ctx.answerCbQuery('❌ Помилка при блокуванні користувача', true);
+  }
+});
+
+bot.action(/^promo_(approve|decline)_([a-f0-9]{24})$/i, async (ctx) => {
+  const action = String(ctx.match[1] || '').toLowerCase();
+  const submissionId = ctx.match[2];
+
+  if (!accessControl.isAdmin(ctx.from.id)) {
+    await safeAnswerCbQuery(ctx, t(ctx, 'errors.accessDenied'), { show_alert: true });
+    return;
+  }
+
+  try {
+    const result = action === 'approve'
+      ? await approvePromoSubmission(submissionId, ctx.from.id)
+      : await declinePromoSubmission(submissionId, ctx.from.id);
+
+    if (result.submission) {
+      await syncPromoAdminMessages(result.submission);
+    }
+
+    if (result.status === 'approved') {
+      await notifyPromoUser(result.submission, result.submission.languageCode);
+      await safeAnswerCbQuery(ctx, t(ctx, 'promoAdmin.approvedAnswer', { reward: result.submission.rewardAmount }));
+      return;
+    }
+
+    if (result.status === 'declined') {
+      await notifyPromoUser(result.submission, result.submission.languageCode);
+      await safeAnswerCbQuery(ctx, t(ctx, 'promoAdmin.declinedAnswer'));
+      return;
+    }
+
+    if (result.status === 'already_rewarded') {
+      await safeAnswerCbQuery(ctx, t(ctx, 'promoAdmin.alreadyApproved'));
+      return;
+    }
+
+    if (result.status === 'already_declined') {
+      await safeAnswerCbQuery(ctx, t(ctx, 'promoAdmin.alreadyDeclined'));
+      return;
+    }
+
+    if (result.status === 'already_processing') {
+      await safeAnswerCbQuery(ctx, t(ctx, 'promoAdmin.alreadyProcessing'), { show_alert: true });
+      return;
+    }
+
+    await safeAnswerCbQuery(ctx, t(ctx, 'promoAdmin.notFound'), { show_alert: true });
+  } catch (error) {
+    console.error(`Promo moderation failed for submission ${submissionId}:`, error);
+    await safeAnswerCbQuery(ctx, t(ctx, 'promoAdmin.processFailed'), { show_alert: true });
   }
 });
 
@@ -10583,6 +11244,12 @@ bot.action('profile_menu', async (ctx) => {
   if (!(await requirePrivateAction(ctx))) return;
   await safeAnswerCbQuery(ctx);
   await showProfile(ctx);
+});
+
+bot.action('promo_task_start', async (ctx) => {
+  if (!(await requirePrivateAction(ctx))) return;
+  await safeAnswerCbQuery(ctx);
+  await beginPromoTaskFlow(ctx);
 });
 
 // Tokens purchase

@@ -191,6 +191,7 @@ function createLegalMenu(localeSource = 'en') {
 function createProfileMenu(localeSource = 'en') {
   return Markup.inlineKeyboard([
     [Markup.button.callback(t(localeSource, 'profile.buyTokens'), 'buy_subscription')],
+    [Markup.button.callback(t(localeSource, 'profile.promoTask'), 'promo_task_start')],
     [Markup.button.callback(t(localeSource, 'profile.providerChoice'), 'provider_menu')],
     [Markup.button.callback(t(localeSource, 'profile.community'), 'community')],
     [Markup.button.callback(t(localeSource, 'profile.legalInfo'), 'legal_info')],
