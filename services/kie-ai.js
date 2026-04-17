@@ -2446,6 +2446,9 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
 
     const {
       modelKey = 'seedance_2',
+      inputMode = null,
+      firstFrameUrl = null,
+      lastFrameUrl = null,
       referenceImageUrls = [],
       referenceVideoUrls = [],
       referenceAudioUrls = [],
@@ -2463,10 +2466,20 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
       : 'bytedance/seedance-2';
 
     const safeDuration = Math.max(4, Math.min(15, Number(duration) || 4));
-    const safeResolution = ['480p', '720p'].includes(resolution) ? resolution : '480p';
+    const allowedResolutions = modelKey === 'seedance_2'
+      ? ['480p', '720p', '1080p']
+      : ['480p', '720p'];
+    const safeResolution = allowedResolutions.includes(resolution) ? resolution : allowedResolutions[0];
     const safeAspectRatio = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'].includes(aspectRatio)
       ? aspectRatio
       : '16:9';
+    const normalizedInputMode = inputMode === 'frames' || inputMode === 'multimodal' || inputMode === 'text'
+      ? inputMode
+      : (firstFrameUrl || lastFrameUrl)
+        ? 'frames'
+        : (referenceImageUrls.length > 0 || referenceVideoUrls.length > 0 || referenceAudioUrls.length > 0)
+          ? 'multimodal'
+          : 'text';
 
     const input = {
       prompt,
@@ -2478,9 +2491,19 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
       web_search: !!webSearch
     };
 
-    const [imageRefs, videoRefs, audioRefs] = await Promise.all([
+    const [firstFrameRefs, lastFrameRefs, imageRefs, videoRefs, audioRefs] = await Promise.all([
+      cacheRemoteFilesForKie(firstFrameUrl, {
+        maxItems: 1,
+        uploadPath: 'telegram-seedance-first-frame',
+        strict: true
+      }),
+      cacheRemoteFilesForKie(lastFrameUrl, {
+        maxItems: 1,
+        uploadPath: 'telegram-seedance-last-frame',
+        strict: true
+      }),
       cacheRemoteFilesForKie(referenceImageUrls, {
-        maxItems: 5,
+        maxItems: 9,
         uploadPath: 'telegram-seedance-images',
         strict: true
       }),
@@ -2496,9 +2519,14 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
       })
     ]);
 
-    if (imageRefs.length > 0) input.reference_image_urls = imageRefs;
-    if (videoRefs.length > 0) input.reference_video_urls = videoRefs;
-    if (audioRefs.length > 0) input.reference_audio_urls = audioRefs;
+    if (normalizedInputMode === 'frames') {
+      if (firstFrameRefs.length > 0) input.first_frame_url = firstFrameRefs[0];
+      if (lastFrameRefs.length > 0) input.last_frame_url = lastFrameRefs[0];
+    } else if (normalizedInputMode === 'multimodal') {
+      if (imageRefs.length > 0) input.reference_image_urls = imageRefs;
+      if (videoRefs.length > 0) input.reference_video_urls = videoRefs;
+      if (audioRefs.length > 0) input.reference_audio_urls = audioRefs;
+    }
 
     const payload = {
       model: apiModel,
@@ -2512,7 +2540,10 @@ async function generateSeedanceVideoKieAI(prompt, options = {}) {
       aspectRatio: safeAspectRatio,
       duration: safeDuration,
       generateAudio: !!generateAudio,
+      inputMode: normalizedInputMode,
       refs: {
+        firstFrame: firstFrameRefs.length,
+        lastFrame: lastFrameRefs.length,
         images: imageRefs.length,
         videos: videoRefs.length,
         audio: audioRefs.length

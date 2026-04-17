@@ -549,15 +549,96 @@ function getSeedanceCostRange(userId, modelKey, options = {}) {
   };
 }
 
+function getSeedanceReferenceImageCount(state = {}) {
+  return Array.isArray(state.referenceImageUrls)
+    ? state.referenceImageUrls.filter(Boolean).length
+    : 0;
+}
+
 function buildSeedanceVideoInputSummary(state = {}) {
-  const inputType = resolveSeedanceInputType(state);
-  if (inputType !== 'with_video_input') {
-    return '';
+  const lines = [];
+  const referenceImageCount = getSeedanceReferenceImageCount(state);
+
+  if (state.startImage) {
+    lines.push('🖼️ Перший кадр: так');
   }
 
-  const inputDuration = getSeedanceInputVideoDuration(state);
-  const durationLabel = inputDuration > 0 ? ` (${inputDuration} сек)` : '';
-  return `\n🎞️ Референс-відео: так${durationLabel}`;
+  if (state.lastFrame) {
+    lines.push('🏁 Останній кадр: так');
+  }
+
+  if (referenceImageCount > 0) {
+    lines.push(`🖼️ Референс-зображення: ${referenceImageCount}`);
+  }
+
+  if (resolveSeedanceInputType(state) === 'with_video_input') {
+    const inputDuration = getSeedanceInputVideoDuration(state);
+    const durationLabel = inputDuration > 0 ? ` (${inputDuration} сек)` : '';
+    lines.push(`🎞️ Референс-відео: так${durationLabel}`);
+  }
+
+  return lines.length > 0 ? `\n${lines.join('\n')}` : '';
+}
+
+async function promptSeedanceReferenceImagesStep(ctx, state = {}) {
+  const userId = ctx.from.id;
+  const model = models.video.models.find(m => m.key === state.modelKey);
+  const cost = getEffectiveSeedanceCost(
+    userId,
+    state.modelKey,
+    state.duration || 4,
+    state.resolution || '480p',
+    state
+  );
+  const referenceImageCount = getSeedanceReferenceImageCount(state);
+  const hasReferenceImages = referenceImageCount > 0;
+
+  await ctx.reply(
+    `<b>${model?.name || 'Seedance'}</b>\n\n` +
+    `🖥️ ${state.resolution} | ⏱️ ${state.duration} сек | 📐 ${state.aspectRatio}\n` +
+    `🧩 Режим: <b>multimodal references</b>\n` +
+    `🖼️ Референс-зображення: <b>${referenceImageCount}</b>/9\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `🖼️ <b>Референс-зображення (опціонально)</b>\n\n` +
+    `Можете додати до 9 зображень для стилю, композиції або персонажів.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback(hasReferenceImages ? '➕ Додати ще зображення' : '🖼️ Додати зображення', 'seedance_add_reference_images')],
+        [Markup.button.callback(hasReferenceImages ? '⏭️ Далі до відео-референсу' : '⏭️ Без зображень', 'seedance_reference_images_done')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+}
+
+async function promptSeedanceReferenceVideoStep(ctx, state = {}) {
+  const userId = ctx.from.id;
+  const model = models.video.models.find(m => m.key === state.modelKey);
+  const cost = getEffectiveSeedanceCost(
+    userId,
+    state.modelKey,
+    state.duration || 4,
+    state.resolution || '480p',
+    state
+  );
+
+  await ctx.reply(
+    `<b>${model?.name || 'Seedance'}</b>\n\n` +
+    `🖥️ ${state.resolution} | ⏱️ ${state.duration} сек | 📐 ${state.aspectRatio}` +
+    `${buildSeedanceVideoInputSummary(state)}\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `🎞️ <b>Референс-відео (опціонально)</b>\n\n` +
+    `Якщо додати відео-референс, ціна буде перерахована як <b>(тривалість референсу + тривалість результату) × тариф with video input</b>.`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🎞️ Додати референс-відео', 'seedance_add_reference_video')],
+        [Markup.button.callback(`⏭️ Без референс-відео (${cost}⚡)`, 'seedance_skip_reference_video')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
 }
 
 async function promptSeedanceAudioStep(ctx, state = {}) {
@@ -577,7 +658,7 @@ async function promptSeedanceAudioStep(ctx, state = {}) {
     `${buildSeedanceVideoInputSummary(state)}\n` +
     `💰 Вартість: <b>${cost}⚡</b>\n\n` +
     `🔊 <b>AI-аудіо для результату</b>\n\n` +
-    `Цей параметр не змінює ціну. Оберіть, чи генерувати звук у фінальному відео.`,
+    `Оберіть, чи генерувати звук у фінальному відео.`,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
@@ -608,7 +689,7 @@ async function promptSeedanceReferenceAudioStep(ctx, state = {}) {
     `${buildSeedanceVideoInputSummary(state)}\n` +
     `💰 Вартість: <b>${cost}⚡</b>\n\n` +
     `🎵 <b>Референс-аудіо (опціонально)</b>\n\n` +
-    `Можете додати аудіофайл як reference. Це не змінює ціну в Seedance.`,
+    `Можете додати аудіофайл як reference.`,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
@@ -5269,14 +5350,22 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     }
 
     const durations = model.durations || [4, 5, 6, 8, 10, 12, 15];
-    const range480 = {
-      min: getEffectiveSeedanceCost(ctx.from.id, modelKey, Math.min(...durations), '480p'),
-      max: getEffectiveSeedanceCost(ctx.from.id, modelKey, Math.max(...durations), '480p')
-    };
-    const range720 = {
-      min: getEffectiveSeedanceCost(ctx.from.id, modelKey, Math.min(...durations), '720p'),
-      max: getEffectiveSeedanceCost(ctx.from.id, modelKey, Math.max(...durations), '720p')
-    };
+    const resolutionRanges = (model.resolutions || ['480p', '720p']).map((resolution) => ({
+      resolution,
+      min: getEffectiveSeedanceCost(ctx.from.id, modelKey, Math.min(...durations), resolution),
+      max: getEffectiveSeedanceCost(ctx.from.id, modelKey, Math.max(...durations), resolution)
+    }));
+    const resolutionRows = [];
+    for (let index = 0; index < resolutionRanges.length; index += 2) {
+      resolutionRows.push(
+        resolutionRanges.slice(index, index + 2).map(({ resolution, min, max }) =>
+          Markup.button.callback(`${resolution} (${min}—${max}⚡)`, `seedance_resolution_${resolution}`)
+        )
+      );
+    }
+    const resolutionSummary = resolutionRanges
+      .map(({ resolution, min, max }) => `${resolution} — ${min}—${max}⚡`)
+      .join('\n');
 
     userState.set(ctx.from.id, {
       action: 'seedance_generation',
@@ -5289,20 +5378,17 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
       `<b>${model.name}</b>\n\n` +
       `🎬 Генерація відео через KIE.AI\n` +
       `⏱️ Тривалість: 4-15 секунд\n` +
-      `🎞️ Референс-відео: опціонально\n` +
-      `🎵 Референс-аудіо: опціонально\n` +
+      `🖼️ First/last frame: опціонально\n` +
+      `🧩 Multimodal refs: image / video / audio\n` +
+      `🔀 First/last frame та multimodal refs не можна змішувати в одному запуску\n` +
       `🔊 AI-аудіо результату: опціонально\n\n` +
       `💡 Стартова ціна нижче показана для <b>no video input</b>. Якщо додасте reference video, бот перерахує ціну за формулою <b>(input + output duration) × rate</b>.\n\n` +
       `📐 <b>Крок 1: Оберіть роздільну здатність</b>\n\n` +
-      `480p — ${range480.min}—${range480.max}⚡\n` +
-      `720p — ${range720.min}—${range720.max}⚡`,
+      `${resolutionSummary}`,
       {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-          [
-            Markup.button.callback(`480p (${range480.min}—${range480.max}⚡)`, 'seedance_resolution_480p'),
-            Markup.button.callback(`720p (${range720.min}—${range720.max}⚡)`, 'seedance_resolution_720p')
-          ],
+          ...resolutionRows,
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
       }
@@ -6450,7 +6536,7 @@ bot.action('sora_skip_reference', async (ctx) => {
 
 // ==================== SEEDANCE 2 CALLBACKS ====================
 
-bot.action(/^seedance_resolution_(480p|720p)$/, async (ctx) => {
+bot.action(/^seedance_resolution_(480p|720p|1080p)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
   const resolution = ctx.match[1];
@@ -6462,6 +6548,12 @@ bot.action(/^seedance_resolution_(480p|720p)$/, async (ctx) => {
   }
 
   const model = models.video.models.find(m => m.key === state.modelKey);
+  const allowedResolutions = model?.resolutions || ['480p', '720p'];
+  if (!allowedResolutions.includes(resolution)) {
+    await ctx.reply('❌ Ця роздільна здатність недоступна для вибраної моделі.');
+    return;
+  }
+
   const durations = model?.durations || [4, 5, 6, 8, 10, 12, 15];
   const durationButtons = durations.map(d =>
     Markup.button.callback(
@@ -6548,28 +6640,138 @@ bot.action(/^seedance_aspect_(.+)$/, async (ctx) => {
   userState.set(userId, {
     ...state,
     aspectRatio,
+    seedanceInputMode: null,
+    startImage: null,
+    lastFrame: null,
+    referenceImageUrls: [],
     inputType: 'no_video_input',
     referenceVideoUrls: [],
     referenceAudioUrls: [],
     inputVideoDuration: 0,
-    step: 'ask_reference_video'
+    step: 'select_input_mode'
   });
 
   await ctx.reply(
     `<b>${state.modelKey === 'seedance_2_fast' ? 'ByteDance Seedance 2 Fast' : 'ByteDance Seedance 2'}</b>\n\n` +
     `🖥️ ${state.resolution} | ⏱️ ${state.duration} сек | 📐 ${aspectRatio}\n` +
     `💰 Вартість: <b>${cost}⚡</b>\n\n` +
-    `🎞️ <b>Референс-відео (опціонально)</b>\n\n` +
-    `Якщо додати відео-референс, ціна буде перерахована як <b>(тривалість референсу + тривалість результату) × тариф with video input</b>.`,
+    `🧭 <b>Крок 4: Оберіть сценарій входу</b>\n\n` +
+    `✍️ <b>Тільки текст</b> — класичний text-to-video\n` +
+    `🖼️ <b>Перший / останній кадр</b> — image-to-video з точним first/last frame\n` +
+    `🧩 <b>Multimodal refs</b> — reference images / video / audio\n\n` +
+    `⚠️ First/last frame та multimodal refs взаємовиключні.`,
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('🎞️ Додати референс-відео', 'seedance_add_reference_video')],
-        [Markup.button.callback(`⏭️ Без референс-відео (${cost}⚡)`, 'seedance_skip_reference_video')],
+        [Markup.button.callback(`✍️ Тільки текст (${cost}⚡)`, 'seedance_mode_text')],
+        [Markup.button.callback(`🖼️ First / last frame (${cost}⚡)`, 'seedance_mode_frames')],
+        [Markup.button.callback(`🧩 Multimodal refs (${cost}⚡)`, 'seedance_mode_multimodal')],
         [Markup.button.callback('← Назад', 'video_menu')]
       ])
     }
   );
+});
+
+bot.action(/^seedance_mode_(text|frames|multimodal)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const mode = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const baseState = {
+    ...state,
+    seedanceInputMode: mode,
+    startImage: null,
+    lastFrame: null,
+    referenceImageUrls: [],
+    referenceVideoUrls: [],
+    referenceAudioUrls: [],
+    inputType: 'no_video_input',
+    inputVideoDuration: 0
+  };
+
+  if (mode === 'text') {
+    const nextState = {
+      ...baseState,
+      step: 'select_audio'
+    };
+
+    userState.set(userId, nextState);
+    await promptSeedanceAudioStep(ctx, nextState);
+    return;
+  }
+
+  if (mode === 'frames') {
+    const nextState = {
+      ...baseState,
+      step: 'waiting_first_frame'
+    };
+
+    userState.set(userId, nextState);
+    await ctx.reply(
+      `🖼️ <b>Надішліть перший кадр</b>\n\n` +
+      `Це зображення стане точним стартом відео.\n\n` +
+      `📏 Мінімум: 300×300px\n` +
+      `📁 Формат: фото Telegram (JPG/PNG/WebP)`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  const nextState = {
+    ...baseState,
+    step: 'ask_reference_images'
+  };
+
+  userState.set(userId, nextState);
+  await promptSeedanceReferenceImagesStep(ctx, nextState);
+});
+
+bot.action('seedance_add_reference_images', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_reference_images'
+  });
+
+  await ctx.reply(
+    `🖼️ <b>Надішліть референс-зображення</b>\n\n` +
+    `Можна додати до 9 зображень. Надсилайте по одному фото.\n\n` +
+    `💡 Після кожного фото бот запропонує додати ще або перейти далі.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+bot.action('seedance_reference_images_done', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const nextState = {
+    ...state,
+    step: 'ask_reference_video'
+  };
+
+  userState.set(userId, nextState);
+  await promptSeedanceReferenceVideoStep(ctx, nextState);
 });
 
 bot.action('seedance_add_reference_video', async (ctx) => {
@@ -6618,6 +6820,49 @@ bot.action('seedance_skip_reference_video', async (ctx) => {
   await promptSeedanceAudioStep(ctx, nextState);
 });
 
+bot.action('seedance_add_last_frame', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_last_frame'
+  });
+
+  await ctx.reply(
+    `🏁 <b>Надішліть останній кадр</b>\n\n` +
+    `Це зображення стане точним фіналом відео.\n\n` +
+    `📏 Мінімум: 300×300px`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+bot.action('seedance_skip_last_frame', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'seedance_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const nextState = {
+    ...state,
+    lastFrame: null,
+    step: 'select_audio'
+  };
+
+  userState.set(userId, nextState);
+  await promptSeedanceAudioStep(ctx, nextState);
+});
+
 bot.action(/^seedance_audio_(on|off)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id;
@@ -6630,18 +6875,31 @@ bot.action(/^seedance_audio_(on|off)$/, async (ctx) => {
   }
 
   const cost = getEffectiveSeedanceCost(userId, state.modelKey, state.duration || 4, state.resolution || '480p', state);
-
-  userState.set(userId, {
-    ...state,
-    generateAudio,
-    seedanceCost: cost,
-    step: 'ask_reference_audio'
-  });
-
-  await promptSeedanceReferenceAudioStep(ctx, {
+  const nextState = {
     ...state,
     generateAudio,
     seedanceCost: cost
+  };
+
+  if (state.seedanceInputMode === 'multimodal') {
+    userState.set(userId, {
+      ...nextState,
+      step: 'ask_reference_audio'
+    });
+
+    await promptSeedanceReferenceAudioStep(ctx, nextState);
+    return;
+  }
+
+  userState.set(userId, {
+    ...nextState,
+    referenceAudioUrls: [],
+    step: 'waiting_prompt'
+  });
+
+  await promptSeedancePromptStep(ctx, {
+    ...nextState,
+    referenceAudioUrls: []
   });
 });
 
@@ -10629,7 +10887,10 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  if (state?.action === 'seedance_generation' && state?.step === 'waiting_reference_video') {
+  if (
+    state?.action === 'seedance_generation'
+    && (state?.step === 'waiting_reference_video' || state?.step === 'ask_reference_video')
+  ) {
     await ctx.reply(
       '🎞️ Для цього кроку потрібно надіслати референс-відео як відео-повідомлення або повернутись назад.\n\n' +
       'Якщо відео не потрібне, натисніть "Без референс-відео".',
@@ -10638,10 +10899,46 @@ bot.on('text', async (ctx) => {
     return;
   }
 
-  if (state?.action === 'seedance_generation' && state?.step === 'waiting_reference_audio') {
+  if (
+    state?.action === 'seedance_generation'
+    && (state?.step === 'waiting_reference_audio' || state?.step === 'ask_reference_audio')
+  ) {
     await ctx.reply(
       '🎵 Для цього кроку потрібно завантажити референс-аудіо або пропустити його.\n\n' +
       'Якщо аудіо не потрібне, натисніть "Без референс-аудіо".',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (state?.action === 'seedance_generation' && state?.step === 'waiting_first_frame') {
+    await ctx.reply(
+      '🖼️ Для цього кроку потрібно надіслати перший кадр як фото.\n\n' +
+      'Після цього можна буде додати останній кадр або перейти далі.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (
+    state?.action === 'seedance_generation'
+    && (state?.step === 'waiting_last_frame' || state?.step === 'ask_last_frame')
+  ) {
+    await ctx.reply(
+      '🏁 Для цього кроку потрібно надіслати останній кадр як фото або пропустити його кнопкою.\n\n' +
+      'Якщо останній кадр не потрібен, натисніть "Без останнього кадру".',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (
+    state?.action === 'seedance_generation'
+    && (state?.step === 'waiting_reference_images' || state?.step === 'ask_reference_images')
+  ) {
+    await ctx.reply(
+      '🖼️ На цьому кроці надішліть референс-зображення як фото.\n\n' +
+      'Коли зображень достатньо, натисніть "Далі до відео-референсу".',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
     return;
@@ -11415,7 +11712,10 @@ bot.on(['audio', 'document'], async (ctx, next) => {
   const userId = ctx.from.id;
   const state = userState.get(userId);
 
-  if (state?.action === 'seedance_generation' && state?.step === 'waiting_reference_video') {
+  if (
+    state?.action === 'seedance_generation'
+    && (state?.step === 'waiting_reference_video' || state?.step === 'ask_reference_video')
+  ) {
     await ctx.reply(
       '❌ Для Seedance reference video надішліть файл саме як відео-повідомлення, не як document.',
       keyboard.createBackButton('video_menu')
@@ -11423,7 +11723,10 @@ bot.on(['audio', 'document'], async (ctx, next) => {
     return;
   }
 
-  if (state?.action === 'seedance_generation' && state?.step === 'waiting_reference_audio') {
+  if (
+    state?.action === 'seedance_generation'
+    && (state?.step === 'waiting_reference_audio' || state?.step === 'ask_reference_audio')
+  ) {
     const audioUrl = await getAudioUrl(ctx);
     if (!audioUrl) {
       await ctx.reply(
@@ -11441,6 +11744,17 @@ bot.on(['audio', 'document'], async (ctx, next) => {
 
     userState.set(userId, nextState);
     await promptSeedancePromptStep(ctx, nextState);
+    return;
+  }
+
+  if (
+    state?.action === 'seedance_generation'
+    && ['waiting_first_frame', 'waiting_last_frame', 'ask_last_frame', 'waiting_reference_images', 'ask_reference_images'].includes(state?.step)
+  ) {
+    await ctx.reply(
+      '❌ Для цього кроку надішліть саме фото Telegram, а не document.',
+      keyboard.createBackButton('video_menu')
+    );
     return;
   }
 
@@ -11515,6 +11829,122 @@ bot.on('photo', async (ctx) => {
       '✍️ Для Seedance зараз потрібен текстовий промпт.\n\n' +
       'Надішліть опис сцени текстом.',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (state?.action === 'seedance_generation' && state?.step === 'waiting_first_frame') {
+    if (!(await ensureMinimumPhotoDimensions(ctx, 300, 300))) {
+      return;
+    }
+
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Не вдалося завантажити перший кадр. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      startImage: imageUrl,
+      step: 'ask_last_frame'
+    });
+
+    await ctx.reply(
+      `✅ <b>Перший кадр збережено!</b>\n\n` +
+      `🏁 <b>Останній кадр (опціонально)</b>\n\n` +
+      `Можете додати фінальний кадр для точного завершення відео або перейти далі без нього.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🏁 Додати останній кадр', 'seedance_add_last_frame')],
+          [Markup.button.callback('⏭️ Без останнього кадру', 'seedance_skip_last_frame')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  if (
+    state?.action === 'seedance_generation'
+    && (state?.step === 'waiting_last_frame' || state?.step === 'ask_last_frame')
+  ) {
+    if (!(await ensureMinimumPhotoDimensions(ctx, 300, 300))) {
+      return;
+    }
+
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Не вдалося завантажити останній кадр. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    const nextState = {
+      ...state,
+      lastFrame: imageUrl,
+      step: 'select_audio'
+    };
+
+    userState.set(userId, nextState);
+    await promptSeedanceAudioStep(ctx, nextState);
+    return;
+  }
+
+  if (
+    state?.action === 'seedance_generation'
+    && (state?.step === 'waiting_reference_images' || state?.step === 'ask_reference_images')
+  ) {
+    if (!(await ensureMinimumPhotoDimensions(ctx, 300, 300))) {
+      return;
+    }
+
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Не вдалося завантажити референс-зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    const referenceImageUrls = [...(state.referenceImageUrls || [])];
+    if (referenceImageUrls.length >= 9) {
+      await ctx.reply('⚠️ Уже додано максимум 9 референс-зображень.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    referenceImageUrls.push(imageUrl);
+
+    const nextState = {
+      ...state,
+      referenceImageUrls,
+      step: 'waiting_reference_images'
+    };
+
+    userState.set(userId, nextState);
+
+    if (referenceImageUrls.length >= 9) {
+      const doneState = {
+        ...nextState,
+        step: 'ask_reference_video'
+      };
+
+      userState.set(userId, doneState);
+      await ctx.reply('✅ Додано 9/9 референс-зображень. Переходимо до відео-референсу.');
+      await promptSeedanceReferenceVideoStep(ctx, doneState);
+      return;
+    }
+
+    await ctx.reply(
+      `✅ <b>Референс-зображення додано!</b>\n\n` +
+      `🖼️ Зараз: <b>${referenceImageUrls.length}</b>/9\n\n` +
+      `Можете додати ще або перейти до відео-референсу.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('➕ Додати ще зображення', 'seedance_add_reference_images')],
+          [Markup.button.callback('⏭️ Далі до відео-референсу', 'seedance_reference_images_done')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
     );
     return;
   }
@@ -12236,7 +12666,10 @@ bot.on('video', async (ctx) => {
     hasImageUrl: !!state?.imageUrl
   });
 
-  if (state?.action === 'seedance_generation' && state?.step === 'waiting_reference_video') {
+  if (
+    state?.action === 'seedance_generation'
+    && (state?.step === 'waiting_reference_video' || state?.step === 'ask_reference_video')
+  ) {
     const videoUrl = await getVideoUrl(ctx);
     if (!videoUrl) {
       await ctx.reply('❌ Не вдалося отримати reference video. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
@@ -13573,6 +14006,9 @@ async function generateSeedanceVideo(ctx, state) {
     try {
       const result = await kieAI.generateSeedanceVideoKieAI(generationData.prompt, {
         modelKey,
+        inputMode: generationData.seedanceInputMode || 'text',
+        firstFrameUrl: generationData.startImage || null,
+        lastFrameUrl: generationData.lastFrame || null,
         resolution,
         aspectRatio,
         duration,
