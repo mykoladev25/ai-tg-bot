@@ -957,7 +957,7 @@ function getEffectiveSeedanceCostPerSecond(userId, modelKey, resolution = '480p'
   if (!shouldUseKieProvider(userId, modelKey)) return fallback;
   const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration: 4, resolution, inputType });
   if (!k || typeof k !== 'object' || typeof k.costPerSecond !== 'number') return fallback;
-  return k.costPerSecond;
+  return Math.max(k.costPerSecond, fallback);
 }
 
 function resolveSeedanceInputType(options = {}) {
@@ -1027,7 +1027,7 @@ function getEffectiveSeedanceCost(userId, modelKey, duration = 4, resolution = '
   if (!shouldUseKieProvider(userId, modelKey)) return fallback;
   const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration: billableDuration, resolution, inputType });
   if (!k || typeof k !== 'object' || typeof k.cost !== 'number') return fallback;
-  return k.cost;
+  return Math.max(k.cost, fallback);
 }
 
 function getSeedanceCostRange(userId, modelKey, options = {}) {

@@ -195,41 +195,40 @@ module.exports = {
         costPerSecondByResolution: {
           '480p': 16,
           '720p': 34,
-          // KIE docs expose 1080p for Seedance 2.0, but pricing cache still omits it.
-          // Fallback price is inferred from the observed 480p -> 720p multiplier.
-          '1080p': 73
+          // Keep 1080p at a fixed pricing floor even if KIE cache is missing or under-reports it.
+          '1080p': 85
         },
         apiCostPerSecondByResolution: {
           '480p': 0.095,
           '720p': 0.205,
-          '1080p': 0.4425
+          '1080p': 0.51
         },
         costPerSecondByInputTypeAndResolution: {
           no_video_input: {
             '480p': 16,
             '720p': 34,
-            '1080p': 73
+            '1080p': 85
           },
           with_video_input: {
             '480p': 10,
             '720p': 21,
-            '1080p': 45
+            '1080p': 52
           }
         },
         apiCostPerSecondByInputTypeAndResolution: {
           no_video_input: {
             '480p': 0.095,
             '720p': 0.205,
-            '1080p': 0.4425
+            '1080p': 0.51
           },
           with_video_input: {
             '480p': 0.0575,
             '720p': 0.125,
-            '1080p': 0.27
+            '1080p': 0.31
           }
         },
         cost: 63,
-        maxCost: 1095,
+        maxCost: 1275,
         minSeconds: 4,
         durations: [4, 5, 6, 8, 10, 12, 15],
         resolutions: ['480p', '720p', '1080p'],

@@ -321,13 +321,13 @@ module.exports = {
         '480p': { usd_per_sec: 0.095, credits_per_sec: 19 },
         '720p': { usd_per_sec: 0.205, credits_per_sec: 41 },
         // KIE docs expose 1080p for Seedance 2.0, but the pricing cache still lacks it.
-        // Keep this as a documented fallback until the pricing API exposes a native 1080p row.
-        '1080p': { usd_per_sec: 0.4425, credits_per_sec: 88.5 }
+        // Keep this as the floor until the pricing API exposes a native 1080p row.
+        '1080p': { usd_per_sec: 0.51, credits_per_sec: 102 }
       },
       with_video_input: {
         '480p': { usd_per_sec: 0.0575, credits_per_sec: 11.5 },
         '720p': { usd_per_sec: 0.125, credits_per_sec: 25 },
-        '1080p': { usd_per_sec: 0.27, credits_per_sec: 54 }
+        '1080p': { usd_per_sec: 0.31, credits_per_sec: 62 }
       }
     },
     features: {
