@@ -330,7 +330,7 @@ module.exports = {
         costPerSecond: 12,  
         apiCostPerSecond: 0.03336,  
         durations: [5, 10, 15, 20],
-        available: true,
+        available: false,
         requiresImage: true,
         a2eOnly: true  
       },
@@ -479,7 +479,7 @@ module.exports = {
         apiCost: 0.0556,     
         apiCost2k: 0.139,    
         maxImages: 2,        
-        available: true,
+        available: false,
         a2eOnly: true        
       },
 
