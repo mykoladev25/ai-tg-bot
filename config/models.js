@@ -175,14 +175,25 @@ module.exports = {
       },
 
       /**
-       * ByteDance Seedance 2 — KIE.AI ONLY
-       * Pricing API (checked 2026-04-04):
+       * ByteDance Seedance 2
+       *
+       * KIE.AI pricing API (checked 2026-04-04):
        * - no_video_input:
        *   - 480p: $0.095/sec
        *   - 720p: $0.205/sec
        * - with_video_input:
        *   - 480p: $0.0575/sec
        *   - 720p: $0.125/sec
+       *
+       * Replicate billing config (checked 2026-04-23):
+       * - non_video_in:
+       *   - 480p: $0.08/sec
+       *   - 720p: $0.18/sec
+       *   - 1080p: $0.45/sec
+       * - video_in:
+       *   - 480p: $0.10/sec
+       *   - 720p: $0.22/sec
+       *   - 1080p: $0.55/sec
        *
        * Telegram flow currently defaults to no_video_input pricing unless
        * reference video URLs are explicitly attached to the generation state.
@@ -227,6 +238,42 @@ module.exports = {
             '1080p': 0.31
           }
         },
+        replicateCostPerSecond: 14,  // fallback/min = 480p non_video_in
+        replicateApiCostPerSecond: 0.08,
+        replicateCostPerSecondByResolution: {
+          '480p': 14,
+          '720p': 30,
+          '1080p': 75
+        },
+        replicateApiCostPerSecondByResolution: {
+          '480p': 0.08,
+          '720p': 0.18,
+          '1080p': 0.45
+        },
+        replicateCostPerSecondByInputTypeAndResolution: {
+          no_video_input: {
+            '480p': 14,
+            '720p': 30,
+            '1080p': 75
+          },
+          with_video_input: {
+            '480p': 17,
+            '720p': 37,
+            '1080p': 91
+          }
+        },
+        replicateApiCostPerSecondByInputTypeAndResolution: {
+          no_video_input: {
+            '480p': 0.08,
+            '720p': 0.18,
+            '1080p': 0.45
+          },
+          with_video_input: {
+            '480p': 0.10,
+            '720p': 0.22,
+            '1080p': 0.55
+          }
+        },
         cost: 63,
         maxCost: 1275,
         minSeconds: 4,
@@ -236,8 +283,7 @@ module.exports = {
         available: true,
         requiresImage: false,
         supportsReferences: true,
-        supportsAudio: true,
-        kieAIOnly: true
+        supportsAudio: true
       },
 
       /**

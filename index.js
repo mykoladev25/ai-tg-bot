@@ -640,7 +640,7 @@ function getDesignModelsWithEffectiveCost(userId) {
 }
 
 
-const KIE_ONLY_VIDEO_MODELS = ['kling_3', 'seedance_2', 'seedance_2_fast'];
+const KIE_ONLY_VIDEO_MODELS = ['kling_3', 'seedance_2_fast'];
 
 
 
@@ -946,15 +946,57 @@ function getEffectiveSora2Cost(userId, model, duration = 15, options = {}) {
   return Math.ceil(duration * (model?.costPerSecond || 0));
 }
 
+function shouldUseKieSeedanceProvider(userId, modelKey) {
+  if (modelKey === 'seedance_2_fast') return true;
+  return shouldUseKieProvider(userId, modelKey);
+}
+
+function getSeedanceStaticCostPerSecond(model, provider, inputType, resolution) {
+  if (!model) return 0;
+
+  if (provider === 'replicate') {
+    return (
+      model.replicateCostPerSecondByInputTypeAndResolution?.[inputType]?.[resolution]
+      ?? model.replicateCostPerSecondByResolution?.[resolution]
+      ?? model.replicateCostPerSecond
+      ?? 0
+    );
+  }
+
+  return (
+    model.costPerSecondByInputTypeAndResolution?.[inputType]?.[resolution]
+    ?? model.costPerSecondByResolution?.[resolution]
+    ?? model.costPerSecond
+    ?? 0
+  );
+}
+
+function getSeedanceStaticApiCostPerSecond(model, provider, inputType, resolution) {
+  if (!model) return 0;
+
+  if (provider === 'replicate') {
+    return (
+      model.replicateApiCostPerSecondByInputTypeAndResolution?.[inputType]?.[resolution]
+      ?? model.replicateApiCostPerSecondByResolution?.[resolution]
+      ?? model.replicateApiCostPerSecond
+      ?? 0
+    );
+  }
+
+  return (
+    model.apiCostPerSecondByInputTypeAndResolution?.[inputType]?.[resolution]
+    ?? model.apiCostPerSecondByResolution?.[resolution]
+    ?? model.apiCostPerSecond
+    ?? 0
+  );
+}
+
 function getEffectiveSeedanceCostPerSecond(userId, modelKey, resolution = '480p', options = {}) {
   const model = models.video.models.find(m => m.key === modelKey);
   const inputType = resolveSeedanceInputType(options);
-  const fallback =
-    model?.costPerSecondByInputTypeAndResolution?.[inputType]?.[resolution]
-    ?? model?.costPerSecondByResolution?.[resolution]
-    ?? model?.costPerSecond
-    ?? 0;
-  if (!shouldUseKieProvider(userId, modelKey)) return fallback;
+  const provider = shouldUseKieSeedanceProvider(userId, modelKey) ? 'kie' : 'replicate';
+  const fallback = getSeedanceStaticCostPerSecond(model, provider, inputType, resolution);
+  if (provider !== 'kie') return fallback;
   const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration: 4, resolution, inputType });
   if (!k || typeof k !== 'object' || typeof k.costPerSecond !== 'number') return fallback;
   return Math.max(k.costPerSecond, fallback);
@@ -989,6 +1031,10 @@ function getSeedanceInputVideoDuration(options = {}) {
 
 function getSeedanceBillableDuration(outputDuration = 4, options = {}) {
   const safeOutputDuration = Math.max(0, Number(outputDuration) || 0);
+  if (options.provider !== 'kie') {
+    return safeOutputDuration;
+  }
+
   if (resolveSeedanceInputType(options) !== 'with_video_input') {
     return safeOutputDuration;
   }
@@ -1008,13 +1054,10 @@ function isSeedanceWaitingForPrompt(state, currentModel) {
 function getSeedanceApiCostUSD(userId, modelKey, duration = 4, resolution = '480p', options = {}) {
   const model = models.video.models.find(m => m.key === modelKey);
   const inputType = resolveSeedanceInputType(options);
-  const billableDuration = getSeedanceBillableDuration(duration, options);
-  const fallbackRate =
-    model?.apiCostPerSecondByInputTypeAndResolution?.[inputType]?.[resolution]
-    ?? model?.apiCostPerSecondByResolution?.[resolution]
-    ?? model?.apiCostPerSecond
-    ?? 0;
-  if (!shouldUseKieProvider(userId, modelKey)) return +(fallbackRate * billableDuration).toFixed(4);
+  const provider = shouldUseKieSeedanceProvider(userId, modelKey) ? 'kie' : 'replicate';
+  const billableDuration = getSeedanceBillableDuration(duration, { ...options, provider });
+  const fallbackRate = getSeedanceStaticApiCostPerSecond(model, provider, inputType, resolution);
+  if (provider !== 'kie') return +(fallbackRate * billableDuration).toFixed(4);
   const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration: billableDuration, resolution, inputType });
   if (!k || typeof k !== 'object' || typeof k.apiCost !== 'number') return +(fallbackRate * billableDuration).toFixed(4);
   return k.apiCost;
@@ -1022,9 +1065,10 @@ function getSeedanceApiCostUSD(userId, modelKey, duration = 4, resolution = '480
 
 function getEffectiveSeedanceCost(userId, modelKey, duration = 4, resolution = '480p', options = {}) {
   const fallback = usdToTokens(getSeedanceApiCostUSD(userId, modelKey, duration, resolution, options));
+  const provider = shouldUseKieSeedanceProvider(userId, modelKey) ? 'kie' : 'replicate';
+  if (provider !== 'kie') return fallback;
   const inputType = resolveSeedanceInputType(options);
-  const billableDuration = getSeedanceBillableDuration(duration, options);
-  if (!shouldUseKieProvider(userId, modelKey)) return fallback;
+  const billableDuration = getSeedanceBillableDuration(duration, { ...options, provider });
   const k = kiePricingSync.getKieTokenCostSync(modelKey, { duration: billableDuration, resolution, inputType });
   if (!k || typeof k !== 'object' || typeof k.cost !== 'number') return fallback;
   return Math.max(k.cost, fallback);
@@ -1052,6 +1096,14 @@ function getSeedanceReferenceImageCount(state = {}) {
   return Array.isArray(state.referenceImageUrls)
     ? state.referenceImageUrls.filter(Boolean).length
     : 0;
+}
+
+function hasSeedanceVisualReferences(state = {}) {
+  return getSeedanceReferenceImageCount(state) > 0
+    || (
+      Array.isArray(state.referenceVideoUrls)
+      && state.referenceVideoUrls.filter(Boolean).length > 0
+    );
 }
 
 function buildSeedanceVideoInputSummary(state = {}) {
@@ -1114,6 +1166,7 @@ async function promptSeedanceReferenceImagesStep(ctx, state = {}) {
 async function promptSeedanceReferenceVideoStep(ctx, state = {}) {
   const userId = ctx.from.id;
   const model = models.video.models.find(m => m.key === state.modelKey);
+  const useKieSeedance = shouldUseKieSeedanceProvider(userId, state.modelKey);
   const cost = getEffectiveSeedanceCost(
     userId,
     state.modelKey,
@@ -1128,7 +1181,11 @@ async function promptSeedanceReferenceVideoStep(ctx, state = {}) {
     `${buildSeedanceVideoInputSummary(state)}\n` +
     `💰 Вартість: <b>${cost}⚡</b>\n\n` +
     `🎞️ <b>Референс-відео (опціонально)</b>\n\n` +
-    `Якщо додати відео-референс, ціна буде перерахована як <b>(тривалість референсу + тривалість результату) × тариф with video input</b>.`,
+    (
+      useKieSeedance
+        ? `Якщо додати відео-референс, ціна буде перерахована як <b>(тривалість референсу + тривалість результату) × тариф with video input</b>.`
+        : `Якщо додати відео-референс, тариф переключиться на <b>video_in</b>, але в Replicate білиться тільки <b>тривалість результату</b>.`
+    ),
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
@@ -1174,6 +1231,8 @@ async function promptSeedanceAudioStep(ctx, state = {}) {
 async function promptSeedanceReferenceAudioStep(ctx, state = {}) {
   const userId = ctx.from.id;
   const model = models.video.models.find(m => m.key === state.modelKey);
+  const useKieSeedance = shouldUseKieSeedanceProvider(userId, state.modelKey);
+  const canAttachReferenceAudio = useKieSeedance || hasSeedanceVisualReferences(state);
   const cost = getEffectiveSeedanceCost(
     userId,
     state.modelKey,
@@ -1188,7 +1247,11 @@ async function promptSeedanceReferenceAudioStep(ctx, state = {}) {
     `${buildSeedanceVideoInputSummary(state)}\n` +
     `💰 Вартість: <b>${cost}⚡</b>\n\n` +
     `🎵 <b>Референс-аудіо (опціонально)</b>\n\n` +
-    `Можете додати аудіофайл як reference.`,
+    (
+      canAttachReferenceAudio
+        ? `Можете додати аудіофайл як reference.`
+        : `Для <b>Replicate</b> reference audio працює тільки разом із хоча б одним <b>reference image</b> або <b>reference video</b>.`
+    ),
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
@@ -5998,11 +6061,14 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
   }
 
   if (modelKey === 'seedance_2' || modelKey === 'seedance_2_fast') {
-    if (!kieAI.isKieAIEnabled) {
+    const isFastModel = modelKey === 'seedance_2_fast';
+    const useKieSeedance = shouldUseKieSeedanceProvider(ctx.from.id, modelKey);
+
+    if (isFastModel && !kieAI.isKieAIEnabled) {
       await ctx.reply('❌ KIE.AI тимчасово вимкнена. Додайте KIE_AI_API_KEY в .env.', keyboard.createBackButton('video_menu'));
       return;
     }
-    if (!accessControl.canUseKieAI(ctx.from.id)) {
+    if (isFastModel && !accessControl.canUseKieAI(ctx.from.id)) {
       await ctx.reply(
         '🔒 Генерації через KIE.AI (Seedance 2, Kling 3.0 тощо) поки доступні тільки адміністратору.\n\n' +
         'Доступ керується змінною KIE_AI_ACCESS у .env (admin_only / all_users).',
@@ -6038,13 +6104,17 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
 
     await ctx.reply(
       `<b>${model.name}</b>\n\n` +
-      `🎬 Генерація відео через KIE.AI\n` +
+      `🎬 Генерація відео через ${useKieSeedance ? 'KIE.AI' : 'Replicate'}\n` +
       `⏱️ Тривалість: 4-15 секунд\n` +
       `🖼️ First/last frame: опціонально\n` +
       `🧩 Multimodal refs: image / video / audio\n` +
       `🔀 First/last frame та multimodal refs не можна змішувати в одному запуску\n` +
       `🔊 AI-аудіо результату: опціонально\n\n` +
-      `💡 Стартова ціна нижче показана для <b>no video input</b>. Якщо додасте reference video, бот перерахує ціну за формулою <b>(input + output duration) × rate</b>.\n\n` +
+      (
+        useKieSeedance
+          ? `💡 Стартова ціна нижче показана для <b>no video input</b>. Якщо додасте reference video, бот перерахує ціну за формулою <b>(input + output duration) × rate</b>.\n\n`
+          : `💡 Для Replicate стартова ціна нижче показана для <b>non_video_in</b>. Якщо додасте reference video, тариф переключиться на <b>video_in</b>, але білиться тільки <b>output duration</b>.\n\n`
+      ) +
       `📐 <b>Крок 1: Оберіть роздільну здатність</b>\n\n` +
       `${resolutionSummary}`,
       {
@@ -7446,6 +7516,8 @@ bot.action('seedance_add_reference_video', async (ctx) => {
     return;
   }
 
+  const useKieSeedance = shouldUseKieSeedanceProvider(userId, state.modelKey);
+
   userState.set(userId, {
     ...state,
     step: 'waiting_reference_video'
@@ -7455,7 +7527,11 @@ bot.action('seedance_add_reference_video', async (ctx) => {
     `🎞️ <b>Надішліть референс-відео</b>\n\n` +
     `Підійде короткий кліп, який задає рух, темп або камеру.\n\n` +
     `⚠️ Надішліть саме як <b>відео</b>, не як документ — так бот зможе правильно порахувати тривалість для ціни.\n\n` +
-    `💡 Після завантаження бот перерахує ціну з урахуванням <b>input video duration</b>.`,
+    (
+      useKieSeedance
+        ? `💡 Після завантаження бот перерахує ціну з урахуванням <b>input video duration</b>.`
+        : `💡 Після завантаження бот переключить тариф на <b>video_in</b>, але для Replicate вартість рахується тільки за <b>output duration</b>.`
+    ),
     { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
   );
 });
@@ -7572,6 +7648,14 @@ bot.action('seedance_add_reference_audio', async (ctx) => {
 
   if (!state || state.action !== 'seedance_generation') {
     await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  if (!shouldUseKieSeedanceProvider(userId, state.modelKey) && !hasSeedanceVisualReferences(state)) {
+    await ctx.reply(
+      '❌ Для Replicate reference audio доступне тільки разом із хоча б одним reference image або reference video.',
+      keyboard.createBackButton('video_menu')
+    );
     return;
   }
 
@@ -14625,15 +14709,22 @@ async function generateSeedanceVideo(ctx, state) {
     return;
   }
 
-  if (!kieAI.isKieAIEnabled) {
+  const canUseKieAI = accessControl.canUseKieAI(userId) && kieAI.isKieAIEnabled;
+  const useKieAI = modelKey === 'seedance_2_fast'
+    ? true
+    : shouldUseKieSeedanceProvider(userId, modelKey);
+  const providerKey = useKieAI ? 'kie' : 'replicate';
+  const providerLabel = useKieAI ? 'KIE.AI' : 'Replicate';
+
+  if (useKieAI && !kieAI.isKieAIEnabled) {
     await ctx.reply('❌ KIE.AI тимчасово вимкнена. Додайте KIE_AI_API_KEY в .env.', keyboard.createBackButton('video_menu'));
     userState.delete(userId);
     return;
   }
 
-  if (!accessControl.canUseKieAI(userId)) {
+  if (useKieAI && !canUseKieAI) {
     await ctx.reply(
-      '🔒 Seedance 2 доступна тільки через KIE.AI для користувачів з доступом до KIE.',
+      '🔒 Seedance 2 Fast доступна тільки через KIE.AI для користувачів з доступом до KIE.',
       keyboard.createBackButton('video_menu')
     );
     userState.delete(userId);
@@ -14644,6 +14735,8 @@ async function generateSeedanceVideo(ctx, state) {
   const resolution = state.resolution || '480p';
   const aspectRatio = state.aspectRatio || '16:9';
   const generateAudio = state.generateAudio === true;
+  const inputType = resolveSeedanceInputType(state);
+  const inputVideoDuration = getSeedanceInputVideoDuration(state);
   const seedanceCost = state.seedanceCost || getEffectiveSeedanceCost(userId, modelKey, duration, resolution, state);
   const apiCost = getSeedanceApiCostUSD(userId, modelKey, duration, resolution, state);
 
@@ -14655,6 +14748,7 @@ async function generateSeedanceVideo(ctx, state) {
 
   const statusMsg = await ctx.reply(
     `<b>${model.name} - Генерація</b>\n\n` +
+    `🌐 Провайдер: ${providerLabel}\n` +
     `🖥️ Роздільна здатність: ${resolution}\n` +
     `⏱️ Тривалість: ${duration} сек\n` +
     `📐 Пропорції: ${aspectRatio}\n` +
@@ -14672,78 +14766,106 @@ async function generateSeedanceVideo(ctx, state) {
 
   (async () => {
     try {
-      const result = await kieAI.generateSeedanceVideoKieAI(generationData.prompt, {
-        modelKey,
-        inputMode: generationData.seedanceInputMode || 'text',
-        firstFrameUrl: generationData.startImage || null,
-        lastFrameUrl: generationData.lastFrame || null,
-        resolution,
-        aspectRatio,
-        duration,
-        generateAudio,
-        referenceImageUrls: generationData.referenceImageUrls || generationData.imageUrls || [],
-        referenceVideoUrls: generationData.referenceVideoUrls || [],
-        referenceAudioUrls: generationData.referenceAudioUrls || [],
-        onTaskCreated: (taskId) => persistPendingVideoTask(buildPendingVideoTaskPayload({
-          chatId,
-          userId,
-          username,
-          modelKey,
-          modelLabel: model.name,
-          taskId,
-          cost: seedanceCost,
-          deductDescription: `${model.name} generation`,
-          deductMeta: {
-            modelKey,
-            modelName: model.name,
-            apiCost,
-            prompt: generationData.prompt,
-            duration,
-            resolution,
-            aspectRatio,
-            generateAudio,
-            provider: 'kie'
-          },
-          promptSnippet: `🖥️ ${resolution} | ⏱️ ${duration} сек | 📐 ${aspectRatio}`,
-          captionLine: `${model.name}\n🖥️ ${resolution} | ⏱️ ${duration}сек | 📐 ${aspectRatio}`,
-          monitorOptions: { options: { duration, resolution, aspectRatio, generateAudio }, provider: 'kie' }
-        }))
-      });
+      let result;
 
-      if (!result.success && result.pending && result.taskId) {
-        console.log(`⏱️ Seedance task ${result.taskId} pending — recovery for user ${userId}`);
-        await bot.telegram.editMessageText(
-          chatId,
-          statusMsg.message_id,
-          null,
-          `⏳ <b>${model.name} ще генерується...</b>\n\nВідео буде надіслано автоматично.\n🔄 Перевіряємо у фоні...`,
-          { parse_mode: 'HTML' }
-        );
-        startVideoRecoveryPolling({
-          chatId,
-          userId,
-          username,
+      if (useKieAI) {
+        result = await kieAI.generateSeedanceVideoKieAI(generationData.prompt, {
           modelKey,
-          modelLabel: model.name,
-          taskId: result.taskId,
-          cost: seedanceCost,
-          deductDescription: `${model.name} generation`,
-          deductMeta: {
+          inputMode: generationData.seedanceInputMode || 'text',
+          firstFrameUrl: generationData.startImage || null,
+          lastFrameUrl: generationData.lastFrame || null,
+          resolution,
+          aspectRatio,
+          duration,
+          generateAudio,
+          referenceImageUrls: generationData.referenceImageUrls || generationData.imageUrls || [],
+          referenceVideoUrls: generationData.referenceVideoUrls || [],
+          referenceAudioUrls: generationData.referenceAudioUrls || [],
+          onTaskCreated: (taskId) => persistPendingVideoTask(buildPendingVideoTaskPayload({
+            chatId,
+            userId,
+            username,
             modelKey,
-            modelName: model.name,
-            apiCost,
-            prompt: generationData.prompt,
-            duration,
-            resolution,
-            aspectRatio,
-            generateAudio,
-            provider: 'kie'
-          },
-          promptSnippet: `🖥️ ${resolution} | ⏱️ ${duration} сек | 📐 ${aspectRatio}`,
-          captionLine: `${model.name}\n🖥️ ${resolution} | ⏱️ ${duration}сек | 📐 ${aspectRatio}`,
-          monitorOptions: { options: { duration, resolution, aspectRatio, generateAudio }, provider: 'kie' }
+            modelLabel: model.name,
+            taskId,
+            cost: seedanceCost,
+            deductDescription: `${model.name} generation`,
+            deductMeta: {
+              modelKey,
+              modelName: model.name,
+              apiCost,
+              prompt: generationData.prompt,
+              duration,
+              resolution,
+              aspectRatio,
+              generateAudio,
+              inputType,
+              inputVideoDuration,
+              provider: 'kie'
+            },
+            promptSnippet: `🖥️ ${resolution} | ⏱️ ${duration} сек | 📐 ${aspectRatio}`,
+            captionLine: `${model.name}\n🖥️ ${resolution} | ⏱️ ${duration}сек | 📐 ${aspectRatio}`,
+            monitorOptions: {
+              options: { duration, resolution, aspectRatio, generateAudio, inputType, inputVideoDuration },
+              provider: 'kie'
+            }
+          }))
         });
-        return;
+
+        if (!result.success && result.pending && result.taskId) {
+          console.log(`⏱️ Seedance task ${result.taskId} pending — recovery for user ${userId}`);
+          await bot.telegram.editMessageText(
+            chatId,
+            statusMsg.message_id,
+            null,
+            `⏳ <b>${model.name} ще генерується...</b>\n\nВідео буде надіслано автоматично.\n🔄 Перевіряємо у фоні...`,
+            { parse_mode: 'HTML' }
+          );
+          startVideoRecoveryPolling({
+            chatId,
+            userId,
+            username,
+            modelKey,
+            modelLabel: model.name,
+            taskId: result.taskId,
+            cost: seedanceCost,
+            deductDescription: `${model.name} generation`,
+            deductMeta: {
+              modelKey,
+              modelName: model.name,
+              apiCost,
+              prompt: generationData.prompt,
+              duration,
+              resolution,
+              aspectRatio,
+              generateAudio,
+              inputType,
+              inputVideoDuration,
+              provider: 'kie'
+            },
+            promptSnippet: `🖥️ ${resolution} | ⏱️ ${duration} сек | 📐 ${aspectRatio}`,
+            captionLine: `${model.name}\n🖥️ ${resolution} | ⏱️ ${duration}сек | 📐 ${aspectRatio}`,
+            monitorOptions: {
+              options: { duration, resolution, aspectRatio, generateAudio, inputType, inputVideoDuration },
+              provider: 'kie'
+            }
+          });
+          return;
+        }
+      } else {
+        result = await replicate.generateVideoWithSeedance2(generationData.prompt, {
+          modelKey,
+          inputMode: generationData.seedanceInputMode || 'text',
+          firstFrameUrl: generationData.startImage || null,
+          lastFrameUrl: generationData.lastFrame || null,
+          resolution,
+          aspectRatio,
+          duration,
+          generateAudio,
+          referenceImageUrls: generationData.referenceImageUrls || generationData.imageUrls || [],
+          referenceVideoUrls: generationData.referenceVideoUrls || [],
+          referenceAudioUrls: generationData.referenceAudioUrls || []
+        });
       }
 
       if (!result.success) {
@@ -14754,7 +14876,8 @@ async function generateSeedanceVideo(ctx, state) {
           model: model.name,
           prompt: generationData.prompt,
           duration,
-          resolution
+          resolution,
+          provider: providerKey
         });
         await bot.telegram.editMessageText(
           chatId,
@@ -14768,11 +14891,11 @@ async function generateSeedanceVideo(ctx, state) {
           userId,
           modelKey,
           success: false,
-          options: { duration, resolution, aspectRatio, generateAudio },
+          options: { duration, resolution, aspectRatio, generateAudio, inputType, inputVideoDuration },
           isTrial,
           isFree: isTrial,
           errorCode: result.error?.substring(0, 100),
-          provider: 'kie'
+          provider: providerKey
         });
         return;
       }
@@ -14786,7 +14909,9 @@ async function generateSeedanceVideo(ctx, state) {
         resolution,
         aspectRatio,
         generateAudio,
-        provider: 'kie'
+        inputType,
+        inputVideoDuration,
+        provider: providerKey
       });
 
       const isTrial = await isTrialUser(userId);
@@ -14794,10 +14919,10 @@ async function generateSeedanceVideo(ctx, state) {
         userId,
         modelKey,
         success: true,
-        options: { duration, resolution, aspectRatio, generateAudio },
+        options: { duration, resolution, aspectRatio, generateAudio, inputType, inputVideoDuration },
         isTrial,
         isFree: isTrial,
-        provider: 'kie'
+        provider: providerKey
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
@@ -14805,6 +14930,7 @@ async function generateSeedanceVideo(ctx, state) {
       await bot.telegram.sendMessage(
         chatId,
         `✅ <b>${model.name} готово!</b>\n\n` +
+        `🌐 Провайдер: ${providerLabel}\n` +
         `🖥️ Роздільна здатність: ${resolution}\n` +
         `⏱️ Тривалість: ${duration} сек\n` +
         `📐 Пропорції: ${aspectRatio}\n` +
@@ -14828,7 +14954,7 @@ async function generateSeedanceVideo(ctx, state) {
         username,
         action: `${modelKey}_generation`,
         model: model.name,
-        provider: 'kie'
+        provider: providerKey
       });
       try {
         await bot.telegram.editMessageText(

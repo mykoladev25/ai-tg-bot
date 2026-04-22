@@ -3020,7 +3020,6 @@ module.exports = {
     ],
     kieAIOnly: [
       'kling_3',           
-      'seedance_2',        // ⚠️ Seedance 2 - KIE only
       'seedance_2_fast',   // ⚠️ Seedance 2 Fast - KIE only
       'seedream_5_lite',   // ⚠️ Seedream 5.0 Lite - KIE.AI only
       'z_image'            

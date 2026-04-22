@@ -7,6 +7,8 @@ const models = require('../config/models');
 const { WORST_CASE_TOKEN_USD } = require('../config/constants');
 
 const TOKEN_PRICE_USD = WORST_CASE_TOKEN_USD ?? (110 / 4760);
+const TOKEN_USD = models._pricingAssumptions?.tokenUSD || 0.01;
+const PRICING_MULTIPLIER = models._pricingAssumptions?.pricingMultiplier || 1.65;
 
 /**
  * Generate unique request ID
@@ -46,9 +48,33 @@ function getModelConfig(modelKey) {
  * Calculate estimated API cost based on model config
  */
 function calculateApiCost(modelConfig, options = {}) {
-  const { seconds, duration, generateAudio, mode, orientation } = options;
+  const { seconds, duration, generateAudio, mode, orientation, provider, resolution, inputType, inputVideoDuration } = options;
 
   if (!modelConfig) return 0;
+
+  if (modelConfig.key === 'seedance_2' || modelConfig.key === 'seedance_2_fast') {
+    const resolvedProvider = provider === 'kie' ? 'kie' : 'replicate';
+    const resolvedResolution = resolution || '480p';
+    const resolvedInputType = inputType || 'no_video_input';
+    const outputSecs = seconds || duration || modelConfig.minSeconds || 4;
+    const billableSecs = resolvedProvider === 'kie' && resolvedInputType === 'with_video_input'
+      ? outputSecs + Math.max(0, Number(inputVideoDuration) || 0)
+      : outputSecs;
+    const rate = resolvedProvider === 'kie'
+      ? (
+        modelConfig.apiCostPerSecondByInputTypeAndResolution?.[resolvedInputType]?.[resolvedResolution]
+        ?? modelConfig.apiCostPerSecondByResolution?.[resolvedResolution]
+        ?? modelConfig.apiCostPerSecond
+        ?? 0
+      )
+      : (
+        modelConfig.replicateApiCostPerSecondByInputTypeAndResolution?.[resolvedInputType]?.[resolvedResolution]
+        ?? modelConfig.replicateApiCostPerSecondByResolution?.[resolvedResolution]
+        ?? modelConfig.replicateApiCostPerSecond
+        ?? 0
+      );
+    return rate * billableSecs;
+  }
 
   // Veo - seconds-based with audio/no-audio pricing
   if (modelConfig.key === 'veo') {
@@ -95,9 +121,14 @@ function calculateApiCost(modelConfig, options = {}) {
  * Calculate token cost based on model config
  */
 function calculateTokenCost(modelConfig, options = {}) {
-  const { seconds, duration, generateAudio, mode, orientation } = options;
+  const { seconds, duration, generateAudio, mode, orientation, provider, resolution, inputType, inputVideoDuration } = options;
 
   if (!modelConfig) return 0;
+
+  if (modelConfig.key === 'seedance_2' || modelConfig.key === 'seedance_2_fast') {
+    const apiCost = calculateApiCost(modelConfig, options);
+    return Math.ceil((apiCost || 0) * PRICING_MULTIPLIER / TOKEN_USD);
+  }
 
   // Veo
   if (modelConfig.key === 'veo') {
@@ -174,20 +205,21 @@ async function logUsageEvent(payload) {
       provider  
     } = payload;
 
-    const modelConfig = getModelConfig(modelKey);
-    const tokensSpent = calculateTokenCost(modelConfig, options);
-    const apiCost = calculateApiCost(modelConfig, options);
-
-    // Revenue = 0 for trial/free users
-    const estimatedRevenueUSD = (isTrial || isFree) ? 0 : tokensSpent * TOKEN_PRICE_USD;
-
     let detectedProvider = provider || 'replicate';
 
+    const modelConfig = getModelConfig(modelKey);
     if (!provider && modelConfig) {
       if (modelConfig.kieAIOnly) {
         detectedProvider = 'kie';
       }
     }
+
+    const pricingOptions = { ...options, provider: detectedProvider };
+    const tokensSpent = calculateTokenCost(modelConfig, pricingOptions);
+    const apiCost = calculateApiCost(modelConfig, pricingOptions);
+
+    // Revenue = 0 for trial/free users
+    const estimatedRevenueUSD = (isTrial || isFree) ? 0 : tokensSpent * TOKEN_PRICE_USD;
 
     const event = new UsageEvent({
       ts: new Date(),

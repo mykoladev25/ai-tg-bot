@@ -107,6 +107,23 @@ const OFFICIAL_PRICING = {
     model: 'sora_2',
     lastChecked: '2026-01-26',
     source: 'https://replicate.com/openai/sora-2'
+  },
+  'bytedance/seedance-2.0': {
+    priceByInputTypeAndResolution: {
+      non_video_in: {
+        '480p': 0.08,
+        '720p': 0.18,
+        '1080p': 0.45
+      },
+      video_in: {
+        '480p': 0.10,
+        '720p': 0.22,
+        '1080p': 0.55
+      }
+    },
+    model: 'seedance_2',
+    lastChecked: '2026-04-23',
+    source: 'https://replicate.com/bytedance/seedance-2.0'
   }
 };
 
@@ -125,7 +142,8 @@ const MODEL_MAPPING = {
   'kling_v2_6': 'kwaivgi/kling-v2.6',
   'kling_motion': 'kwaivgi/kling-v2.6-motion-control',
   'veo': 'google/veo-3.1',
-  'runway_turbo': 'runway/gen-4-turbo'
+  'runway_turbo': 'runway/gen-4-turbo',
+  'seedance_2': 'bytedance/seedance-2.0'
 };
 
 
@@ -222,6 +240,33 @@ function comparePrices() {
         }
       }
     }
+
+    if (official.priceByInputTypeAndResolution && model.replicateApiCostPerSecondByInputTypeAndResolution) {
+      for (const [inputType, ratesByResolution] of Object.entries(official.priceByInputTypeAndResolution)) {
+        const internalInputType = inputType === 'video_in' ? 'with_video_input' : 'no_video_input';
+        for (const [resolution, officialPrice] of Object.entries(ratesByResolution)) {
+          const ourPrice = model.replicateApiCostPerSecondByInputTypeAndResolution?.[internalInputType]?.[resolution];
+          if (!Number.isFinite(ourPrice)) continue;
+          const diff = Math.abs(ourPrice - officialPrice);
+          const diffPercent = (diff / officialPrice) * 100;
+
+          if (diffPercent > 10) {
+            discrepancies.push({
+              model: model.key,
+              modelName: model.name,
+              inputType,
+              resolution,
+              ourPricePerSec: ourPrice,
+              officialPricePerSec: officialPrice,
+              difference: diff.toFixed(4),
+              differencePercent: diffPercent.toFixed(1) + '%',
+              source: official.source,
+              lastChecked: official.lastChecked
+            });
+          }
+        }
+      }
+    }
   }
 
   return discrepancies;
@@ -261,6 +306,23 @@ function calculateActualCost(modelKey, metrics, options = {}) {
       hasAudio,
       predictTime: metrics?.predict_time || 0,
       source: 'veo_pricing'
+    };
+  }
+
+  if (official.priceByInputTypeAndResolution) {
+    const duration = options.duration || 4;
+    const resolution = options.resolution || '480p';
+    const inputType = options.inputType === 'with_video_input' ? 'video_in' : 'non_video_in';
+    const pricePerSec = official.priceByInputTypeAndResolution?.[inputType]?.[resolution];
+    if (!pricePerSec) return null;
+
+    return {
+      estimatedCost: pricePerSec * duration,
+      duration,
+      resolution,
+      inputType,
+      predictTime: metrics?.predict_time || 0,
+      source: 'seedance_pricing'
     };
   }
 
@@ -344,6 +406,24 @@ function getSuggestedUpdates() {
               suggestedValue: price,
               source: pricing.source
             });
+          }
+        }
+      }
+
+      if (pricing.priceByInputTypeAndResolution && ourModel.replicateApiCostPerSecondByInputTypeAndResolution) {
+        for (const [inputType, pricesByResolution] of Object.entries(pricing.priceByInputTypeAndResolution)) {
+          const internalInputType = inputType === 'video_in' ? 'with_video_input' : 'no_video_input';
+          for (const [resolution, price] of Object.entries(pricesByResolution)) {
+            const current = ourModel.replicateApiCostPerSecondByInputTypeAndResolution?.[internalInputType]?.[resolution];
+            if (Number.isFinite(current) && current !== price) {
+              updates.push({
+                modelKey,
+                field: `replicateApiCostPerSecondByInputTypeAndResolution.${internalInputType}.${resolution}`,
+                currentValue: current,
+                suggestedValue: price,
+                source: pricing.source
+              });
+            }
           }
         }
       }

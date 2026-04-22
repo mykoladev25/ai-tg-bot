@@ -9,7 +9,8 @@ function isAvailableOnReplicate(modelKey) {
     'kling_3',
     'midjourney',
     'seedream_5_lite',
-    'z_image'
+    'z_image',
+    'seedance_2_fast'
   ];
 
   return !kieOnlyModels.includes(modelKey);

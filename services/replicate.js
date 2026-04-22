@@ -57,6 +57,18 @@ function normalizeImageInput(imageInput, maxImages = 14) {
   return [imageInput];
 }
 
+function normalizeReplicateFileOutput(output) {
+  const value = Array.isArray(output) ? output[0] : output;
+  if (!value) return value;
+  if (typeof value.url === 'function') {
+    return value.url().toString();
+  }
+  if (typeof value.toString === 'function') {
+    return value.toString();
+  }
+  return value;
+}
+
 /**
  * Poll Replicate until a prediction completes.
  */
@@ -612,6 +624,128 @@ async function generateVideoWithSora2(prompt, seconds = 4, aspectRatio = 'portra
   }
 }
 
+async function generateVideoWithSeedance2(prompt, options = {}) {
+  try {
+    if (!prompt) {
+      throw new Error('Prompt is required for Seedance 2');
+    }
+
+    const {
+      modelKey = 'seedance_2',
+      inputMode = null,
+      firstFrameUrl = null,
+      lastFrameUrl = null,
+      referenceImageUrls = [],
+      referenceVideoUrls = [],
+      referenceAudioUrls = [],
+      generateAudio = true,
+      resolution = '480p',
+      aspectRatio = '16:9',
+      duration = 4,
+      seed = undefined
+    } = options;
+
+    const replicateModel = modelKey === 'seedance_2_fast'
+      ? 'bytedance/seedance-2.0-fast'
+      : 'bytedance/seedance-2.0';
+
+    const allowedResolutions = modelKey === 'seedance_2_fast'
+      ? ['480p', '720p']
+      : ['480p', '720p', '1080p'];
+    const safeResolution = allowedResolutions.includes(resolution) ? resolution : allowedResolutions[0];
+    const safeAspectRatio = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', '9:21', 'adaptive'].includes(aspectRatio)
+      ? aspectRatio
+      : '16:9';
+    const safeDuration = Math.max(-1, Math.min(15, Number(duration) || 4));
+    const imageRefs = Array.isArray(referenceImageUrls)
+      ? referenceImageUrls.filter(Boolean).slice(0, 9)
+      : [];
+    const videoRefs = Array.isArray(referenceVideoUrls)
+      ? referenceVideoUrls.filter(Boolean).slice(0, 3)
+      : [];
+    const audioRefs = Array.isArray(referenceAudioUrls)
+      ? referenceAudioUrls.filter(Boolean).slice(0, 3)
+      : [];
+    const hasFrameInputs = !!firstFrameUrl || !!lastFrameUrl;
+    const hasReferenceInputs = imageRefs.length > 0 || videoRefs.length > 0 || audioRefs.length > 0;
+
+    const normalizedInputMode = inputMode === 'frames' || inputMode === 'multimodal' || inputMode === 'text'
+      ? inputMode
+      : hasFrameInputs
+        ? 'frames'
+        : hasReferenceInputs
+          ? 'multimodal'
+          : 'text';
+
+    if (hasFrameInputs && hasReferenceInputs) {
+      throw new Error('Seedance 2 on Replicate does not allow mixing first/last frame inputs with multimodal references');
+    }
+
+    if (audioRefs.length > 0 && imageRefs.length === 0 && videoRefs.length === 0) {
+      throw new Error('Seedance 2 on Replicate requires at least one reference image or reference video when using reference audio');
+    }
+
+    const input = {
+      prompt,
+      duration: safeDuration,
+      resolution: safeResolution,
+      aspect_ratio: safeAspectRatio,
+      generate_audio: !!generateAudio
+    };
+
+    if (Number.isInteger(seed)) {
+      input.seed = seed;
+    }
+
+    if (normalizedInputMode === 'frames') {
+      if (!firstFrameUrl) {
+        throw new Error('First frame image is required for Seedance frames mode');
+      }
+      input.image = firstFrameUrl;
+      if (lastFrameUrl) {
+        input.last_frame_image = lastFrameUrl;
+      }
+    } else {
+      if (imageRefs.length > 0) {
+        input.reference_images = imageRefs;
+      }
+      if (videoRefs.length > 0) {
+        input.reference_videos = videoRefs;
+      }
+      if (audioRefs.length > 0) {
+        input.reference_audios = audioRefs;
+      }
+    }
+
+    console.log('🎞️ Seedance 2 Replicate input:', {
+      modelKey,
+      prompt: prompt.substring(0, 100),
+      duration: input.duration,
+      resolution: input.resolution,
+      aspect_ratio: input.aspect_ratio,
+      generate_audio: input.generate_audio,
+      has_image: !!input.image,
+      has_last_frame: !!input.last_frame_image,
+      reference_images: input.reference_images?.length || 0,
+      reference_videos: input.reference_videos?.length || 0,
+      reference_audios: input.reference_audios?.length || 0
+    });
+
+    const output = await replicate.run(replicateModel, { input });
+
+    return {
+      success: true,
+      videoUrl: normalizeReplicateFileOutput(output)
+    };
+  } catch (error) {
+    console.error('Seedance 2 Replicate API Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 // ==================== AUDIO GENERATION ====================
 
 
@@ -870,6 +1004,7 @@ module.exports = {
   generateVideoWithKlingMotion,
   generateVideoWithRunway,
   generateVideoWithSora2,
+  generateVideoWithSeedance2,
   generateVideoWithVeo,
   generateVideoWithKlingO1Edit
 };
