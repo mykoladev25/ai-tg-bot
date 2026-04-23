@@ -2193,6 +2193,7 @@ const IMAGE_MODELS = [
   'seedream_5_lite',
   'ideogram',
   'z_image',
+  'gpt_image_2',
   'a2e_image',
   'clarity',
   'recraft_upscale'
@@ -2209,7 +2210,8 @@ const MODELS_WITH_ASPECT_RATIO = [
   'seedream_5_lite',
   'stable_diffusion',
   'ideogram',
-  'z_image'
+  'z_image',
+  'gpt_image_2'
 ];
 
 const MODELS_WITH_STATE = [
@@ -2237,7 +2239,8 @@ const ASPECT_RATIO_OPTIONS = {
   nano_banana_4k: ['match_input_image', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
   stable_diffusion: ['1:1', '16:9', '21:9', '2:3', '3:2', '4:5', '5:4', '9:16', '9:21'],
   ideogram: ['1:3', '3:1', '1:2', '2:1', '9:16', '16:9', '10:16', '16:10', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '1:1'],
-  z_image: ['1:1', '4:3', '3:4', '16:9', '9:16']
+  z_image: ['1:1', '4:3', '3:4', '16:9', '9:16'],
+  gpt_image_2: ['auto', '1:1', '9:16', '16:9', '4:3', '3:4']
 };
 
 const ASPECT_RATIO_LABELS = {
@@ -2262,7 +2265,8 @@ const ASPECT_RATIO_LABELS = {
   '2:3': '🖼️ 2:3 (Classic Portrait)',
   '21:9': '🎬 21:9 (Ultrawide)',
   '9:21': '📱 9:21 (Vertical)',
-  'match_input_image': 'Auto'
+  'match_input_image': 'Auto',
+  auto: '🤖 Auto'
 };
 
 const RATIO_NOTES = {
@@ -2282,7 +2286,8 @@ const TEXT_ASPECT_RATIO_MODELS = new Set([
   'seedream_5_lite',
   'ideogram',
   'stable_diffusion',
-  'z_image'
+  'z_image',
+  'gpt_image_2'
 ]);
 
 const IMAGE_SIZE_OPTIONS = {
@@ -4752,11 +4757,11 @@ bot.action('new_conversation', async (ctx) => {
 });
 
 // ==================== ASPECT RATIO SELECTION ====================
-bot.action(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|1:4|4:1|1:8|8:1|4:5|5:4|9:16|10:16|16:10|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/, async (ctx) => {
+bot.action(/^aspect_ratio_(.+?)_(auto|1:1|1:2|2:1|1:3|3:1|1:4|4:1|1:8|8:1|4:5|5:4|9:16|10:16|16:10|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/, async (ctx) => {
   await ctx.answerCbQuery();
 
   const callbackData = ctx.callbackQuery.data;
-  const match = callbackData.match(/^aspect_ratio_(.+?)_(1:1|1:2|2:1|1:3|3:1|1:4|4:1|1:8|8:1|4:5|5:4|9:16|10:16|16:10|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/);
+  const match = callbackData.match(/^aspect_ratio_(.+?)_(auto|1:1|1:2|2:1|1:3|3:1|1:4|4:1|1:8|8:1|4:5|5:4|9:16|10:16|16:10|4:3|3:4|16:9|3:2|2:3|21:9|match_input_image)$/);
   const userId = ctx.from.id;
 
   console.log(`📐 Aspect ratio callback: ${callbackData}`);
@@ -5349,7 +5354,7 @@ bot.action(/^mj_vary_(.+)_(\d+)$/, async (ctx) => {
 });
 
 // Design Models
-bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|seedream_5_lite|clarity|recraft_upscale|ideogram|z_image|a2e_image)$/, async (ctx) => {
+bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|nano_banana_2k|nano_banana_4k|stable_diffusion|seedream_4k|seedream_5_lite|clarity|recraft_upscale|ideogram|z_image|gpt_image_2|a2e_image)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.design.models.find(m => m.key === modelKey);
 
@@ -5542,6 +5547,28 @@ bot.action(/^(flux|nano_banana_free|nano_banana_2|nano_banana_pro|nano_banana|na
       `✍️ Enter a prompt (up to 1000 characters)\n\n` +
       `💰 Cost: ${effectiveCost}⚡\n` +
       `⏱️ Time: ~10-20 seconds`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
+    return;
+  }
+
+  if (modelKey === 'gpt_image_2') {
+    imageGenState.set(ctx.from.id, {
+      model: modelKey,
+      step: 'prompt',
+      photos: []
+    });
+    userCurrentModel.set(ctx.from.id, modelKey);
+
+    await ctx.reply(
+      `🧠 <b>${model.name}</b>\n\n` +
+      `🖼️ KIE.AI GPT Image-2 text-to-image generation.\n\n` +
+      `✍️ <b>Step 1:</b> Enter your prompt\n` +
+      `📐 <b>Step 2:</b> Choose aspect ratio\n\n` +
+      `💡 Formats: auto, 1:1, 9:16, 16:9, 4:3, 3:4\n` +
+      `💡 Reference images are not used in this bot flow for GPT Image-2.\n\n` +
+      `💰 Cost: ${effectiveCost}⚡\n` +
+      `⏱️ Time: ~10-25 seconds`,
       { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
     );
     return;
@@ -12990,6 +13017,7 @@ bot.on('text', async (ctx) => {
     seedream_5_lite: () => handleImageGeneration(ctx, text, 'seedream_5_lite'),
     ideogram: () => handleImageGeneration(ctx, text, 'ideogram'),
     z_image: () => handleImageGeneration(ctx, text, 'z_image'),
+    gpt_image_2: () => handleImageGeneration(ctx, text, 'gpt_image_2'),
     kling: () => handleVideoGeneration(ctx, text, 'kling'),
     kling_v2_6: () => handleVideoGeneration(ctx, text, 'kling_v2_6'),
     runway_gen4: () => handleVideoGeneration(ctx, text, 'runway_gen4'),
@@ -14095,6 +14123,12 @@ bot.on('photo', async (ctx) => {
     runBackgroundTask(() => handleClaudeVision(ctx), 'claude_vision_photo');
   } else if (currentModel === 'clarity') {
     runBackgroundTask(() => handleClarityUpscaler(ctx), 'clarity_upscaler');
+  } else if (currentModel === 'gpt_image_2') {
+    await ctx.reply(
+      '🧠 <b>GPT Image-2</b> у цьому боті працює тільки в режимі text-to-image.\n\n' +
+      '✍️ Надішліть текстовий prompt, після чого я запропоную вибрати aspect ratio.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('design_menu') }
+    );
   } else if (currentModel === 'kling_motion' || currentModel === 'kling_motion_minimal') {
     const imageUrl = await getImageUrl(ctx);
     userState.set(userId, { model: currentModel, step: 'waiting_video', imageUrl });
@@ -15078,6 +15112,12 @@ async function handleImageGeneration(ctx, prompt, modelKey, imageInput = null, a
               return await kieAI.generateWithZImageKieAI(
                 generationData.prompt,
                 generationData.aspectRatio
+              );
+
+            case 'gpt_image_2':
+              return await kieAI.generateWithGPTImage2KieAI(
+                generationData.prompt,
+                generationData.aspectRatio || 'auto'
               );
 
             default:

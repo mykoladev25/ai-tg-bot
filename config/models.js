@@ -619,6 +619,22 @@ module.exports = {
         kieAIOnly: true
       },
 
+      /**
+       * GPT Image-2 (KIE.AI)
+       * Verified from the KIE pricing API on 2026-04-23:
+       * - text-to-image, high: 12 credits = $0.06
+       * - internal token price = ceil(0.06 * 1.65 / 0.01) = 10
+       */
+      {
+        name: '🧠 GPT Image-2 💎',
+        key: 'gpt_image_2',
+        cost: 10,
+        apiCost: 0.06,
+        maxImages: 1,
+        available: true,
+        kieAIOnly: true
+      },
+
       
       {
         name: '🖼️ MidJourney 💎',

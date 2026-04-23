@@ -67,6 +67,7 @@ function parseOurModels(pricing) {
     ideogram: findModels(pricing.image, 'ideogram'),  // All ideogram variants
     recraft_upscale: findModel(pricing.image, 'recraft crisp upscale'),  // Recraft Crisp Upscale
     z_image: findModel(pricing.image, 'z-image', 'text-to-image'),  // Qwen Z-Image
+    gpt_image_2: findModel(pricing.image, 'gpt image 2', 'text-to-image'),
 
     // VIDEO
     kling_2_5: findModels(pricing.video, 'kling 2.5'),
@@ -256,6 +257,9 @@ function getModelPrice(cache, modelKey, options = {}) {
       case 'z_image':
         return parsed.z_image?.usdPrice || null;
 
+      case 'gpt_image_2':
+        return parsed.gpt_image_2?.usdPrice || null;
+
       case 'ideogram': {
         const ideogram = parsed.ideogram?.find(m => {
           const desc = m.modelDescription.toLowerCase();
@@ -366,7 +370,7 @@ function getKling3TokenCostPerSecondSync(options = {}) {
 }
 
 
-const KIE_IMAGE_MODELS = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'seedream_5_lite', 'ideogram', 'recraft_upscale', 'z_image'];
+const KIE_IMAGE_MODELS = ['nano_banana', 'nano_banana_2k', 'nano_banana_4k', 'seedream_2k', 'seedream_4k', 'seedream_5_lite', 'ideogram', 'recraft_upscale', 'z_image', 'gpt_image_2'];
 
 
 const VEO_REF_DURATION_SEC = 4;
@@ -434,6 +438,11 @@ function getKieTokenCostSync(modelKey, options = {}) {
       if (usd == null && modelKey === 'z_image') {
         usd = 0.004;  // KIE.AI: 0.8 credits × $0.005 = $0.004
         console.log(`💡 Using hardcoded Z-Image price: $${usd} (0.8 credits)`);
+      }
+
+      if (usd == null && modelKey === 'gpt_image_2') {
+        usd = 0.06;  // KIE.AI: 12 credits × $0.005 = $0.06
+        console.log(`💡 Using hardcoded GPT Image-2 price: $${usd} (12 credits)`);
       }
 
       if (usd == null) return null;

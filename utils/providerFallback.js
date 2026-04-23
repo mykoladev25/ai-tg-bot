@@ -10,6 +10,7 @@ function isAvailableOnReplicate(modelKey) {
     'midjourney',
     'seedream_5_lite',
     'z_image',
+    'gpt_image_2',
     'seedance_2_fast'
   ];
 

@@ -977,6 +977,118 @@ async function generateWithZImageKieAI(prompt, aspectRatio = "1:1") {
   }
 }
 
+async function generateWithGPTImage2KieAI(prompt, aspectRatio = 'auto') {
+  try {
+    if (!KIE_API_KEY) {
+      throw new Error('KIE_AI_API_KEY is not set in .env');
+    }
+
+    if (!prompt) {
+      throw new Error('Prompt is required for GPT Image-2');
+    }
+
+    const truncatedPrompt = prompt.length > 20000 ? prompt.substring(0, 20000) : prompt;
+    const safeAspectRatio = ['auto', '1:1', '9:16', '16:9', '4:3', '3:4'].includes(aspectRatio)
+      ? aspectRatio
+      : 'auto';
+
+    console.log(`🧠 KIE.AI GPT Image-2 (text2img):`, {
+      prompt: truncatedPrompt.substring(0, 100),
+      aspectRatio: safeAspectRatio
+    });
+
+    const payload = {
+      model: 'gpt-image-2-text-to-image',
+      callBackUrl: `${process.env.APP_URL || 'http://localhost:5500'}/webhook/kie-ai`,
+      input: {
+        prompt: truncatedPrompt,
+        aspect_ratio: safeAspectRatio,
+        nsfw_checker: false
+      }
+    };
+
+    console.log(`📤 KIE.AI GPT Image-2 request:`, {
+      model: payload.model,
+      aspectRatio: safeAspectRatio,
+      nsfwChecker: payload.input.nsfw_checker
+    });
+
+    try {
+      const kiePricingSync = require('./kie-pricing-sync');
+      const kiePrice = kiePricingSync.getModelPriceSync('gpt_image_2');
+      if (kiePrice) {
+        console.log(`💰 KIE.AI GPT Image-2 price: $${kiePrice}`);
+      }
+    } catch (err) {
+    }
+
+    const createResponse = await axios.post(
+      `${KIE_API_BASE}/jobs/createTask`,
+      payload,
+      {
+        headers: {
+          'Authorization': `Bearer ${KIE_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log(`📥 KIE.AI GPT Image-2 response:`, JSON.stringify(createResponse.data, null, 2));
+
+    if (!createResponse.data || !createResponse.data.data || !createResponse.data.data.taskId) {
+      const responseCode = createResponse?.data?.code;
+      const apiMsg = createResponse?.data?.msg ?? createResponse?.data?.message ?? '';
+
+      if (responseCode === 500) {
+        console.error('❌ KIE.AI GPT Image-2 - Server Error 500:', createResponse?.data);
+        return {
+          success: false,
+          error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes.',
+          provider: 'kie-ai',
+          serverError: true
+        };
+      }
+
+      console.error('❌ Invalid KIE.AI response structure:', createResponse.data);
+      throw new Error(`Unexpected response from KIE.AI: ${apiMsg || JSON.stringify(createResponse.data)}`);
+    }
+
+    const taskId = createResponse.data.data.taskId;
+    console.log(`✅ KIE.AI GPT Image-2 task created: ${taskId}`);
+
+    const result = await pollJobStatus(taskId, 600, 5000, 'GPT Image-2 (KIE.AI)');
+
+    const imageUrl = extractImageUrl(result);
+    if (!imageUrl) {
+      throw new Error('KIE.AI returned no image in output');
+    }
+
+    return {
+      success: true,
+      imageUrl,
+      taskId,
+      provider: 'kie-ai'
+    };
+  } catch (error) {
+    console.error('❌ KIE.AI GPT Image-2 Error:', error.response?.data || error.message);
+
+    if (error.response?.data?.code === 500) {
+      return {
+        success: false,
+        error: '⚠️ Temporary KIE.AI server issue. Try again in 1-2 minutes.',
+        provider: 'kie-ai',
+        serverError: true
+      };
+    }
+
+    return {
+      success: false,
+      error: error.response?.data?.msg || error.response?.data?.message || error.message,
+      provider: 'kie-ai'
+    };
+  }
+}
+
 
 async function generateWithNanoBananaKieAI(prompt, imageInput = null, resolution = "2K", aspectRatio = "1:1") {
   try {
@@ -2972,6 +3084,7 @@ module.exports = {
   generateWithIdeogramKieAI,         // ✅ Ideogram v3
   generateWithRecraftUpscaleKieAI,   // ✅ Recraft Crisp Upscale
   generateWithZImageKieAI,           // ✅ Z-Image (Qwen)
+  generateWithGPTImage2KieAI,        // ✅ GPT Image-2 (text-to-image)
 
   generateKlingMotionKieAI,          // ✅ Kling Motion Control
   generateKling3VideoKieAI,          // ✅ Kling 3.0 (multi-shot, element refs)
@@ -3006,7 +3119,8 @@ module.exports = {
       'seedream_5_lite',  // ✅ seedream/5-lite-text-to-image, seedream/5-lite-image-to-image
       'ideogram',         // ✅ ideogram/v3-reframe, v3-remix, v3-edit
       'recraft_upscale',  // ✅ recraft/crisp-upscale
-      'z_image'           // ✅ z-image (Qwen)
+      'z_image',          // ✅ z-image (Qwen)
+      'gpt_image_2'       // ✅ GPT Image-2 text-to-image
     ],
     video: [
       'kling',            // ✅ kling/v2-5-turbo-image-to-video-pro
@@ -3022,7 +3136,8 @@ module.exports = {
       'kling_3',           
       'seedance_2_fast',   // ⚠️ Seedance 2 Fast - KIE only
       'seedream_5_lite',   // ⚠️ Seedream 5.0 Lite - KIE.AI only
-      'z_image'            
+      'z_image',
+      'gpt_image_2'
     ],
     notSupported: [
       'stable_diffusion', 
@@ -3049,6 +3164,7 @@ module.exports = {
     ideogram: { model: 'ideogram/v3-reframe', remix: 'ideogram/v3-remix', edit: 'ideogram/v3-edit' },
     recraft_upscale: { model: 'recraft/crisp-upscale' },
     z_image: { model: 'z-image' },
+    gpt_image_2: { model: 'gpt-image-2-text-to-image' },
 
     // Video
     kling: { model: 'kling/v2-5-turbo-image-to-video-pro' },

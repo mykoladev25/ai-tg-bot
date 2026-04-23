@@ -141,6 +141,26 @@ module.exports = {
     notes: '⚠️ Available only on KIE.AI. This is the cheapest image model.'
   },
 
+  gpt_image_2: {
+    kie_model: 'gpt-image-2-text-to-image',
+    kie_pricing: {
+      credits: 12,
+      usd: 0.06,
+      note: 'Verified from the public KIE.AI pricing API on 2026-04-23.'
+    },
+    replicate_model: null,
+    replicate_pricing: null,
+    features: {
+      max_images: 1,
+      supports_text_to_image: true,
+      supports_image_to_image: false,
+      aspect_ratios: ['auto', '1:1', '9:16', '16:9', '4:3', '3:4'],
+      max_prompt_length: 20000,
+      nsfw_checker_default: false
+    },
+    notes: '⚠️ Currently wired in this bot only for text-to-image via KIE.AI.'
+  },
+
   
   midjourney: {
     kie_model: 'midjourney',
@@ -394,6 +414,7 @@ module.exports = {
       'seedream_5_lite': 'seedream-5-lite',
       'stable_diffusion': 'stable-diffusion-3.5',
       'z_image': 'z-image',
+      'gpt_image_2': 'gpt-image-2-text-to-image',
       'kling': 'kling-2.5',
       'kling_v2_6': 'kling-2.6',
       'kling_3_0': 'kling-3.0',
@@ -485,6 +506,9 @@ module.exports = {
       case 'seedream_5_lite':
         return this.seedream_5_lite.kie_pricing.per_image.usd;
 
+      case 'gpt_image_2':
+        return this.gpt_image_2.kie_pricing.usd;
+
       default:
         return 0;
     }
@@ -521,6 +545,7 @@ module.exports = {
       'seedream_2k', 'seedream_4k', 'seedream_5_lite',
       'stable_diffusion',
       'z_image',
+      'gpt_image_2',
       'kling', 'kling_v2_6', 'kling_3_0', 'kling_motion',
       'veo', 'sora_2',
       'seedance_2', 'seedance_2_fast'
