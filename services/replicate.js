@@ -7,7 +7,6 @@ const {
   resolveServerSideTelegramFileUrlAsync
 } = require('../utils/telegramFiles');
 
-const REPLICATE_API = 'https://api.replicate.com/v1';
 const Replicate = require('replicate');
 
 const replicate = new Replicate({
@@ -186,54 +185,6 @@ async function prepareReplicateMediaInputs(urls, maxItems, uploadPath) {
   return Promise.all(list.map((url) => prepareReplicateMediaInput(url, uploadPath)));
 }
 
-/**
- * Poll Replicate until a prediction completes.
- */
-async function pollPrediction(predictionId, maxAttempts = 400, interval = 3000, modelName = 'Model') {
-  let result = null;
-  let attempts = 0;
-
-  while (!result && attempts < maxAttempts) {
-    await new Promise(resolve => setTimeout(resolve, interval));
-
-    const statusResponse = await axios.get(
-      `${REPLICATE_API}/predictions/${predictionId}`,
-      {
-        headers: {
-          'Authorization': `Token ${process.env.REPLICATE_API_KEY}`
-        }
-      }
-    );
-
-    console.log(`${modelName} attempt ${attempts + 1}: ${statusResponse.data.status}`);
-
-    if (statusResponse.data.status === 'succeeded') {
-      result = statusResponse.data;
-      break;
-    } else if (statusResponse.data.status === 'failed') {
-      throw new Error(statusResponse.data.error || 'Generation failed');
-    }
-
-    attempts++;
-  }
-
-  // Perform one final status check before returning a timeout error.
-  if (!result) {
-    try {
-      const last = await axios.get(`${REPLICATE_API}/predictions/${predictionId}`, {
-        headers: { 'Authorization': `Token ${process.env.REPLICATE_API_KEY}` }
-      });
-      if (last.data?.status === 'succeeded') {
-        console.log(`📊 ${modelName} got result on final check`);
-        return last.data;
-      }
-    } catch (e) { /* ignore final status errors */ }
-    throw new Error(`Timeout waiting for ${modelName} generation`);
-  }
-
-  return result;
-}
-
 // ==================== IMAGE GENERATION ====================
 
 /**
@@ -243,35 +194,19 @@ async function generateWithFlux(prompt) {
   try {
     console.log('Starting FLUX generation:', prompt);
 
-    const response = await axios.post(
-      `${REPLICATE_API}/predictions`,
-      {
-        version: 'black-forest-labs/flux-1.1-pro',
-        input: {
-          prompt: prompt,
-          aspect_ratio: '1:1',
-          output_format: 'png',
-          output_quality: 90,
-          safety_tolerance: 2
-        }
-      },
-      {
-        headers: {
-          'Authorization': `Token ${process.env.REPLICATE_API_KEY}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'wait'
-        }
-      }
-    );
+    const input = {
+      prompt: prompt,
+      aspect_ratio: '1:1',
+      output_format: 'png',
+      output_quality: 90,
+      safety_tolerance: 2
+    };
 
-    const predictionId = response.data.id;
-    console.log('FLUX prediction created:', predictionId);
-
-    const result = await pollPrediction(predictionId, 400, 3000, 'FLUX');
+    const output = await replicate.run('black-forest-labs/flux-1.1-pro', { input });
 
     return {
       success: true,
-      imageUrl: Array.isArray(result.output) ? result.output[0] : result.output
+      imageUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -299,35 +234,18 @@ async function generateWithStableDiffusion(prompt, imageUrl = null, strength = 0
 
     if (imageUrl) {
       const imageRef = Array.isArray(imageUrl) ? imageUrl[0] : imageUrl;
-      input.image = imageRef;
+      input.image = await prepareReplicateMediaInput(imageRef, 'telegram-stable-diffusion-image');
       input.prompt_strength = strength;
       console.log('Using image input (url), prompt_strength:', strength);
     } else {
       input.aspect_ratio = aspectRatio;
     }
 
-    const response = await axios.post(
-      `${REPLICATE_API}/predictions`,
-      {
-        version: 'stability-ai/stable-diffusion-3.5-large',
-        input: input
-      },
-      {
-        headers: {
-          'Authorization': `Token ${process.env.REPLICATE_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const predictionId = response.data.id;
-    console.log('Stable Diffusion prediction created:', predictionId);
-
-    const result = await pollPrediction(predictionId, 400, 3000, 'Stable Diffusion');
+    const output = await replicate.run('stability-ai/stable-diffusion-3.5-large', { input });
 
     return {
       success: true,
-      imageUrl: Array.isArray(result.output) ? result.output[0] : result.output
+      imageUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -346,10 +264,16 @@ async function generateWithNanoBanana(prompt, imageInput = null, resolution = "2
   try {
     console.log('Generating with Nano Banana Pro:', prompt, `aspect_ratio: ${aspectRatio}`);
 
+    const imageInputs = await prepareReplicateMediaInputs(
+      normalizeImageInput(imageInput, 14),
+      14,
+      'telegram-nano-banana-pro-images'
+    );
+
     const input = {
       prompt: prompt,
       resolution: resolution,
-      image_input: normalizeImageInput(imageInput, 14),
+      image_input: imageInputs,
       aspect_ratio: aspectRatio,
       output_format: "png",
       safety_filter_level: "block_only_high"
@@ -363,7 +287,7 @@ async function generateWithNanoBanana(prompt, imageInput = null, resolution = "2
 
     return {
       success: true,
-      imageUrl: Array.isArray(output) ? output[0] : output
+      imageUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -380,9 +304,15 @@ async function generateWithNanoBananaBase(prompt, imageInput = null, aspectRatio
   try {
     console.log('Generating with Nano Banana:', prompt, `aspect_ratio: ${aspectRatio}`);
 
+    const imageInputs = await prepareReplicateMediaInputs(
+      normalizeImageInput(imageInput, 3),
+      3,
+      'telegram-nano-banana-images'
+    );
+
     const input = {
       prompt: prompt,
-      image_input: normalizeImageInput(imageInput, 3),
+      image_input: imageInputs,
       aspect_ratio: aspectRatio,
       output_format: outputFormat
     };
@@ -395,7 +325,7 @@ async function generateWithNanoBananaBase(prompt, imageInput = null, aspectRatio
 
     return {
       success: true,
-      imageUrl: Array.isArray(output) ? output[0] : output
+      imageUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -412,13 +342,17 @@ async function generateWithSeedream(prompt, imageInput = null, size = "4K", aspe
   try {
     console.log('Generating with Seedream 4.5:', prompt, `aspect_ratio: ${aspectRatio}`);
 
+    const imageInputs = await prepareReplicateMediaInputs(
+      normalizeImageInput(imageInput, 14),
+      14,
+      'telegram-seedream-images'
+    );
+
     const input = {
       size: size,
-      width: 2048,
-      height: 2048,
       prompt: prompt,
       max_images: 1,
-      image_input: normalizeImageInput(imageInput, 14),
+      image_input: imageInputs,
       aspect_ratio: aspectRatio,
       sequential_image_generation: "disabled"
     };
@@ -431,7 +365,7 @@ async function generateWithSeedream(prompt, imageInput = null, size = "4K", aspe
 
     return {
       success: true,
-      imageUrl: Array.isArray(output) ? output[0] : output
+      imageUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -458,7 +392,9 @@ async function generateWithIdeogram(prompt, imageInput = null, imageWeight = 0.5
       if (!imageUrl) {
         console.warn('Ideogram: imageInput provided but empty/invalid, skipping style_reference_images.');
       } else {
-        input.style_reference_images = [imageUrl];
+        input.style_reference_images = [
+          await prepareReplicateMediaInput(imageUrl, 'telegram-ideogram-style-image')
+        ];
         input.image_weight = imageWeight; // 0.0-1.0 (default 0.5)
         console.log(`Using 1 image as style_reference_images (url), weight: ${imageWeight}`);
       }
@@ -468,7 +404,7 @@ async function generateWithIdeogram(prompt, imageInput = null, imageWeight = 0.5
 
     return {
       success: true,
-      imageUrl: Array.isArray(output) ? output[0] : output
+      imageUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -486,7 +422,7 @@ async function generateWithClarityUpscaler(imageUrl, prompt = '') {
     console.log('Upscaling with Clarity:', imageUrl);
 
     const input = {
-      image: imageUrl,
+      image: await prepareReplicateMediaInput(imageUrl, 'telegram-clarity-image'),
       prompt: prompt || 'masterpiece, best quality, highres, extremely detailed',
       negative_prompt: 'worst quality, low quality, normal quality',
       scale_factor: 2,
@@ -514,7 +450,7 @@ async function generateWithClarityUpscaler(imageUrl, prompt = '') {
 
     return {
       success: true,
-      imageUrl: output[0]
+      imageUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -534,7 +470,7 @@ async function generateWithRecraftCrispUpscale(imageUrl) {
     console.log('Upscaling with Recraft Crisp:', imageUrl);
 
     const input = {
-      image: imageUrl
+      image: await prepareReplicateMediaInput(imageUrl, 'telegram-recraft-image')
     };
 
     const output = await replicate.run(
@@ -544,7 +480,7 @@ async function generateWithRecraftCrispUpscale(imageUrl) {
 
     return {
       success: true,
-      imageUrl: Array.isArray(output) ? output[0] : output
+      imageUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -575,14 +511,14 @@ async function generateVideoWithKling(prompt, startImage = null, endImage = null
     };
 
     if (startImage) {
-      input.start_image = startImage;
+      input.start_image = await prepareReplicateMediaInput(startImage, 'telegram-kling-start-image');
       console.log('✅ Adding start_image (first frame)');
     } else {
       input.aspect_ratio = aspectRatio;
     }
 
     if (endImage) {
-      input.end_image = endImage;
+      input.end_image = await prepareReplicateMediaInput(endImage, 'telegram-kling-end-image');
       console.log('✅ Adding end_image (last frame) for interpolation');
     }
 
@@ -592,7 +528,7 @@ async function generateVideoWithKling(prompt, startImage = null, endImage = null
 
     return {
       success: true,
-      videoUrl: Array.isArray(output) ? output[0] : output
+      videoUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -621,7 +557,7 @@ async function generateVideoWithKling26(prompt, startImage = null, duration = 5,
     };
 
     if (startImage) {
-      input.start_image = startImage;
+      input.start_image = await prepareReplicateMediaInput(startImage, 'telegram-kling26-start-image');
       console.log('✅ Adding start_image (first frame)');
     } else {
       input.aspect_ratio = aspectRatio;
@@ -637,7 +573,7 @@ async function generateVideoWithKling26(prompt, startImage = null, duration = 5,
 
     return {
       success: true,
-      videoUrl: Array.isArray(output) ? output[0] : output
+      videoUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -660,14 +596,14 @@ async function generateVideoWithRunway(prompt, imageUrl = null) {
     };
 
     if (imageUrl) {
-      input.prompt_image = imageUrl;
+      input.prompt_image = await prepareReplicateMediaInput(imageUrl, 'telegram-runway-gen4-image');
     }
 
     const output = await replicate.run("runwayml/gen4-aleph", { input });
 
     return {
       success: true,
-      videoUrl: Array.isArray(output) ? output[0] : output
+      videoUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -686,19 +622,19 @@ async function generateVideoWithRunwayTurbo(prompt, imageUrl = null, duration = 
 
     const input = {
       prompt: prompt,
-      seconds: duration,
+      duration: duration,
       aspect_ratio: aspectRatio
     };
 
     if (imageUrl) {
-      input.image = imageUrl;
+      input.image = await prepareReplicateMediaInput(imageUrl, 'telegram-runway-turbo-image');
     }
 
     const output = await replicate.run("runwayml/gen4-turbo", { input });
 
     return {
       success: true,
-      videoUrl: Array.isArray(output) ? output[0] : output
+      videoUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -722,14 +658,14 @@ async function generateVideoWithSora2(prompt, seconds = 4, aspectRatio = 'portra
     };
 
     if (inputReference) {
-      input.input_reference = inputReference;
+      input.input_reference = await prepareReplicateMediaInput(inputReference, 'telegram-sora2-reference-image');
     }
 
     const output = await replicate.run('openai/sora-2', { input });
 
     return {
       success: true,
-      videoUrl: Array.isArray(output) ? output[0] : output
+      videoUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -869,6 +805,129 @@ async function generateVideoWithSeedance2(prompt, options = {}) {
   }
 }
 
+async function generateVideoWithPVideo(prompt, options = {}) {
+  try {
+    if (!prompt) {
+      throw new Error('Prompt is required for P-Video');
+    }
+
+    const {
+      imageUrl = null,
+      lastFrameUrl = null,
+      audioUrl = null,
+      duration = 5,
+      resolution = '720p',
+      aspectRatio = '16:9',
+      fps = 24,
+      draft = false,
+      saveAudio = true,
+      promptUpsampling = true,
+      disableSafetyFilter = false,
+      seed = undefined
+    } = options;
+
+    const safeResolution = ['720p', '1080p'].includes(resolution) ? resolution : '720p';
+    const safeAspectRatio = ['16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '1:1'].includes(aspectRatio)
+      ? aspectRatio
+      : '16:9';
+    const safeDuration = Math.max(1, Math.min(20, Number(duration) || 5));
+    const safeFps = [24, 48].includes(Number(fps)) ? Number(fps) : 24;
+
+    const input = {
+      prompt,
+      duration: safeDuration,
+      resolution: safeResolution,
+      aspect_ratio: safeAspectRatio,
+      fps: safeFps,
+      draft: !!draft,
+      save_audio: !!saveAudio,
+      prompt_upsampling: !!promptUpsampling,
+      disable_safety_filter: !!disableSafetyFilter
+    };
+
+    if (Number.isInteger(seed)) {
+      input.seed = seed;
+    }
+
+    if (imageUrl) {
+      input.image = await prepareReplicateMediaInput(imageUrl, 'telegram-p-video-image');
+    }
+    if (lastFrameUrl) {
+      input.last_frame_image = await prepareReplicateMediaInput(lastFrameUrl, 'telegram-p-video-last-frame');
+    }
+    if (audioUrl) {
+      input.audio = await prepareReplicateMediaInput(audioUrl, 'telegram-p-video-audio');
+    }
+
+    console.log('⚡ P-Video Replicate input:', {
+      prompt: prompt.substring(0, 100),
+      duration: input.duration,
+      resolution: input.resolution,
+      aspect_ratio: input.aspect_ratio,
+      fps: input.fps,
+      draft: input.draft,
+      has_image: !!input.image,
+      has_last_frame: !!input.last_frame_image,
+      has_audio: !!input.audio
+    });
+
+    const output = await replicate.run('prunaai/p-video', { input });
+
+    return {
+      success: true,
+      videoUrl: normalizeReplicateFileOutput(output)
+    };
+  } catch (error) {
+    console.error('P-Video Replicate API Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+async function generateVideoWithFabric10(options = {}) {
+  try {
+    const {
+      imageUrl = null,
+      audioUrl = null,
+      resolution = '720p'
+    } = options;
+
+    if (!imageUrl) {
+      throw new Error('Image is required for Fabric 1.0');
+    }
+    if (!audioUrl) {
+      throw new Error('Audio is required for Fabric 1.0');
+    }
+
+    const input = {
+      image: await prepareReplicateMediaInput(imageUrl, 'telegram-fabric-image'),
+      audio: await prepareReplicateMediaInput(audioUrl, 'telegram-fabric-audio'),
+      resolution: ['480p', '720p'].includes(resolution) ? resolution : '720p'
+    };
+
+    console.log('🗣️ Fabric 1.0 Replicate input:', {
+      resolution: input.resolution,
+      has_image: !!input.image,
+      has_audio: !!input.audio
+    });
+
+    const output = await replicate.run('veed/fabric-1.0', { input });
+
+    return {
+      success: true,
+      videoUrl: normalizeReplicateFileOutput(output)
+    };
+  } catch (error) {
+    console.error('Fabric 1.0 Replicate API Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 // ==================== AUDIO GENERATION ====================
 
 
@@ -921,8 +980,8 @@ async function generateVideoWithKlingMotion(imageUrl, videoUrl, mode = 'pro', ch
 
     const input = {
       mode: mode,                           
-      image: imageUrl,
-      video: videoUrl,
+      image: await prepareReplicateMediaInput(imageUrl, 'telegram-kling-motion-image'),
+      video: await prepareReplicateMediaInput(videoUrl, 'telegram-kling-motion-video'),
       character_orientation: characterOrientation,  
       keep_original_sound: keepOriginalSound
     };
@@ -941,7 +1000,7 @@ async function generateVideoWithKlingMotion(imageUrl, videoUrl, mode = 'pro', ch
 
     return {
       success: true,
-      videoUrl: Array.isArray(output) ? output[0] : output
+      videoUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -975,18 +1034,18 @@ async function generateVideoWithVeo(prompt, referenceImages = [], lastFrame = nu
     };
 
     if (startImage) {
-      input.image = startImage;
+      input.image = await prepareReplicateMediaInput(startImage, 'telegram-veo-start-image');
       console.log(`✅ Adding start image (first frame) for image-to-video`);
     }
 
     if (referenceImages && referenceImages.length > 0 && aspectRatio === '16:9') {
-      input.reference_images = referenceImages.slice(0, 3);  // Max 3 reference images
+      input.reference_images = await prepareReplicateMediaInputs(referenceImages, 3, 'telegram-veo-reference-images');
       console.log(`✅ Adding ${input.reference_images.length} reference image(s) for subject-consistent generation`);
     }
 
     if (!input.reference_images || input.reference_images.length === 0) {
       if (lastFrame) {
-        input.last_frame = lastFrame;
+        input.last_frame = await prepareReplicateMediaInput(lastFrame, 'telegram-veo-last-frame');
         console.log(`✅ Adding last_frame for interpolation`);
       }
     }
@@ -1013,7 +1072,7 @@ async function generateVideoWithVeo(prompt, referenceImages = [], lastFrame = nu
 
     return {
       success: true,
-      videoUrl: Array.isArray(output) ? output[0] : output
+      videoUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -1051,7 +1110,7 @@ async function generateVideoWithKlingO1Edit(options = {}) {
     };
 
     if (referenceVideo) {
-      input.reference_video = referenceVideo;
+      input.reference_video = await prepareReplicateMediaInput(referenceVideo, 'telegram-kling-o1-reference-video');
       input.video_reference_type = videoReferenceType;  
       input.keep_original_sound = keepOriginalSound;
       
@@ -1069,15 +1128,15 @@ async function generateVideoWithKlingO1Edit(options = {}) {
     }
 
     if (startImage) {
-      input.start_image = startImage;
+      input.start_image = await prepareReplicateMediaInput(startImage, 'telegram-kling-o1-start-image');
       if (endImage) {
-        input.end_image = endImage;
+        input.end_image = await prepareReplicateMediaInput(endImage, 'telegram-kling-o1-end-image');
       }
     }
 
     if (referenceImages && referenceImages.length > 0) {
       const maxRefs = referenceVideo ? 4 : 7;
-      input.reference_images = referenceImages.slice(0, maxRefs);
+      input.reference_images = await prepareReplicateMediaInputs(referenceImages, maxRefs, 'telegram-kling-o1-reference-images');
     }
 
     console.log(`✂️ Kling O1 Edit:`, {
@@ -1099,7 +1158,7 @@ async function generateVideoWithKlingO1Edit(options = {}) {
 
     return {
       success: true,
-      videoUrl: Array.isArray(output) ? output[0] : output
+      videoUrl: normalizeReplicateFileOutput(output)
     };
 
   } catch (error) {
@@ -1128,6 +1187,8 @@ module.exports = {
   generateVideoWithRunway,
   generateVideoWithSora2,
   generateVideoWithSeedance2,
+  generateVideoWithPVideo,
+  generateVideoWithFabric10,
   generateVideoWithVeo,
   generateVideoWithKlingO1Edit
 };

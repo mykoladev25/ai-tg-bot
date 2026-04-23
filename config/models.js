@@ -63,6 +63,85 @@ module.exports = {
         aspectRatios: ['16:9', '9:16']
       },
 
+      /**
+       * PrunaAI P-Video (Replicate)
+       * Billing config (checked 2026-04-23):
+       * - base 720p: $0.02/sec
+       * - draft 720p: $0.005/sec
+       * - base 1080p: $0.04/sec
+       * - draft 1080p: $0.01/sec
+       */
+      {
+        name: '⚡ PrunaAI P-Video',
+        key: 'p_video',
+        cost: 17, // default: 5s 720p base
+        apiCost: 0.10,
+        costPerSecond: 4, // 720p base rounded per-second fallback
+        apiCostPerSecond: 0.02,
+        costPerSecondByVariantAndResolution: {
+          base: {
+            '720p': 4,
+            '1080p': 7
+          },
+          draft: {
+            '720p': 1,
+            '1080p': 2
+          }
+        },
+        apiCostPerSecondByVariantAndResolution: {
+          base: {
+            '720p': 0.02,
+            '1080p': 0.04
+          },
+          draft: {
+            '720p': 0.005,
+            '1080p': 0.01
+          }
+        },
+        minSeconds: 5,
+        maxSeconds: 20,
+        durations: [5, 10],
+        resolutions: ['720p', '1080p'],
+        aspectRatios: ['16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '1:1'],
+        fpsOptions: [24, 48],
+        supportsDraft: true,
+        supportsAudioInput: true,
+        supportsLastFrame: true,
+        available: true,
+        requiresImage: false
+      },
+
+      /**
+       * VEED Fabric 1.0 (Replicate)
+       * Billing config (checked 2026-04-23):
+       * - 480p: $0.08/sec
+       * - 720p: $0.15/sec
+       *
+       * Output duration follows the input audio length. If Telegram does not
+       * expose audio duration, the flow charges maxSeconds conservatively.
+       */
+      {
+        name: '🗣️ VEED Fabric 1.0',
+        key: 'fabric_1_0',
+        cost: 124, // default: 5s 720p
+        apiCost: 0.75,
+        costPerSecondByResolution: {
+          '480p': 14,
+          '720p': 25
+        },
+        apiCostPerSecondByResolution: {
+          '480p': 0.08,
+          '720p': 0.15
+        },
+        minSeconds: 1,
+        maxSeconds: 60,
+        defaultSeconds: 5,
+        resolutions: ['480p', '720p'],
+        available: true,
+        requiresImage: true,
+        requiresAudio: true
+      },
+
       
       {
         name: '🎭 Kling v2.5 Turbo',

@@ -687,7 +687,7 @@ function getVideoModelsForUser(userId) {
     ? models.video.models
     : models.video.models.filter(m => !KIE_ONLY_VIDEO_MODELS.includes(m.key));
   if (providerChoice === 'kie-ai') {
-    list = list.filter(m => m.key !== 'sora_2');
+    list = list.filter(m => !['sora_2', 'p_video', 'fabric_1_0'].includes(m.key));
   }
   return list.map(m => {
     if (m.key === 'veo') {
@@ -755,6 +755,14 @@ function getVideoModelsForUser(userId) {
         )
       );
       return { ...m, cost: minCost };
+    }
+    if (m.key === 'p_video') {
+      const { minCost, maxCost } = getPVideoCostRange();
+      return { ...m, cost: minCost, maxCost };
+    }
+    if (m.key === 'fabric_1_0') {
+      const { minCost, maxCost } = getFabricCostRange();
+      return { ...m, cost: minCost, maxCost };
     }
     if (m.key === 'seedance_2' || m.key === 'seedance_2_fast') {
       const { minCost, maxCost } = getSeedanceCostRange(userId, m.key);
@@ -944,6 +952,79 @@ function getEffectiveSora2Cost(userId, model, duration = 15, options = {}) {
   const k = kiePricingSync.getKieTokenCostSync('sora_2', { soraType });
   if (k && typeof k === 'object' && typeof k.cost === 'number') return k.cost;
   return Math.ceil(duration * (model?.costPerSecond || 0));
+}
+
+function getPVideoApiCostUSD(duration = 5, options = {}) {
+  const model = models.video.models.find(m => m.key === 'p_video');
+  const resolution = options.resolution || '720p';
+  const variant = options.draft ? 'draft' : 'base';
+  const rate =
+    model?.apiCostPerSecondByVariantAndResolution?.[variant]?.[resolution]
+    ?? model?.apiCostPerSecond
+    ?? 0;
+  const requestedDuration = (options.hasAudioInput || options.audioDuration)
+    ? (options.audioDuration || model?.maxSeconds || 20)
+    : (duration || model?.minSeconds || 5);
+  const maxSeconds = model?.maxSeconds || 20;
+  const billableDuration = Math.max(1, Math.min(maxSeconds, Number(requestedDuration) || 5));
+  return +(rate * billableDuration).toFixed(4);
+}
+
+function getPVideoCost(duration = 5, options = {}) {
+  return usdToTokens(getPVideoApiCostUSD(duration, options));
+}
+
+function getPVideoCostRange(options = {}) {
+  const model = models.video.models.find(m => m.key === 'p_video');
+  const durations = model?.durations?.length ? model.durations : [5, 10];
+  const resolutions = model?.resolutions?.length ? model.resolutions : ['720p'];
+  const values = [];
+
+  for (const resolution of resolutions) {
+    for (const duration of durations) {
+      values.push(getPVideoCost(duration, { ...options, resolution, draft: false }));
+      values.push(getPVideoCost(duration, { ...options, resolution, draft: true }));
+    }
+  }
+
+  return {
+    minCost: values.length ? Math.min(...values) : 0,
+    maxCost: values.length ? Math.max(...values) : 0
+  };
+}
+
+function getFabricApiCostUSD(duration = 5, resolution = '720p') {
+  const model = models.video.models.find(m => m.key === 'fabric_1_0');
+  const rate =
+    model?.apiCostPerSecondByResolution?.[resolution]
+    ?? model?.apiCostPerSecondByResolution?.['720p']
+    ?? 0;
+  const maxSeconds = model?.maxSeconds || 60;
+  const defaultSeconds = model?.defaultSeconds || 5;
+  const billableDuration = Math.max(1, Math.min(maxSeconds, Number(duration) || defaultSeconds));
+  return +(rate * billableDuration).toFixed(4);
+}
+
+function getFabricCost(duration = 5, resolution = '720p') {
+  return usdToTokens(getFabricApiCostUSD(duration, resolution));
+}
+
+function getFabricCostRange() {
+  const model = models.video.models.find(m => m.key === 'fabric_1_0');
+  const resolutions = model?.resolutions?.length ? model.resolutions : ['480p', '720p'];
+  const minSeconds = model?.minSeconds || 1;
+  const maxSeconds = model?.maxSeconds || 60;
+  const values = [];
+
+  for (const resolution of resolutions) {
+    values.push(getFabricCost(minSeconds, resolution));
+    values.push(getFabricCost(maxSeconds, resolution));
+  }
+
+  return {
+    minCost: values.length ? Math.min(...values) : 0,
+    maxCost: values.length ? Math.max(...values) : 0
+  };
 }
 
 function shouldUseKieSeedanceProvider(userId, modelKey) {
@@ -2137,6 +2218,8 @@ const MODELS_WITH_STATE = [
   'kling_motion',           
   'veo',                    // aspect ratio + prompt + last_frame + start_image
   'sora_2',                 // duration + aspect ratio + optional reference + prompt
+  'p_video',                // resolution + draft/base + duration + input mode + prompt
+  'fabric_1_0',             // resolution + image + audio
   'seedance_2',             // resolution + duration + aspect ratio + audio + prompt
   'seedance_2_fast',        // resolution + duration + aspect ratio + audio + prompt
   'nano_banana_pro',        
@@ -2371,6 +2454,14 @@ bot.on('callback_query', async (ctx, next) => {
     return next();
   }
 
+  if (callbackData.startsWith('pvideo_')) {
+    return next();
+  }
+
+  if (callbackData.startsWith('fabric_')) {
+    return next();
+  }
+
   if (callbackData.startsWith('a2e_')) {
     return next();
   }
@@ -2407,6 +2498,14 @@ bot.on('callback_query', async (ctx, next) => {
   }
 
   if (state?.action === 'seedance_generation') {
+    return next();
+  }
+
+  if (state?.action === 'p_video_generation') {
+    return next();
+  }
+
+  if (state?.action === 'fabric_generation') {
     return next();
   }
 
@@ -5803,7 +5902,7 @@ bot.action(/^img_gen_refs_(.+)$/, async (ctx) => {
 
 
 // Video Models
-bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|runway_turbo|veo|sora_2|seedance_2|seedance_2_fast|luma|a2e_motion)$/, async (ctx) => {
+bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|runway_turbo|veo|sora_2|p_video|fabric_1_0|seedance_2|seedance_2_fast|luma|a2e_motion)$/, async (ctx) => {
   const modelKey = ctx.match[1];
   const model = models.video.models.find(m => m.key === modelKey);
 
@@ -5823,9 +5922,9 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
     return;
   }
 
-  if (modelKey === 'sora_2' && userProviderChoice.get(ctx.from.id) === 'kie-ai') {
+  if (['sora_2', 'p_video', 'fabric_1_0'].includes(modelKey) && userProviderChoice.get(ctx.from.id) === 'kie-ai') {
     await ctx.reply(
-      '⚠️ <b>Sora 2</b> тимчасово працює тільки через <b>Replicate</b>.\n\n' +
+      `⚠️ <b>${model.name}</b> працює тільки через <b>Replicate</b>.\n\n` +
       'Змініть провайдера: 👤 Профіль → Вибір провайдера → 🟣 Replicate',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
@@ -5883,6 +5982,12 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
   }
   if (modelKey === 'seedance_2' || modelKey === 'seedance_2_fast') {
     requiredCost = getSeedanceCostRange(ctx.from.id, modelKey).minCost;
+  }
+  if (modelKey === 'p_video') {
+    requiredCost = getPVideoCostRange().minCost;
+  }
+  if (modelKey === 'fabric_1_0') {
+    requiredCost = getFabricCostRange().minCost;
   }
   if (modelKey === 'kling_o1_edit') {
     const durations = model.durations || [3, 5, 7, 10];
@@ -6053,6 +6158,73 @@ bot.action(/^(kling|kling_v2_6|kling_3|kling_motion|kling_o1_edit|runway_gen4|ru
             Markup.button.callback('⚡ STD', 'kling_3_mode_std'),
             Markup.button.callback('💎 PRO', 'kling_3_mode_pro')
           ],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  if (modelKey === 'p_video') {
+    const resolutions = model.resolutions || ['720p', '1080p'];
+    const durations = model.durations || [5, 10];
+    const minDuration = Math.min(...durations);
+    const maxDuration = Math.max(...durations);
+    const { minCost, maxCost } = getPVideoCostRange();
+    const resolutionRows = resolutions.map((resolution) => {
+      const draftMin = getPVideoCost(minDuration, { resolution, draft: true });
+      const baseMax = getPVideoCost(maxDuration, { resolution, draft: false });
+      return [Markup.button.callback(`${resolution} (${draftMin}—${baseMax}⚡)`, `pvideo_resolution_${resolution}`)];
+    });
+
+    userState.set(ctx.from.id, {
+      action: 'p_video_generation',
+      step: 'select_resolution',
+      modelKey: 'p_video'
+    });
+
+    await ctx.reply(
+      `<b>${model.name}</b>\n\n` +
+      `⚡ Fast text/image/audio-to-video через <b>Replicate</b>.\n` +
+      `🧪 Draft mode дешевший для швидких ітерацій.\n\n` +
+      `⏱️ Тривалість у боті: ${minDuration}-${maxDuration} сек\n` +
+      `💰 Вартість: ${minCost}—${maxCost}⚡\n\n` +
+      `📐 <b>Крок 1: Оберіть роздільну здатність</b>`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          ...resolutionRows,
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  if (modelKey === 'fabric_1_0') {
+    const resolutions = model.resolutions || ['480p', '720p'];
+    const defaultSeconds = model.defaultSeconds || 5;
+    const resolutionRows = resolutions.map((resolution) => ([
+      Markup.button.callback(`${resolution} (~${getFabricCost(defaultSeconds, resolution)}⚡ за ${defaultSeconds}с)`, `fabric_resolution_${resolution}`)
+    ]));
+    const { minCost, maxCost } = getFabricCostRange();
+
+    userState.set(ctx.from.id, {
+      action: 'fabric_generation',
+      step: 'select_resolution',
+      modelKey: 'fabric_1_0'
+    });
+
+    await ctx.reply(
+      `<b>${model.name}</b>\n\n` +
+      `🗣️ Talking-video з <b>зображення + аудіо</b> через Replicate.\n` +
+      `⏱️ Ціна рахується за тривалістю аудіо. Якщо Telegram не віддасть duration для document, бот зарезервує максимум ${model.maxSeconds || 60} сек.\n\n` +
+      `💰 Діапазон: ${minCost}—${maxCost}⚡\n\n` +
+      `📐 <b>Крок 1: Оберіть роздільну здатність</b>`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          ...resolutionRows,
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
       }
@@ -7262,6 +7434,300 @@ bot.action('sora_skip_reference', async (ctx) => {
   await ctx.reply(
     `✍️ <b>Крок 4: Введіть промпт</b>\n\n` +
     `Опишіть детально що хочете бачити у відео.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+// ==================== PRUNAAI P-VIDEO CALLBACKS ====================
+
+function getPVideoVariantLabel(draft = false) {
+  return draft ? 'Draft' : 'Base';
+}
+
+function getPVideoSelectedCost(state = {}, duration = null) {
+  return getPVideoCost(duration || state.duration || 5, {
+    resolution: state.resolution || '720p',
+    draft: state.draft === true,
+    audioDuration: state.audioDuration,
+    hasAudioInput: !!state.audioUrl
+  });
+}
+
+function buildPVideoInputSummary(state = {}) {
+  const lines = [];
+  if (state.imageUrl) lines.push('🖼️ Перший кадр: так');
+  if (state.lastFrameUrl) lines.push('🏁 Останній кадр: так');
+  if (state.audioUrl) {
+    const durationLabel = state.audioDuration ? ` (${state.audioDuration} сек)` : '';
+    lines.push(`🎵 Input audio: так${durationLabel}`);
+  }
+  return lines.length ? `\n${lines.join('\n')}` : '';
+}
+
+async function promptPVideoPromptStep(ctx, state = {}) {
+  const cost = getPVideoSelectedCost(state);
+
+  await ctx.reply(
+    `<b>PrunaAI P-Video</b>\n\n` +
+    `🖥️ ${state.resolution || '720p'} | ⚙️ ${getPVideoVariantLabel(state.draft)} | ⏱️ ${state.duration || 5} сек | 📐 ${state.aspectRatio || '16:9'}` +
+    `${buildPVideoInputSummary(state)}\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `✍️ <b>Введіть промпт</b>\n\n` +
+    `Опишіть рух, сцену, камеру та стиль. Для діалогу використовуйте лапки.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+}
+
+function getTelegramAudioDurationSeconds(ctx) {
+  const duration = Number(
+    ctx.message?.audio?.duration
+    ?? ctx.message?.voice?.duration
+    ?? 0
+  );
+
+  return Number.isFinite(duration) && duration > 0 ? Math.ceil(duration) : 0;
+}
+
+function getFabricBillableDuration(ctx, model) {
+  const maxSeconds = model?.maxSeconds || 60;
+  const duration = getTelegramAudioDurationSeconds(ctx);
+  return duration > 0 ? Math.max(1, Math.min(maxSeconds, duration)) : maxSeconds;
+}
+
+bot.action(/^pvideo_resolution_(720p|1080p)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const resolution = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'p_video_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    resolution,
+    aspectRatio: '16:9',
+    step: 'select_quality'
+  });
+
+  await ctx.reply(
+    `<b>PrunaAI P-Video</b>\n\n` +
+    `🖥️ Роздільна здатність: <b>${resolution}</b>\n\n` +
+    `⚙️ <b>Крок 2: Оберіть режим</b>\n\n` +
+    `🧪 <b>Draft</b> — дешевше для швидких тестів\n` +
+    `⚡ <b>Base</b> — фінальна якість`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`🧪 Draft (від ${getPVideoCost(5, { resolution, draft: true })}⚡)`, 'pvideo_quality_draft'),
+          Markup.button.callback(`⚡ Base (від ${getPVideoCost(5, { resolution, draft: false })}⚡)`, 'pvideo_quality_base')
+        ],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+bot.action(/^pvideo_quality_(base|draft)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const draft = ctx.match[1] === 'draft';
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'p_video_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const model = models.video.models.find(m => m.key === 'p_video');
+  const durations = model?.durations || [5, 10];
+  const durationRows = durations.map((duration) => ([
+    Markup.button.callback(
+      `${duration} сек (${getPVideoCost(duration, { resolution: state.resolution || '720p', draft })}⚡)`,
+      `pvideo_duration_${duration}`
+    )
+  ]));
+
+  userState.set(userId, {
+    ...state,
+    draft,
+    step: 'select_duration'
+  });
+
+  await ctx.reply(
+    `<b>PrunaAI P-Video</b>\n\n` +
+    `🖥️ ${state.resolution || '720p'} | ⚙️ ${getPVideoVariantLabel(draft)}\n\n` +
+    `⏱️ <b>Крок 3: Оберіть тривалість</b>`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        ...durationRows,
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+bot.action(/^pvideo_duration_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const duration = parseInt(ctx.match[1], 10);
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'p_video_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const nextState = {
+    ...state,
+    duration,
+    step: 'select_input_mode'
+  };
+  const cost = getPVideoSelectedCost(nextState);
+
+  userState.set(userId, nextState);
+
+  await ctx.reply(
+    `<b>PrunaAI P-Video</b>\n\n` +
+    `🖥️ ${nextState.resolution || '720p'} | ⚙️ ${getPVideoVariantLabel(nextState.draft)} | ⏱️ ${duration} сек\n` +
+    `💰 Вартість: <b>${cost}⚡</b>\n\n` +
+    `🧭 <b>Крок 4: Оберіть тип входу</b>`,
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback(`✍️ Тільки текст (${cost}⚡)`, 'pvideo_mode_text')],
+        [Markup.button.callback(`🖼️ З першим кадром (${cost}⚡)`, 'pvideo_mode_image')],
+        [Markup.button.callback(`🎵 З input audio (${cost}⚡)`, 'pvideo_mode_audio')],
+        [Markup.button.callback('← Назад', 'video_menu')]
+      ])
+    }
+  );
+});
+
+bot.action(/^pvideo_mode_(text|image|audio)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const mode = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'p_video_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  if (mode === 'text') {
+    const nextState = {
+      ...state,
+      inputMode: 'text',
+      imageUrl: null,
+      lastFrameUrl: null,
+      audioUrl: null,
+      step: 'waiting_prompt'
+    };
+    userState.set(userId, nextState);
+    await promptPVideoPromptStep(ctx, nextState);
+    return;
+  }
+
+  if (mode === 'image') {
+    userState.set(userId, {
+      ...state,
+      inputMode: 'image',
+      audioUrl: null,
+      step: 'waiting_image'
+    });
+    await ctx.reply(
+      `🖼️ <b>Надішліть перший кадр</b>\n\n` +
+      `Фото стане стартовим кадром для P-Video. Після цього можна буде додати optional last frame.`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    inputMode: 'audio',
+    imageUrl: null,
+    lastFrameUrl: null,
+    step: 'waiting_audio'
+  });
+  await ctx.reply(
+    `🎵 <b>Надішліть input audio</b>\n\n` +
+    `Підтримувані формати: MP3, WAV, OGG, AAC, M4A/MP4.\n` +
+    `Для audio mode P-Video ігнорує вибрану duration, тому ціна буде перерахована за довжиною аудіо.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+bot.action('pvideo_add_last_frame', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'p_video_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    step: 'waiting_last_frame'
+  });
+
+  await ctx.reply(
+    `🏁 <b>Надішліть останній кадр</b>\n\n` +
+    `Він працює тільки разом із першим кадром.`,
+    { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+  );
+});
+
+bot.action('pvideo_skip_last_frame', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'p_video_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  const nextState = {
+    ...state,
+    lastFrameUrl: null,
+    step: 'waiting_prompt'
+  };
+  userState.set(userId, nextState);
+  await promptPVideoPromptStep(ctx, nextState);
+});
+
+// ==================== VEED FABRIC 1.0 CALLBACKS ====================
+
+bot.action(/^fabric_resolution_(480p|720p)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const resolution = ctx.match[1];
+  const state = userState.get(userId);
+
+  if (!state || state.action !== 'fabric_generation') {
+    await ctx.reply('❌ Помилка. Почніть заново.');
+    return;
+  }
+
+  userState.set(userId, {
+    ...state,
+    resolution,
+    step: 'waiting_image'
+  });
+
+  await ctx.reply(
+    `<b>VEED Fabric 1.0</b>\n\n` +
+    `🖥️ Роздільна здатність: <b>${resolution}</b>\n\n` +
+    `🖼️ <b>Крок 2: Надішліть зображення персонажа</b>\n\n` +
+    `Після фото бот попросить аудіо для lip-sync/talking video.`,
     { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
   );
 });
@@ -11639,6 +12105,65 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  if (state?.action === 'p_video_generation' && state?.step === 'waiting_prompt') {
+    if (!text || text.length < 5) {
+      await ctx.reply(
+        '⚠️ Промпт занадто короткий!\n\n' +
+        'Напишіть детальніше що хочете бачити у відео (мінімум 5 символів).',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const nextState = {
+      ...state,
+      prompt: text,
+      pVideoCost: getPVideoSelectedCost(state),
+      step: 'ready_to_generate'
+    };
+    userState.set(userId, nextState);
+
+    await ctx.reply('🚀 Промпт збережено! Починаємо генерацію P-Video...');
+    runBackgroundTask(() => generatePVideo(ctx, nextState), 'p_video_generate_text');
+    return;
+  }
+
+  if (
+    state?.action === 'p_video_generation'
+    && ['waiting_image', 'waiting_last_frame'].includes(state?.step)
+  ) {
+    await ctx.reply(
+      '🖼️ Для цього кроку потрібно надіслати фото, не текст.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (state?.action === 'p_video_generation' && state?.step === 'waiting_audio') {
+    await ctx.reply(
+      '🎵 Для цього кроку потрібно надіслати аудіо-файл.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (state?.action === 'fabric_generation') {
+    if (state.step === 'waiting_image') {
+      await ctx.reply(
+        '🖼️ Для Fabric потрібно спочатку надіслати зображення.',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+      return;
+    }
+    if (state.step === 'waiting_audio') {
+      await ctx.reply(
+        '🎵 Тепер надішліть аудіо-файл для talking-video.',
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+      return;
+    }
+  }
+
   if (
     state?.action === 'seedance_generation'
     && (state?.step === 'waiting_reference_video' || state?.step === 'ask_reference_video')
@@ -12092,6 +12617,26 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  if (currentModel === 'p_video' && !state?.action) {
+    await ctx.reply(
+      '⚡ <b>PrunaAI P-Video</b>\n\n' +
+      '⚠️ Спочатку оберіть resolution, режим, тривалість і тип входу.\n\n' +
+      'Натисніть P-Video у меню відео.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (currentModel === 'fabric_1_0' && !state?.action) {
+    await ctx.reply(
+      '🗣️ <b>VEED Fabric 1.0</b>\n\n' +
+      '⚠️ Спочатку оберіть resolution, потім надішліть фото та аудіо.\n\n' +
+      'Натисніть Fabric 1.0 у меню відео.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
   if ((currentModel === 'seedance_2' || currentModel === 'seedance_2_fast') && !state?.action) {
     await ctx.reply(
       '🎞️ <b>ByteDance Seedance</b>\n\n' +
@@ -12464,6 +13009,83 @@ bot.on(['audio', 'document'], async (ctx, next) => {
   const userId = ctx.from.id;
   const state = userState.get(userId);
 
+  if (state?.action === 'p_video_generation' && state?.step === 'waiting_audio') {
+    const audioUrl = await getAudioUrl(ctx);
+    if (!audioUrl) {
+      await ctx.reply(
+        '❌ Надішліть аудіо-файл у форматі MP3, WAV, OGG, AAC або M4A/MP4.',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const nextState = {
+      ...state,
+      audioUrl,
+      audioDuration: getTelegramAudioDurationSeconds(ctx),
+      step: 'waiting_prompt'
+    };
+    nextState.pVideoCost = getPVideoSelectedCost(nextState);
+
+    userState.set(userId, nextState);
+    await promptPVideoPromptStep(ctx, nextState);
+    return;
+  }
+
+  if (state?.action === 'fabric_generation' && state?.step === 'waiting_audio') {
+    const audioUrl = await getAudioUrl(ctx);
+    if (!audioUrl) {
+      await ctx.reply(
+        '❌ Надішліть аудіо-файл у форматі MP3, WAV, OGG, AAC або M4A/MP4.',
+        keyboard.createBackButton('video_menu')
+      );
+      return;
+    }
+
+    const model = models.video.models.find(m => m.key === 'fabric_1_0');
+    const audioDuration = getFabricBillableDuration(ctx, model);
+    const resolution = state.resolution || '720p';
+    const fabricCost = getFabricCost(audioDuration, resolution);
+    const nextState = {
+      ...state,
+      audioUrl,
+      audioDuration,
+      fabricCost,
+      step: 'ready_to_generate'
+    };
+
+    userState.set(userId, nextState);
+
+    await ctx.reply(
+      `🚀 <b>Аудіо отримано. Починаємо Fabric 1.0...</b>\n\n` +
+      `🖥️ ${resolution}\n` +
+      `⏱️ Billable duration: <b>${audioDuration} сек</b>\n` +
+      `💰 Вартість: <b>${fabricCost}⚡</b>`,
+      { parse_mode: 'HTML' }
+    );
+    runBackgroundTask(() => generateFabricVideo(ctx, nextState), 'fabric_generate_audio');
+    return;
+  }
+
+  if (
+    state?.action === 'p_video_generation'
+    && ['waiting_image', 'waiting_last_frame'].includes(state?.step)
+  ) {
+    await ctx.reply(
+      '❌ Для цього кроку надішліть саме фото Telegram, а не audio/document.',
+      keyboard.createBackButton('video_menu')
+    );
+    return;
+  }
+
+  if (state?.action === 'fabric_generation' && state?.step === 'waiting_image') {
+    await ctx.reply(
+      '❌ Для Fabric спочатку надішліть фото персонажа, а не audio/document.',
+      keyboard.createBackButton('video_menu')
+    );
+    return;
+  }
+
   if (
     state?.action === 'seedance_generation'
     && (state?.step === 'waiting_reference_video' || state?.step === 'ask_reference_video')
@@ -12697,6 +13319,104 @@ bot.on('photo', async (ctx) => {
           [Markup.button.callback('← Назад', 'video_menu')]
         ])
       }
+    );
+    return;
+  }
+
+  if (state?.action === 'p_video_generation' && state?.step === 'waiting_image') {
+    if (!(await ensureMinimumPhotoDimensions(ctx, 300, 300))) {
+      return;
+    }
+
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Не вдалося завантажити перший кадр. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      imageUrl,
+      step: 'ask_last_frame'
+    });
+
+    await ctx.reply(
+      `✅ <b>Перший кадр збережено!</b>\n\n` +
+      `🏁 <b>Додати останній кадр?</b>\n\n` +
+      `P-Video підтримує optional last_frame_image тільки разом із першим кадром.`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🏁 Додати останній кадр', 'pvideo_add_last_frame')],
+          [Markup.button.callback('⏭️ Без останнього кадру', 'pvideo_skip_last_frame')],
+          [Markup.button.callback('← Назад', 'video_menu')]
+        ])
+      }
+    );
+    return;
+  }
+
+  if (state?.action === 'p_video_generation' && state?.step === 'waiting_last_frame') {
+    if (!(await ensureMinimumPhotoDimensions(ctx, 300, 300))) {
+      return;
+    }
+
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Не вдалося завантажити останній кадр. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    const nextState = {
+      ...state,
+      lastFrameUrl: imageUrl,
+      step: 'waiting_prompt'
+    };
+
+    userState.set(userId, nextState);
+    await promptPVideoPromptStep(ctx, nextState);
+    return;
+  }
+
+  if (state?.action === 'p_video_generation' && state?.step === 'waiting_prompt') {
+    await ctx.reply(
+      '✍️ P-Video зараз очікує текстовий промпт.\n\nНадішліть опис сцени текстом.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (state?.action === 'fabric_generation' && state?.step === 'waiting_image') {
+    if (!(await ensureMinimumPhotoDimensions(ctx, 300, 300))) {
+      return;
+    }
+
+    const imageUrl = await getImageUrl(ctx);
+    if (!imageUrl) {
+      await ctx.reply('❌ Не вдалося завантажити зображення. Спробуйте ще раз.', keyboard.createBackButton('video_menu'));
+      return;
+    }
+
+    userState.set(userId, {
+      ...state,
+      imageUrl,
+      step: 'waiting_audio'
+    });
+
+    await ctx.reply(
+      `✅ <b>Зображення збережено!</b>\n\n` +
+      `🎵 <b>Крок 3: Надішліть аудіо</b>\n\n` +
+      `Fabric згенерує talking-video з цього фото та аудіо.\n` +
+      `Підтримувані формати: MP3, WAV, OGG, AAC або M4A/MP4.`,
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (state?.action === 'fabric_generation' && state?.step === 'waiting_audio') {
+    await ctx.reply(
+      '🎵 VEED Fabric зараз очікує аудіо-файл, а не фото.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
     return;
   }
@@ -13270,6 +13990,24 @@ bot.on('photo', async (ctx) => {
       '🎞️ <b>ByteDance Seedance</b>\n\n' +
       '⚠️ Спочатку оберіть resolution, тривалість, пропорції та аудіо в меню відео.\n\n' +
       'Після цього бот попросить текстовий промпт.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (currentModel === 'p_video' && !state?.action) {
+    await ctx.reply(
+      '⚡ <b>PrunaAI P-Video</b>\n\n' +
+      '⚠️ Спочатку оберіть resolution, режим якості, тривалість та input mode у меню відео.',
+      { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+    );
+    return;
+  }
+
+  if (currentModel === 'fabric_1_0' && !state?.action) {
+    await ctx.reply(
+      '🗣️ <b>VEED Fabric 1.0</b>\n\n' +
+      '⚠️ Спочатку оберіть resolution у меню відео. Після цього бот попросить image + audio.',
       { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
     );
     return;
@@ -14955,6 +15693,328 @@ async function generateSeedanceVideo(ctx, state) {
         action: `${modelKey}_generation`,
         model: model.name,
         provider: providerKey
+      });
+      try {
+        await bot.telegram.editMessageText(
+          chatId,
+          statusMsg.message_id,
+          null,
+          `❌ Помилка генерації ${model.name}. Спробуйте ще раз.`
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, `❌ Помилка генерації ${model.name}. Спробуйте ще раз.`);
+      }
+    }
+  })();
+}
+
+// ==================== P-VIDEO / FABRIC GENERATION FUNCTIONS ====================
+
+async function generatePVideo(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
+  const model = models.video.models.find(m => m.key === 'p_video');
+
+  if (!model) {
+    await ctx.reply('❌ Модель PrunaAI P-Video не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  const duration = state.duration || 5;
+  const resolution = state.resolution || '720p';
+  const aspectRatio = state.aspectRatio || '16:9';
+  const draft = state.draft === true;
+  const hasAudioInput = !!state.audioUrl;
+  const pVideoCost = state.pVideoCost || getPVideoCost(duration, {
+    resolution,
+    draft,
+    audioDuration: state.audioDuration,
+    hasAudioInput
+  });
+  const apiCost = getPVideoApiCostUSD(duration, {
+    resolution,
+    draft,
+    audioDuration: state.audioDuration,
+    hasAudioInput
+  });
+
+  if (!(await userBalance.hasTokens(userId, pVideoCost))) {
+    await showInsufficientTokens(ctx, pVideoCost);
+    userState.delete(userId);
+    return;
+  }
+
+  const statusMsg = await ctx.reply(
+    `<b>${model.name} - Генерація</b>\n\n` +
+    `🌐 Провайдер: Replicate\n` +
+    `🖥️ Роздільна здатність: ${resolution}\n` +
+    `⚙️ Режим: ${draft ? 'Draft' : 'Base'}\n` +
+    `⏱️ Тривалість: ${duration} сек\n` +
+    `📐 Пропорції: ${aspectRatio}` +
+    `${buildPVideoInputSummary(state)}\n\n` +
+    `📝 Промпт: "${state.prompt?.substring(0, 100)}${state.prompt?.length > 100 ? '...' : ''}"\n\n` +
+    `⏱️ Це може зайняти 2-5 хвилин...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  const generationData = { ...state };
+
+  (async () => {
+    try {
+      const result = await replicate.generateVideoWithPVideo(generationData.prompt, {
+        imageUrl: generationData.imageUrl || null,
+        lastFrameUrl: generationData.lastFrameUrl || null,
+        audioUrl: generationData.audioUrl || null,
+        duration,
+        resolution,
+        aspectRatio,
+        draft
+      });
+
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId,
+          username,
+          action: 'p_video_generation',
+          model: model.name,
+          prompt: generationData.prompt,
+          duration,
+          resolution,
+          draft,
+          provider: 'Replicate'
+        });
+        await bot.telegram.editMessageText(
+          chatId,
+          statusMsg.message_id,
+          null,
+          `❌ Помилка генерації ${model.name}.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+        );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'p_video',
+          success: false,
+          options: { duration, resolution, draft, inputMode: generationData.inputMode, audioDuration: generationData.audioDuration, hasAudioInput },
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100),
+          provider: 'replicate'
+        });
+        return;
+      }
+
+      await userBalance.deductTokens(userId, pVideoCost, `${model.name} generation`, {
+        modelKey: 'p_video',
+        modelName: model.name,
+        apiCost,
+        prompt: generationData.prompt,
+        duration,
+        resolution,
+        aspectRatio,
+        draft,
+        inputMode: generationData.inputMode || 'text',
+        hasImage: !!generationData.imageUrl,
+        hasLastFrame: !!generationData.lastFrameUrl,
+        hasAudio: !!generationData.audioUrl,
+        audioDuration: generationData.audioDuration || null,
+        provider: 'replicate'
+      });
+
+      const isTrial = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey: 'p_video',
+        success: true,
+        options: { duration, resolution, draft, inputMode: generationData.inputMode, audioDuration: generationData.audioDuration, hasAudioInput },
+        isTrial,
+        isFree: isTrial,
+        provider: 'replicate'
+      });
+
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>${model.name} готово!</b>\n\n` +
+        `🌐 Провайдер: Replicate\n` +
+        `🖥️ ${resolution} | ${draft ? 'Draft' : 'Base'} | ⏱️ ${duration} сек | 📐 ${aspectRatio}\n` +
+        `📝 Промпт: ${generationData.prompt?.substring(0, 100)}...\n\n` +
+        `💾 <b>Як зберегти:</b>\n` +
+        `1️⃣ Натисніть на відео нижче\n` +
+        `2️⃣ Натисніть ⋮ → "Зберегти"\n\n` +
+        `💰 Витрачено: ${pVideoCost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `${model.name}\n\n🖥️ ${resolution} | ${draft ? 'Draft' : 'Base'} | ⏱️ ${duration}сек\n📝 ${generationData.prompt?.substring(0, 80)}...\n\n💰 Витрачено: ${pVideoCost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
+    } catch (error) {
+      console.error('P-Video generation failed:', error);
+      await adminNotifier.notifyAdmin(bot, error, {
+        userId,
+        username,
+        action: 'p_video_generation',
+        model: model.name,
+        provider: 'Replicate'
+      });
+      try {
+        await bot.telegram.editMessageText(
+          chatId,
+          statusMsg.message_id,
+          null,
+          `❌ Помилка генерації ${model.name}. Спробуйте ще раз.`
+        );
+      } catch (e) {
+        await bot.telegram.sendMessage(chatId, `❌ Помилка генерації ${model.name}. Спробуйте ще раз.`);
+      }
+    }
+  })();
+}
+
+async function generateFabricVideo(ctx, state) {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || 'unknown';
+  const chatId = ctx.chat.id;
+  const model = models.video.models.find(m => m.key === 'fabric_1_0');
+
+  if (!model) {
+    await ctx.reply('❌ Модель VEED Fabric 1.0 не знайдена');
+    userState.delete(userId);
+    return;
+  }
+
+  if (!state.imageUrl || !state.audioUrl) {
+    await ctx.reply('❌ Fabric 1.0 потребує image + audio. Почніть заново.', keyboard.createBackButton('video_menu'));
+    userState.delete(userId);
+    return;
+  }
+
+  const resolution = state.resolution || '720p';
+  const audioDuration = Math.max(model.minSeconds || 1, Math.min(model.maxSeconds || 60, Number(state.audioDuration) || model.defaultSeconds || 5));
+  const fabricCost = state.fabricCost || getFabricCost(audioDuration, resolution);
+  const apiCost = getFabricApiCostUSD(audioDuration, resolution);
+
+  if (!(await userBalance.hasTokens(userId, fabricCost))) {
+    await showInsufficientTokens(ctx, fabricCost);
+    userState.delete(userId);
+    return;
+  }
+
+  const statusMsg = await ctx.reply(
+    `<b>${model.name} - Генерація</b>\n\n` +
+    `🌐 Провайдер: Replicate\n` +
+    `🖥️ Роздільна здатність: ${resolution}\n` +
+    `⏱️ Billable duration: ${audioDuration} сек\n` +
+    `🖼️ Зображення: так\n` +
+    `🎵 Аудіо: так\n\n` +
+    `⏱️ Це може зайняти 2-5 хвилин...\n` +
+    `💡 <i>Ви можете продовжувати користуватись ботом поки генерація йде!</i>`,
+    { parse_mode: 'HTML' }
+  );
+
+  userState.delete(userId);
+  userCurrentModel.delete(userId);
+
+  const generationData = { ...state };
+
+  (async () => {
+    try {
+      const result = await replicate.generateVideoWithFabric10({
+        imageUrl: generationData.imageUrl,
+        audioUrl: generationData.audioUrl,
+        resolution
+      });
+
+      if (!result.success) {
+        await adminNotifier.notifyAdmin(bot, new Error(result.error), {
+          userId,
+          username,
+          action: 'fabric_generation',
+          model: model.name,
+          resolution,
+          audioDuration,
+          provider: 'Replicate'
+        });
+        await bot.telegram.editMessageText(
+          chatId,
+          statusMsg.message_id,
+          null,
+          `❌ Помилка генерації ${model.name}.\n\n${result.error}\n\nСпробуйте ще раз або оберіть іншу модель.`
+        );
+
+        const isTrial = await isTrialUser(userId);
+        await monitoringLoggers.logUsageEvent({
+          userId,
+          modelKey: 'fabric_1_0',
+          success: false,
+          options: { duration: audioDuration, audioDuration, resolution },
+          isTrial,
+          isFree: isTrial,
+          errorCode: result.error?.substring(0, 100),
+          provider: 'replicate'
+        });
+        return;
+      }
+
+      await userBalance.deductTokens(userId, fabricCost, `${model.name} generation`, {
+        modelKey: 'fabric_1_0',
+        modelName: model.name,
+        apiCost,
+        duration: audioDuration,
+        audioDuration,
+        resolution,
+        hasImage: true,
+        hasAudio: true,
+        provider: 'replicate'
+      });
+
+      const isTrial = await isTrialUser(userId);
+      await monitoringLoggers.logUsageEvent({
+        userId,
+        modelKey: 'fabric_1_0',
+        success: true,
+        options: { duration: audioDuration, audioDuration, resolution },
+        isTrial,
+        isFree: isTrial,
+        provider: 'replicate'
+      });
+
+      await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
+
+      await bot.telegram.sendMessage(
+        chatId,
+        `✅ <b>${model.name} готово!</b>\n\n` +
+        `🌐 Провайдер: Replicate\n` +
+        `🖥️ Роздільна здатність: ${resolution}\n` +
+        `⏱️ Billable duration: ${audioDuration} сек\n\n` +
+        `💾 <b>Як зберегти:</b>\n` +
+        `1️⃣ Натисніть на відео нижче\n` +
+        `2️⃣ Натисніть ⋮ → "Зберегти"\n\n` +
+        `💰 Витрачено: ${fabricCost}⚡`,
+        { parse_mode: 'HTML', ...keyboard.createBackButton('video_menu') }
+      );
+
+      await safeSendVideo(chatId, result.videoUrl, {
+        caption: `${model.name}\n\n🖥️ ${resolution} | ⏱️ ${audioDuration}сек\n💰 Витрачено: ${fabricCost}⚡`,
+        ...keyboard.createBackButton('video_menu')
+      });
+    } catch (error) {
+      console.error('Fabric generation failed:', error);
+      await adminNotifier.notifyAdmin(bot, error, {
+        userId,
+        username,
+        action: 'fabric_generation',
+        model: model.name,
+        provider: 'Replicate'
       });
       try {
         await bot.telegram.editMessageText(

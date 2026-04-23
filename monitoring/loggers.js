@@ -48,9 +48,34 @@ function getModelConfig(modelKey) {
  * Calculate estimated API cost based on model config
  */
 function calculateApiCost(modelConfig, options = {}) {
-  const { seconds, duration, generateAudio, mode, orientation, provider, resolution, inputType, inputVideoDuration } = options;
+  const { seconds, duration, generateAudio, mode, orientation, provider, resolution, inputType, inputVideoDuration, draft, audioDuration, hasAudioInput } = options;
 
   if (!modelConfig) return 0;
+
+  if (modelConfig.key === 'p_video') {
+    const resolvedResolution = resolution || '720p';
+    const variant = draft ? 'draft' : 'base';
+    const secs = hasAudioInput || audioDuration
+      ? (audioDuration || modelConfig.maxSeconds || 20)
+      : (seconds || duration || modelConfig.minSeconds || 5);
+    const billableSecs = Math.max(1, Math.min(modelConfig.maxSeconds || 20, Number(secs) || 5));
+    const rate =
+      modelConfig.apiCostPerSecondByVariantAndResolution?.[variant]?.[resolvedResolution]
+      ?? modelConfig.apiCostPerSecond
+      ?? 0;
+    return rate * billableSecs;
+  }
+
+  if (modelConfig.key === 'fabric_1_0') {
+    const resolvedResolution = resolution || '720p';
+    const secs = audioDuration || seconds || duration || modelConfig.defaultSeconds || 5;
+    const billableSecs = Math.max(1, Math.min(modelConfig.maxSeconds || 60, Number(secs) || modelConfig.defaultSeconds || 5));
+    const rate =
+      modelConfig.apiCostPerSecondByResolution?.[resolvedResolution]
+      ?? modelConfig.apiCostPerSecondByResolution?.['720p']
+      ?? 0;
+    return rate * billableSecs;
+  }
 
   if (modelConfig.key === 'seedance_2' || modelConfig.key === 'seedance_2_fast') {
     const resolvedProvider = provider === 'kie' ? 'kie' : 'replicate';
@@ -121,9 +146,14 @@ function calculateApiCost(modelConfig, options = {}) {
  * Calculate token cost based on model config
  */
 function calculateTokenCost(modelConfig, options = {}) {
-  const { seconds, duration, generateAudio, mode, orientation, provider, resolution, inputType, inputVideoDuration } = options;
+  const { seconds, duration, generateAudio, mode, orientation, provider, resolution, inputType, inputVideoDuration, draft, audioDuration, hasAudioInput } = options;
 
   if (!modelConfig) return 0;
+
+  if (modelConfig.key === 'p_video' || modelConfig.key === 'fabric_1_0') {
+    const apiCost = calculateApiCost(modelConfig, { seconds, duration, provider, resolution, draft, audioDuration, hasAudioInput });
+    return Math.ceil((apiCost || 0) * PRICING_MULTIPLIER / TOKEN_USD);
+  }
 
   if (modelConfig.key === 'seedance_2' || modelConfig.key === 'seedance_2_fast') {
     const apiCost = calculateApiCost(modelConfig, options);

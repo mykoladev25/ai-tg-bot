@@ -108,6 +108,30 @@ const OFFICIAL_PRICING = {
     lastChecked: '2026-01-26',
     source: 'https://replicate.com/openai/sora-2'
   },
+  'prunaai/p-video': {
+    priceByVariantAndResolution: {
+      base: {
+        '720p': 0.02,
+        '1080p': 0.04
+      },
+      draft: {
+        '720p': 0.005,
+        '1080p': 0.01
+      }
+    },
+    model: 'p_video',
+    lastChecked: '2026-04-23',
+    source: 'https://replicate.com/prunaai/p-video'
+  },
+  'veed/fabric-1.0': {
+    priceByResolution: {
+      '480p': 0.08,
+      '720p': 0.15
+    },
+    model: 'fabric_1_0',
+    lastChecked: '2026-04-23',
+    source: 'https://replicate.com/veed/fabric-1.0'
+  },
   'bytedance/seedance-2.0': {
     priceByInputTypeAndResolution: {
       non_video_in: {
@@ -143,6 +167,8 @@ const MODEL_MAPPING = {
   'kling_motion': 'kwaivgi/kling-v2.6-motion-control',
   'veo': 'google/veo-3.1',
   'runway_turbo': 'runway/gen-4-turbo',
+  'p_video': 'prunaai/p-video',
+  'fabric_1_0': 'veed/fabric-1.0',
   'seedance_2': 'bytedance/seedance-2.0'
 };
 
@@ -241,6 +267,55 @@ function comparePrices() {
       }
     }
 
+    if (official.priceByResolution && model.apiCostPerSecondByResolution) {
+      for (const [resolution, officialPrice] of Object.entries(official.priceByResolution)) {
+        const ourPrice = model.apiCostPerSecondByResolution?.[resolution];
+        if (!Number.isFinite(ourPrice)) continue;
+        const diff = Math.abs(ourPrice - officialPrice);
+        const diffPercent = (diff / officialPrice) * 100;
+
+        if (diffPercent > 10) {
+          discrepancies.push({
+            model: model.key,
+            modelName: model.name,
+            resolution,
+            ourPricePerSec: ourPrice,
+            officialPricePerSec: officialPrice,
+            difference: diff.toFixed(4),
+            differencePercent: diffPercent.toFixed(1) + '%',
+            source: official.source,
+            lastChecked: official.lastChecked
+          });
+        }
+      }
+    }
+
+    if (official.priceByVariantAndResolution && model.apiCostPerSecondByVariantAndResolution) {
+      for (const [variant, ratesByResolution] of Object.entries(official.priceByVariantAndResolution)) {
+        for (const [resolution, officialPrice] of Object.entries(ratesByResolution)) {
+          const ourPrice = model.apiCostPerSecondByVariantAndResolution?.[variant]?.[resolution];
+          if (!Number.isFinite(ourPrice)) continue;
+          const diff = Math.abs(ourPrice - officialPrice);
+          const diffPercent = (diff / officialPrice) * 100;
+
+          if (diffPercent > 10) {
+            discrepancies.push({
+              model: model.key,
+              modelName: model.name,
+              variant,
+              resolution,
+              ourPricePerSec: ourPrice,
+              officialPricePerSec: officialPrice,
+              difference: diff.toFixed(4),
+              differencePercent: diffPercent.toFixed(1) + '%',
+              source: official.source,
+              lastChecked: official.lastChecked
+            });
+          }
+        }
+      }
+    }
+
     if (official.priceByInputTypeAndResolution && model.replicateApiCostPerSecondByInputTypeAndResolution) {
       for (const [inputType, ratesByResolution] of Object.entries(official.priceByInputTypeAndResolution)) {
         const internalInputType = inputType === 'video_in' ? 'with_video_input' : 'no_video_input';
@@ -306,6 +381,38 @@ function calculateActualCost(modelKey, metrics, options = {}) {
       hasAudio,
       predictTime: metrics?.predict_time || 0,
       source: 'veo_pricing'
+    };
+  }
+
+  if (official.priceByResolution) {
+    const duration = options.audioDuration || options.duration || 5;
+    const resolution = options.resolution || '720p';
+    const pricePerSec = official.priceByResolution?.[resolution];
+    if (!pricePerSec) return null;
+
+    return {
+      estimatedCost: pricePerSec * duration,
+      duration,
+      resolution,
+      predictTime: metrics?.predict_time || 0,
+      source: 'resolution_per_second'
+    };
+  }
+
+  if (official.priceByVariantAndResolution) {
+    const duration = options.audioDuration || options.duration || 5;
+    const resolution = options.resolution || '720p';
+    const variant = options.draft ? 'draft' : (options.variant || 'base');
+    const pricePerSec = official.priceByVariantAndResolution?.[variant]?.[resolution];
+    if (!pricePerSec) return null;
+
+    return {
+      estimatedCost: pricePerSec * duration,
+      duration,
+      resolution,
+      variant,
+      predictTime: metrics?.predict_time || 0,
+      source: 'variant_resolution_per_second'
     };
   }
 
@@ -406,6 +513,38 @@ function getSuggestedUpdates() {
               suggestedValue: price,
               source: pricing.source
             });
+          }
+        }
+      }
+
+      if (pricing.priceByResolution && ourModel.apiCostPerSecondByResolution) {
+        for (const [resolution, price] of Object.entries(pricing.priceByResolution)) {
+          const current = ourModel.apiCostPerSecondByResolution?.[resolution];
+          if (Number.isFinite(current) && current !== price) {
+            updates.push({
+              modelKey,
+              field: `apiCostPerSecondByResolution.${resolution}`,
+              currentValue: current,
+              suggestedValue: price,
+              source: pricing.source
+            });
+          }
+        }
+      }
+
+      if (pricing.priceByVariantAndResolution && ourModel.apiCostPerSecondByVariantAndResolution) {
+        for (const [variant, pricesByResolution] of Object.entries(pricing.priceByVariantAndResolution)) {
+          for (const [resolution, price] of Object.entries(pricesByResolution)) {
+            const current = ourModel.apiCostPerSecondByVariantAndResolution?.[variant]?.[resolution];
+            if (Number.isFinite(current) && current !== price) {
+              updates.push({
+                modelKey,
+                field: `apiCostPerSecondByVariantAndResolution.${variant}.${resolution}`,
+                currentValue: current,
+                suggestedValue: price,
+                source: pricing.source
+              });
+            }
           }
         }
       }
