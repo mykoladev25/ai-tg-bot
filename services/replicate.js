@@ -1,5 +1,11 @@
 const axios = require('axios');
-const { getTelegramBotToken } = require('../utils/telegramFiles');
+const { File } = require('buffer');
+const {
+  extractTelegramFileIdFromProxyUrl,
+  extractTelegramFilePathFromProxyUrl,
+  getTelegramBotToken,
+  resolveServerSideTelegramFileUrlAsync
+} = require('../utils/telegramFiles');
 
 const REPLICATE_API = 'https://api.replicate.com/v1';
 const Replicate = require('replicate');
@@ -7,6 +13,8 @@ const Replicate = require('replicate');
 const replicate = new Replicate({
   auth: process.env.REPLICATE_API_KEY,
 });
+
+const MAX_REPLICATE_FILE_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -67,6 +75,115 @@ function normalizeReplicateFileOutput(output) {
     return value.toString();
   }
   return value;
+}
+
+function isTelegramMediaUrl(url) {
+  if (typeof url !== 'string' || !url) return false;
+  if (extractTelegramFileIdFromProxyUrl(url) || extractTelegramFilePathFromProxyUrl(url)) return true;
+
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.toLowerCase() === 'api.telegram.org'
+      && parsed.pathname.includes('/file/bot');
+  } catch (error) {
+    return false;
+  }
+}
+
+function inferFileExtension(contentType = '') {
+  const normalized = String(contentType).split(';')[0].trim().toLowerCase();
+  const map = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/webm': 'webm',
+    'audio/mpeg': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/ogg': 'ogg',
+    'audio/aac': 'aac',
+    'audio/mp4': 'm4a'
+  };
+
+  return map[normalized] || 'bin';
+}
+
+function inferFileName(sourceUrl, contentType, uploadPath) {
+  try {
+    const parsed = new URL(sourceUrl);
+    const name = decodeURIComponent(parsed.pathname.split('/').pop() || '').trim();
+    if (name && /\.[a-z0-9]{2,5}$/i.test(name)) {
+      return name;
+    }
+  } catch (error) {
+  }
+
+  const safeUploadPath = String(uploadPath || 'replicate-input')
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'replicate-input';
+  return `${safeUploadPath}-${Date.now()}.${inferFileExtension(contentType)}`;
+}
+
+async function uploadTelegramMediaToReplicateFile(url, uploadPath = 'telegram-seedance-input') {
+  let sourceUrl;
+  try {
+    sourceUrl = await resolveServerSideTelegramFileUrlAsync(url);
+  } catch (error) {
+    throw new Error(`Could not resolve Telegram media for Replicate: ${error.message}`);
+  }
+
+  const response = await axios.get(sourceUrl, {
+    responseType: 'arraybuffer',
+    timeout: 60000,
+    maxRedirects: 5,
+    maxContentLength: MAX_REPLICATE_FILE_UPLOAD_BYTES
+  });
+
+  const buffer = Buffer.from(response.data);
+  if (buffer.length > MAX_REPLICATE_FILE_UPLOAD_BYTES) {
+    throw new Error('Uploaded media is too large for Replicate file upload. Max size is 100MiB.');
+  }
+
+  const contentType = String(response.headers?.['content-type'] || 'application/octet-stream')
+    .split(';')[0]
+    .trim()
+    || 'application/octet-stream';
+  const fileName = inferFileName(sourceUrl, contentType, uploadPath);
+  const file = new File([buffer], fileName, { type: contentType });
+  const uploadedFile = await replicate.files.create(file, {
+    source: 'telegram',
+    uploadPath
+  });
+  const replicateFileUrl = uploadedFile?.urls?.get;
+
+  if (!replicateFileUrl) {
+    throw new Error('Replicate file upload returned no file URL');
+  }
+
+  console.log('📤 Replicate media upload complete:', {
+    uploadPath,
+    fileName,
+    contentType,
+    bytes: buffer.length
+  });
+
+  return replicateFileUrl;
+}
+
+async function prepareReplicateMediaInput(url, uploadPath) {
+  if (!url || typeof url !== 'string') return url;
+  if (!isTelegramMediaUrl(url)) return url;
+
+  return uploadTelegramMediaToReplicateFile(url, uploadPath);
+}
+
+async function prepareReplicateMediaInputs(urls, maxItems, uploadPath) {
+  const list = Array.isArray(urls) ? urls.filter(Boolean).slice(0, maxItems) : [];
+  return Promise.all(list.map((url) => prepareReplicateMediaInput(url, uploadPath)));
 }
 
 /**
@@ -701,19 +818,25 @@ async function generateVideoWithSeedance2(prompt, options = {}) {
       if (!firstFrameUrl) {
         throw new Error('First frame image is required for Seedance frames mode');
       }
-      input.image = firstFrameUrl;
+      input.image = await prepareReplicateMediaInput(firstFrameUrl, 'telegram-seedance-first-frame');
       if (lastFrameUrl) {
-        input.last_frame_image = lastFrameUrl;
+        input.last_frame_image = await prepareReplicateMediaInput(lastFrameUrl, 'telegram-seedance-last-frame');
       }
     } else {
-      if (imageRefs.length > 0) {
-        input.reference_images = imageRefs;
+      const [preparedImageRefs, preparedVideoRefs, preparedAudioRefs] = await Promise.all([
+        prepareReplicateMediaInputs(imageRefs, 9, 'telegram-seedance-reference-images'),
+        prepareReplicateMediaInputs(videoRefs, 3, 'telegram-seedance-reference-videos'),
+        prepareReplicateMediaInputs(audioRefs, 3, 'telegram-seedance-reference-audios')
+      ]);
+
+      if (preparedImageRefs.length > 0) {
+        input.reference_images = preparedImageRefs;
       }
-      if (videoRefs.length > 0) {
-        input.reference_videos = videoRefs;
+      if (preparedVideoRefs.length > 0) {
+        input.reference_videos = preparedVideoRefs;
       }
-      if (audioRefs.length > 0) {
-        input.reference_audios = audioRefs;
+      if (preparedAudioRefs.length > 0) {
+        input.reference_audios = preparedAudioRefs;
       }
     }
 
