@@ -6,7 +6,6 @@ function isAvailableOnKIE(modelKey) {
 
 function isAvailableOnReplicate(modelKey) {
   const kieOnlyModels = [
-    'kling_3',
     'midjourney',
     'seedream_5_lite',
     'z_image',

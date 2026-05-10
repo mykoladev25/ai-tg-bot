@@ -194,10 +194,19 @@ module.exports = {
       {
         name: '🎭 Kling 3.0 Pro 💎',
         key: 'kling_3',
-        costPerSecondAudio: 45,      // pro with audio
-        costPerSecondNoAudio: 23,    // pro without audio
+        costPerSecondAudio: 45,      // pro with audio (KIE pricing — primary)
+        costPerSecondNoAudio: 23,    // pro without audio (KIE pricing — primary)
         apiCostPerSecondAudio: 0.27,
         apiCostPerSecondNoAudio: 0.135,
+        // Replicate fallback prices (kwaivgi/kling-v3-video):
+        // standard: $0.168/s no-audio, $0.252/s audio
+        // pro:      $0.224/s no-audio, $0.336/s audio
+        // 4k:       $0.42/s (audio or not)
+        replicateApiCostPerSecond: {
+          standard: { noAudio: 0.168, audio: 0.252 },
+          pro:      { noAudio: 0.224, audio: 0.336 },
+          '4k':     { noAudio: 0.42,  audio: 0.42  }
+        },
         minSeconds: 3,
         durations: [3, 5, 8, 10, 15],
         cost: 225, // default 5s pro audio = 45*5
@@ -205,8 +214,7 @@ module.exports = {
         requiresImage: false,
         supportsMultiShot: true,
         supportsElementRefs: true,
-        modes: ['std', 'pro'],
-        kieAIOnly: true  
+        modes: ['std', 'pro']
       },
 
       

@@ -586,6 +586,88 @@ async function generateVideoWithKling26(prompt, startImage = null, duration = 5,
 }
 
 
+async function generateVideoWithKling3(prompt, options = {}) {
+  try {
+    const {
+      startImage = null,
+      endImage = null,
+      duration = 5,
+      aspectRatio = '16:9',
+      mode = 'pro',
+      generateAudio = false,
+      negativePrompt = '',
+      multiPrompt = null
+    } = options;
+
+    const safeMode = ['standard', 'pro', '4k'].includes(mode) ? mode : 'pro';
+    const safeDuration = Math.max(3, Math.min(15, Number(duration) || 5));
+
+    const input = {
+      mode: safeMode,
+      prompt: prompt || '',
+      duration: safeDuration,
+      generate_audio: !!generateAudio
+    };
+
+    if (startImage) {
+      input.start_image = await prepareReplicateMediaInput(startImage, 'telegram-kling3-start-image');
+      if (endImage) {
+        input.end_image = await prepareReplicateMediaInput(endImage, 'telegram-kling3-end-image');
+      }
+    } else {
+      input.aspect_ratio = aspectRatio;
+    }
+
+    if (negativePrompt && negativePrompt.trim()) {
+      input.negative_prompt = negativePrompt.trim().substring(0, 2500);
+    }
+
+    if (multiPrompt) {
+      const shots = Array.isArray(multiPrompt) ? multiPrompt : null;
+      if (shots && shots.length > 0) {
+        const totalShotDuration = shots.reduce((sum, s) => sum + (Number(s.duration) || 0), 0);
+        if (shots.length > 6) {
+          throw new Error('Kling 3.0 multi_prompt allows max 6 shots');
+        }
+        if (totalShotDuration !== safeDuration) {
+          throw new Error(`Kling 3.0 multi_prompt total duration (${totalShotDuration}s) must equal duration (${safeDuration}s)`);
+        }
+        input.multi_prompt = JSON.stringify(shots.map(s => ({
+          prompt: String(s.prompt || ''),
+          duration: Math.max(1, Number(s.duration) || 1)
+        })));
+      }
+    }
+
+    console.log('🎬 Kling v3 input:', {
+      mode: input.mode,
+      duration: input.duration,
+      aspect_ratio: input.aspect_ratio,
+      generate_audio: input.generate_audio,
+      has_start_image: !!input.start_image,
+      has_end_image: !!input.end_image,
+      has_negative_prompt: !!input.negative_prompt,
+      has_multi_prompt: !!input.multi_prompt,
+      prompt_length: input.prompt.length
+    });
+
+    const output = await replicate.run('kwaivgi/kling-v3-video', { input });
+
+    return {
+      success: true,
+      videoUrl: normalizeReplicateFileOutput(output)
+    };
+
+  } catch (error) {
+    console.error('Kling v3 API Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+
 async function generateVideoWithRunway(prompt, imageUrl = null) {
   try {
     console.log('Starting Runway Gen-4 video generation:', prompt);
@@ -1183,6 +1265,7 @@ module.exports = {
   generateVideoWithRunwayTurbo,
   generateVideoWithKling,
   generateVideoWithKling26,
+  generateVideoWithKling3,
   generateVideoWithKlingMotion,
   generateVideoWithRunway,
   generateVideoWithSora2,

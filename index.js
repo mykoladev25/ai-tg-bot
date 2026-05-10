@@ -640,7 +640,7 @@ function getDesignModelsWithEffectiveCost(userId) {
 }
 
 
-const KIE_ONLY_VIDEO_MODELS = ['kling_3', 'seedance_2_fast'];
+const KIE_ONLY_VIDEO_MODELS = ['seedance_2_fast'];
 
 
 
@@ -10843,7 +10843,8 @@ async function generateKling3Video(ctx, state) {
 
   (async () => {
     try {
-      const result = await kieAI.generateKling3VideoKieAI({
+      let providerUsed = 'kie';
+      let result = await kieAI.generateKling3VideoKieAI({
         prompt: multiShots ? '' : generationData.prompt,
         imageUrls: generationData.imageUrls,
         duration: String(Math.min(15, Math.max(3, duration))),
@@ -10897,10 +10898,46 @@ async function generateKling3Video(ctx, state) {
         return;
       }
 
+      const kieHardFail = !result.success && !(result.pending && result.taskId);
+      const hasUnsupportedRefs = (generationData.klingElements?.length || 0) > 0;
+      if (kieHardFail && !hasUnsupportedRefs && providerFallback.isAvailableOnReplicate('kling_3')) {
+        const kieError = result.error;
+        console.log(`🔁 Kling 3.0 KIE failed → trying Replicate fallback. KIE error: ${kieError}`);
+        try {
+          const replMode = generationData.mode === 'std'
+            ? 'standard'
+            : (generationData.mode === '4k' ? '4k' : 'pro');
+          const replResult = await replicate.generateVideoWithKling3(
+            generationData.multiShots ? '' : generationData.prompt,
+            {
+              startImage: generationData.imageUrls?.[0] || null,
+              endImage: null,
+              duration: generationData.duration,
+              aspectRatio: generationData.aspectRatio,
+              mode: replMode,
+              generateAudio: generationData.generateAudio,
+              multiPrompt: generationData.multiShots ? generationData.multiPrompt : null
+            }
+          );
+          if (replResult.success && replResult.videoUrl) {
+            result = { success: true, videoUrl: replResult.videoUrl };
+            providerUsed = 'replicate';
+            console.log('✅ Kling 3.0 Replicate fallback succeeded');
+          } else {
+            console.warn(`⚠️ Kling 3.0 Replicate fallback also failed: ${replResult.error}`);
+            result.error = `KIE: ${kieError} | Replicate: ${replResult.error}`;
+          }
+        } catch (fallbackErr) {
+          console.error('Kling 3.0 Replicate fallback threw:', fallbackErr);
+          result.error = `KIE: ${kieError} | Replicate: ${fallbackErr.message}`;
+        }
+      }
+
       if (!result.success) {
         await adminNotifier.notifyAdmin(bot, new Error(result.error), {
           userId, username, action: 'kling_3_generation', model: model.name,
-          prompt: generationData.prompt, duration: generationData.duration
+          prompt: generationData.prompt, duration: generationData.duration,
+          providerUsed
         });
         await bot.telegram.editMessageText(
           chatId, statusMsg.message_id, null,
@@ -10916,18 +10953,29 @@ async function generateKling3Video(ctx, state) {
           isTrial,
           isFree: isTrial,
           errorCode: result.error?.substring(0, 100),
-          provider: 'kie'  
+          provider: providerUsed
         });
 
         return;
       }
 
-      const apiCost = generationData.duration * (generationData.generateAudio ? model.apiCostPerSecondAudio : model.apiCostPerSecondNoAudio);
+      let apiCost;
+      if (providerUsed === 'replicate') {
+        const replModeKey = generationData.mode === 'std'
+          ? 'standard'
+          : (generationData.mode === '4k' ? '4k' : 'pro');
+        const rates = model.replicateApiCostPerSecond?.[replModeKey] || model.replicateApiCostPerSecond?.pro;
+        const ratePerSec = generationData.generateAudio ? rates.audio : rates.noAudio;
+        apiCost = generationData.duration * ratePerSec;
+      } else {
+        apiCost = generationData.duration * (generationData.generateAudio ? model.apiCostPerSecondAudio : model.apiCostPerSecondNoAudio);
+      }
       await userBalance.deductTokens(userId, kling3Cost, `${model.name} generation`, {
         modelKey: 'kling_3', modelName: model.name, apiCost,
         prompt: generationData.prompt, duration: generationData.duration,
         hasStartImage: generationData.imageUrls?.length > 0,
-        generateAudio: generationData.generateAudio
+        generateAudio: generationData.generateAudio,
+        provider: providerUsed
       });
 
       const isTrialKling3 = await isTrialUser(userId);
@@ -10938,7 +10986,7 @@ async function generateKling3Video(ctx, state) {
         options: { duration: generationData.duration, mode: generationData.mode, generateAudio: generationData.generateAudio },
         isTrial: isTrialKling3,
         isFree: isTrialKling3,
-        provider: 'kie'  
+        provider: providerUsed
       });
 
       await bot.telegram.deleteMessage(chatId, statusMsg.message_id);
